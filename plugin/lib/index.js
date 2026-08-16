@@ -44,14 +44,8 @@ const SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA = z.object({
 	strategy: z.union([z.const("round-robin"), z.const("random")]).default("round-robin")
 }).default({});
 
-/** Marker that the host subagents service has already been wrapped by this plugin. */
-const WRAPPED = Symbol("dsh-subagent-default-model.wrapped");
-
-/** Live source thunk installed by the settings seam (host singleton). */
-let settingsSource;
-
-/** Round-robin cursor, advanced on every round-robin pick. */
-let rrCursor = 0;
+/** State retained on the raw host service while this plugin fiber is active. */
+const WRAPPED = Symbol.for("dsh-subagent-default-model.wrapped");
 
 /** Resolve one model entry to `{provider, model}`, or undefined. */
 function resolveEntry(section, entry) {
@@ -69,8 +63,8 @@ function resolveEntry(section, entry) {
 }
 
 /** Pick the next default model from the live settings section, or undefined to inherit the parent route. */
-function defaultModel() {
-	const section = settingsSource?.();
+function defaultModel(state) {
+	const section = state.settingsSource?.();
 	if (section === void 0 || section === null) return void 0;
 
 	// Multi-model list wins; pick per strategy.
@@ -78,7 +72,7 @@ function defaultModel() {
 	if (entries.length > 0) {
 		const picked = section.strategy === "random"
 			? entries[Math.floor(Math.random() * entries.length)]
-			: entries[rrCursor++ % entries.length];
+			: entries[state.rrCursor++ % entries.length];
 		return resolveEntry(section, picked);
 	}
 
@@ -92,41 +86,81 @@ function defaultModel() {
 }
 
 /** Inject the default model into one delegation request unless it already names one. */
-function applyDefaultModel(request) {
+function applyDefaultModel(state, request) {
 	if (request === void 0 || request === null) return request;
 	if (request.agentOptions !== void 0) return request;
-	const model = defaultModel();
+	const model = defaultModel(state);
 	if (model === void 0) return request;
 	return { ...request, agentOptions: model };
 }
 
 export function apply(ctx) {
-	// Register the shared `subagent-default-model` settings section. The seam
-	// defers to the settings service becoming ready via `ctx.inject`, so this
-	// wiring is safe on any plane and needs no synchronous `ctx.get("settings")`.
+	const state = {
+		settingsSource: void 0,
+		rrCursor: 0
+	};
+
+	// The settings seam owns its own injected lifecycle and provides a live
+	// source thunk. Register it unconditionally so the web settings row
+	// (`subagent-default-model` namespace) is available even when the host
+	// `subagents` service is not yet mounted or a previous fiber already wrapped
+	// it — the service-method guard below must never gate settings registration.
 	installSettingsSection(ctx, SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA, {}, {
 		setSource: (current) => {
-			settingsSource = current;
+			state.settingsSource = current;
 		},
 		onChange: () => {}
 	});
 
-	// Wrap the host subagents service once. `ctx.subagents` is a per-call cordis
-	// traceable proxy, so reach the raw service object behind it for a stable
-	// handle and to install the wrappers as own methods.
+	// Expose the namespace to configuration clients (the web settings row).
+	// The Host API proxy only serves namespaces that are either configurable
+	// LLM providers or on its own hard-coded allow-list; a dormant
+	// configurable-provider directory entry is the one plugin-extensible way
+	// to surface an arbitrary namespace to `settings.describe` / `mutate`.
+	// `declared: false` keeps it out of the active model catalog and model
+	// selection, so it never reads as a real provider.
+	ctx.inject(["llm"], (llmCtx) => {
+		llmCtx.llm.registerConfigurableProviders([{
+			provider: "subagent-default-model",
+			displayName: "Subagent Default Model",
+			settingsNs: SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE,
+			settingsPath: [],
+			declared: false
+		}]);
+	});
+
+	// `ctx.subagents` is a per-call Cordis traceable proxy, so reach the raw
+	// service object behind it for a stable handle and to install own methods.
 	const raw = ctx.subagents?.[Symbol.for("cordis.original")] ?? ctx.subagents;
-	if (raw === void 0 || raw[WRAPPED]) return;
-	raw[WRAPPED] = true;
+	if (raw === void 0 || raw[WRAPPED] !== void 0) return;
 
-	const originalStart = raw.start.bind(raw);
-	raw.start = async (name, request) => originalStart(name, applyDefaultModel(request));
+	const originalStart = raw.start;
+	const originalStartContinuable = raw.startContinuable;
+	const wrappedStart = typeof originalStart === "function"
+		? async (name, request) => originalStart.call(raw, name, applyDefaultModel(state, request))
+		: void 0;
+	const wrappedStartContinuable = typeof originalStartContinuable === "function"
+		? async (spec) => {
+			if (spec === void 0 || spec === null) return originalStartContinuable.call(raw, spec);
+			return originalStartContinuable.call(raw, {
+				...spec,
+				request: applyDefaultModel(state, spec.request)
+			});
+		}
+		: void 0;
 
-	const originalStartContinuable = raw.startContinuable.bind(raw);
-	raw.startContinuable = async (spec) => {
-		if (spec === void 0 || spec === null) return originalStartContinuable(spec);
-		return originalStartContinuable({
-			...spec,
-			request: applyDefaultModel(spec.request)
-		});
-	};
+	if (wrappedStart === void 0 && wrappedStartContinuable === void 0) return;
+	if (wrappedStart !== void 0) raw.start = wrappedStart;
+	if (wrappedStartContinuable !== void 0) raw.startContinuable = wrappedStartContinuable;
+	raw[WRAPPED] = state;
+
+	// Service method replacement is not a Cordis-managed contribution by itself.
+	// Restore only our own wrappers so disposal cannot overwrite a later wrapper.
+	ctx.effect(() => () => {
+		if (wrappedStart !== void 0 && raw.start === wrappedStart) raw.start = originalStart;
+		if (wrappedStartContinuable !== void 0 && raw.startContinuable === wrappedStartContinuable) raw.startContinuable = originalStartContinuable;
+		if (raw[WRAPPED] === state) delete raw[WRAPPED];
+		state.settingsSource = void 0;
+		state.rrCursor = 0;
+	});
 }
