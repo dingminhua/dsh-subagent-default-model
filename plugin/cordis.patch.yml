@@ -1,0 +1,8 @@
+# dsh-subagent-default-model bundle patch: one host plugin row that registers
+# the `subagent-default-model` settings section and wraps the host subagents
+# service, so every delegation without an explicit `agentOptions` (the stock
+# `subagent` / `subagent_fork` tools and any other tool that omits model or
+# provider) runs the child on the configured default model.
+- insert:
+    - id: dsh-subagent-default-model
+      name: 'dsh-subagent-default-model'
