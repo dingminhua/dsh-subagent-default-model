@@ -79,7 +79,46 @@ dsh plugin --profile web add /绝对路径/dsh-subagent-default-model/plugin
 
 ### 将设置段暴露给 Web 配置客户端
 
-DSH 的 Host API 代理只服务「可配置 LLM provider」或它自身硬编码白名单里的设置 namespace。为了让 `subagent-default-model` 能被 Web 设置行读写，宿主插件还通过 `ctx.llm.registerConfigurableProviders` 把它注册为 **dormant（休眠）可配置 provider**（`declared: false`）。因为是休眠条目，它不会出现在活跃模型目录或模型选择里——它只是扩大了暴露的 namespace 集合，使 `settings.describe` / `settings.mutate` 能服务该段并持久化到 `~/.dsh/settings.yaml`。
+DSH 的 Host API 代理（`@deepseek-ai/dsh-host-apiproxy`）对 `settings.describe` / `settings.mutate` 做 namespace 白名单过滤：只有「可配置 LLM provider 的 `settingsNs`」加上包内硬编码的 `WEB_SETTINGS_NAMESPACES` / `PRODUCT_SETTINGS_NAMESPACES` 列表里的 namespace 才对 Web 客户端可读写。插件自己 `settings.register()` 的 namespace 默认**不会**被暴露（上游注释明确说明：把该声明移到 `settings.register()` 属于 deferred work）。被过滤的表现是：设置行控件不渲染、保存按钮永久灰色。
+
+因此需要在运行中的 DSH 安装里给 apiproxy 的白名单加一行。找到实际生效的 `dsh-host-apiproxy/lib/index.js`（注意 `~/.dsh/profiles/node_modules/@deepseek-ai/` 下多为指向 npx 缓存的 symlink，改 symlink 目标一处即可全局生效），把：
+
+```js
+const WEB_SETTINGS_NAMESPACES = [
+	"agent-loop",
+	"shell",
+	"locale",
+	"permission",
+	"ui-conversation",
+	"ui-theme",
+	"web-search-deepseek"
+];
+```
+
+改为：
+
+```js
+const WEB_SETTINGS_NAMESPACES = [
+	"agent-loop",
+	"shell",
+	"locale",
+	"permission",
+	"ui-conversation",
+	"ui-theme",
+	"web-search-deepseek",
+	"subagent-default-model"
+];
+```
+
+然后重启 DSH web 进程。可以用下面的调用自检（返回的 `namespaces` 里应出现 `subagent-default-model`）：
+
+```bash
+curl -s --noproxy '*' -X POST http://127.0.0.1:3080/api/settings.describe \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"client-request","rpcId":"check","method":"settings.describe","payload":{}}'
+```
+
+> 注意：升级或重装 DSH 会覆盖该 patch，保存功能会再次失效（现象同上）；按本节重新打 patch 即可恢复。此前尝试过的 `ctx.llm.registerConfigurableProviders` 伪装 provider 方案已废弃——它会污染 Models 页面的 provider 目录，并在部分路径触发 `Cannot read properties of undefined (reading 'prepare')`。
 
 ### fork 对设置行的修复
 
@@ -88,7 +127,7 @@ DSH 的 Host API 代理只服务「可配置 LLM provider」或它自身硬编�
 - 当 scope 快照缺失可选的 `writable` 字段时，保存按钮不再被永久禁用——只有显式为 `writable === false` 时才禁用。
 - 保存通过公开的 `scope.set()` 接缝按顺序写入 `provider`、`model`、`models`、`strategy`（兼容设置 provider 的 revision/变更队列），随后重读快照并逐字段比对；不一致会报告真实失败，而非假装成功。
 - 打开/保存过程中保留该段中无关的字段。
-- 行卡片加了一点垂直外边距（`margin: 8px 0`），避免与通用设置里相邻的扁平行贴在一起。
+- 行卡片加了一点垂直外边距（`margin: 20px 0`），避免与通用设置里相邻的扁平行贴在一起。
 
 ### 接线本地 web profile
 
@@ -112,6 +151,29 @@ dsh web
 硬刷新浏览器（`Cmd/Ctrl + Shift + R`）以加载新的 client bundle。
 
 > 若不再使用 `dsh-codex-connect`，从上述 `dependencies` 与 `dsh.profile.bundles` 中移除它（`pnpm --dir ~/.dsh/profiles/web remove dsh-codex-connect`），再重启 web 即可关闭。
+
+### 防止 peer 依赖“模块双胞胎”（工具调用 0ms 失败）
+
+对 web profile 跑过 `pnpm install` 后，pnpm 会把插件 peer 依赖（`@deepseek-ai/cordis`、`cosmokit`、`dsh-commands`、`dsh-subprocess`、`dsh-tools`、`schemastery`）以**真实目录**装进 `~/.dsh/profiles/web/node_modules/@deepseek-ai/`。而宿主 DSH 的包是从 `~/.dsh/profiles/node_modules`（指向 npx 缓存的 symlink）加载的——Node 就近解析会让 profile 内的真实副本抢先，于是同一进程里出现两份 `dsh-tools`。`dsh-tools` 用 `Symbol()`（非 `Symbol.for`）导出 `TOOL_RUNTIME_SCHEDULER`，两份副本的 Symbol 不相等：`tools` 服务把调度器方法挂在 A 副本的键下，`dsh-agent-loop` 却拿 B 副本的键去读，`ctx.tools[...]` 为 `undefined`，任何工具调用立刻报 `Cannot read properties of undefined (reading 'prepare')`。
+
+修复：把这 6 个真实目录换成指向顶层的符号链接，保证全进程单一实例（原目录已备份到 `node_modules/.dsh-twin-backup/`）：
+
+```bash
+cd ~/.dsh/profiles/web/node_modules/@deepseek-ai
+for pkg in cordis cosmokit dsh-commands dsh-subprocess dsh-tools schemastery; do
+  [ -d "$pkg" ] && [ ! -L "$pkg" ] && mv "$pkg" ../.dsh-twin-backup/ && ln -s "../../../node_modules/@deepseek-ai/$pkg" "$pkg"
+done
+```
+
+然后重启 web 进程。**每次对 web profile 重新 `pnpm install` 后都要重做这一步**，否则工具调用会再次全部失败。自检方法（应全部输出 `SAME`）：
+
+```bash
+node -e "const{createRequire}=require('module'),fs=require('fs');\
+const w=createRequire(process.env.HOME+'/.dsh/profiles/web/package.json');\
+const h=createRequire(process.env.HOME+'/.dsh/profiles/node_modules/@deepseek-ai/dsh/lib/bin.js');\
+for(const p of ['@deepseek-ai/dsh-tools','@deepseek-ai/cordis'])\
+console.log(p,fs.realpathSync(w.resolve(p))===fs.realpathSync(h.resolve(p))?'SAME':'TWIN')"
+```
 
 ## 开发与测试
 
@@ -140,7 +202,13 @@ node prove.mjs       # Cordis traceable-proxy 回归测试
 
 ## 端到端验证
 
-0. 在 Web UI 中验证设置行确实落盘：打开 **设置 → 通用设置 → 子代理默认模型**，改动一个路由或策略，保存，确认 `~/.dsh/settings.yaml` 中的 `subagent-default-model` 与之一致，然后关闭并重新打开面板，确认选择被保留。这个「保存 → YAML 更新 → 重开仍保留」的流程已在运行中的 DSH web 进程上实测通过。
+0. 在 Web UI 中验证设置行确实落盘：打开 **设置 → 通用设置 → 子代理默认模型**，改动一个路由或策略，保存，确认 `~/.dsh/settings.yaml` 中的 `subagent-default-model` 与之一致，然后关闭并重新打开面板，确认选择被保留。这个「保存 → YAML 更新 → 重开仍保留」的流程已在运行中的 DSH web 进程上实测通过。多模型轮换也已实测：配置 `[deepseek-v4-flash, aixforge/glm-5.2]` + `round-robin` 后，连续 3 个子代理实际路由为 `flash → glm-5.2 → flash`，与配置严格一致。
+
+> **故障排查：`An assistant message with 'tool_calls' must be followed by tool messages ...`**
+>
+> 这不是配置问题。任何一次工具执行中途崩溃（如上文的双胞胎 bug）、强杀进程或重启 DSH，都可能让该会话日志里留下「已发出的 tool/call 但没有对应的 tool/result」。此后在该会话里每次发消息，运行时都会把这段残缺历史重放给 LLM，API 直接拒绝，且重试永远报同样的错。
+>
+> 处理：**直接新开会话**，旧会话历史已无法修复。若想确认，可解压 `~/.dsh/sessions/<workspace>/<session>/session.jsonl.zstd`，对比 `tool/call` 与 `tool/result` 事件的 `callId` 是否一一配对。
 
 1. 把 bundle 装进一个一次性 profile，并配置一个已知模型或包含两个模型的 `round-robin` 列表。
 2. 重启对应的 DSH 进程。

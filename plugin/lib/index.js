@@ -112,23 +112,6 @@ export function apply(ctx) {
 		onChange: () => {}
 	});
 
-	// Expose the namespace to configuration clients (the web settings row).
-	// The Host API proxy only serves namespaces that are either configurable
-	// LLM providers or on its own hard-coded allow-list; a dormant
-	// configurable-provider directory entry is the one plugin-extensible way
-	// to surface an arbitrary namespace to `settings.describe` / `mutate`.
-	// `declared: false` keeps it out of the active model catalog and model
-	// selection, so it never reads as a real provider.
-	ctx.inject(["llm"], (llmCtx) => {
-		llmCtx.llm.registerConfigurableProviders([{
-			provider: "subagent-default-model",
-			displayName: "Subagent Default Model",
-			settingsNs: SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE,
-			settingsPath: [],
-			declared: false
-		}]);
-	});
-
 	// `ctx.subagents` is a per-call Cordis traceable proxy, so reach the raw
 	// service object behind it for a stable handle and to install own methods.
 	const raw = ctx.subagents?.[Symbol.for("cordis.original")] ?? ctx.subagents;
