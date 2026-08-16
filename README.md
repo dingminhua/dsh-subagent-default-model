@@ -156,23 +156,23 @@ dsh web
 
 对 web profile 跑过 `pnpm install` 后，pnpm 会把插件 peer 依赖（`@deepseek-ai/cordis`、`cosmokit`、`dsh-commands`、`dsh-subprocess`、`dsh-tools`、`schemastery`）以**真实目录**装进 `~/.dsh/profiles/web/node_modules/@deepseek-ai/`。而宿主 DSH 的包是从 `~/.dsh/profiles/node_modules`（指向 npx 缓存的 symlink）加载的——Node 就近解析会让 profile 内的真实副本抢先，于是同一进程里出现两份 `dsh-tools`。`dsh-tools` 用 `Symbol()`（非 `Symbol.for`）导出 `TOOL_RUNTIME_SCHEDULER`，两份副本的 Symbol 不相等：`tools` 服务把调度器方法挂在 A 副本的键下，`dsh-agent-loop` 却拿 B 副本的键去读，`ctx.tools[...]` 为 `undefined`，任何工具调用立刻报 `Cannot read properties of undefined (reading 'prepare')`。
 
-修复：把这 6 个真实目录换成指向顶层的符号链接，保证全进程单一实例（原目录已备份到 `node_modules/.dsh-twin-backup/`）：
+修复：把这些真实目录换成指向顶层的符号链接，保证全进程单一实例（原目录备份到 `node_modules/.dsh-twin-backup/`）：
+
+```bash
+bash scripts/fix-module-twins.sh
+```
+
+脚本幂等（可反复执行）：把 web profile `node_modules/@deepseek-ai/` 下**所有**真实目录换成指向 `~/.dsh/profiles/node_modules/@deepseek-ai/` 同名包的符号链接（原目录备份到 `node_modules/.dsh-twin-backup/`），并在结束时自动做 `SAME/TWIN` 自检。
+
+然后重启 web 进程。**每次对 web profile 执行 `pnpm install` / `pnpm add` / `pnpm remove` 后都要重跑这个脚本**，否则工具调用会再次全部失败——不只是 `install`：曾经用 `pnpm add` 装一个新 UI 插件、升级另一个插件版本，就触发了 7 个包（`dsh-tools`、`dsh-commands`、`dsh-agent`、`dsh-session`、`dsh-system-prompt`、`dsh-typert-protocol`、`dsh-typert-registry`）重新变为真实目录、双胞胎复发的实际案例。手动等价操作（脚本内部即做此事）：
 
 ```bash
 cd ~/.dsh/profiles/web/node_modules/@deepseek-ai
-for pkg in cordis cosmokit dsh-commands dsh-subprocess dsh-tools schemastery; do
-  [ -d "$pkg" ] && [ ! -L "$pkg" ] && mv "$pkg" ../.dsh-twin-backup/ && ln -s "../../../node_modules/@deepseek-ai/$pkg" "$pkg"
+for pkg in */; do
+  pkg=${pkg%/}
+  [ -L "$pkg" ] && continue
+  [ -d "../../../node_modules/@deepseek-ai/$pkg" ] && mv "$pkg" ../.dsh-twin-backup/ && ln -s "../../../node_modules/@deepseek-ai/$pkg" "$pkg"
 done
-```
-
-然后重启 web 进程。**每次对 web profile 重新 `pnpm install` 后都要重做这一步**，否则工具调用会再次全部失败。自检方法（应全部输出 `SAME`）：
-
-```bash
-node -e "const{createRequire}=require('module'),fs=require('fs');\
-const w=createRequire(process.env.HOME+'/.dsh/profiles/web/package.json');\
-const h=createRequire(process.env.HOME+'/.dsh/profiles/node_modules/@deepseek-ai/dsh/lib/bin.js');\
-for(const p of ['@deepseek-ai/dsh-tools','@deepseek-ai/cordis'])\
-console.log(p,fs.realpathSync(w.resolve(p))===fs.realpathSync(h.resolve(p))?'SAME':'TWIN')"
 ```
 
 ## 开发与测试
