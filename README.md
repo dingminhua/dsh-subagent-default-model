@@ -1,34 +1,34 @@
 # dsh-subagent-default-model
 
-A standalone [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) bundle plugin that selects a default model for child-agent delegations through `~/.dsh/settings.yaml`.
+一个独立的 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) bundle 插件，通过 `~/.dsh/settings.yaml` 为子代理（child-agent）派发选择默认模型。
 
-It changes only subagent requests that omit `agentOptions`; DSH core packages remain unmodified.
+它只改动省略了 `agentOptions` 的子代理请求；DSH 核心包保持原样，不做任何修改。
 
-## Behavior
+## 行为
 
-The plugin registers the `subagent-default-model` settings section and wraps the host `ctx.subagents` service while the plugin fiber is active.
+插件注册 `subagent-default-model` 设置段，并在其 fiber 存活期间包装宿主 `ctx.subagents` 服务。
 
-Model precedence is:
+模型优先级：
 
 ```text
-explicit request agentOptions
-  → subagent-default-model setting
-  → inherited parent-session route
+显式请求 agentOptions
+  → subagent-default-model 设置
+  → 继承父会话路由
 ```
 
-The wrapper applies to both `start()` and `startContinuable()`, covering the stock `subagent` and `subagent_fork` paths as well as other callers of the service.
+包装同时作用于 `start()` 与 `startContinuable()`，覆盖内置的 `subagent` / `subagent_fork` 路径，以及其他调用该服务的发起方。
 
-- An explicit `agentOptions` object is never changed.
-- Missing or incomplete configuration adds nothing, so the child inherits the parent route.
-- A non-empty `models` list takes precedence over the single `model` form.
-- The settings reader is live: edits to `settings.yaml` affect the next delegation.
-- Service wrappers are restored when Cordis disposes this plugin, so a later remount starts cleanly.
+- 显式提供的 `agentOptions` 对象永不改动。
+- 配置缺失或不完整时不注入任何内容，子代理继承父会话路由。
+- 非空的 `models` 列表优先于单 `model` 形式。
+- 设置读取是实时的：编辑 `settings.yaml` 会立即影响下一次派发。
+- Cordis 销毁本插件时会还原服务包装，因此后续重新挂载会干净启动。
 
-## Configuration
+## 配置
 
-Add one of these forms to `~/.dsh/settings.yaml`.
+在 `~/.dsh/settings.yaml` 中添加以下任一形式。
 
-### One fixed child model
+### 固定单个子代理模型
 
 ```yaml
 subagent-default-model:
@@ -36,117 +36,119 @@ subagent-default-model:
   model: deepseek-v4-pro
 ```
 
-### Several child models
+### 多个子代理模型
 
 ```yaml
 subagent-default-model:
-  provider: deepseek-official # default provider for string entries
+  provider: deepseek-official # 字符串条目的默认 provider
   models:
     - deepseek-v4-pro
     - deepseek-v4-flash
-    # Explicit cross-provider entry:
+    # 显式跨 provider 条目：
     # - provider: kimi
     #   model: kimi-k3
-  strategy: round-robin # round-robin (default) or random
+  strategy: round-robin # round-robin（默认）或 random
 ```
 
-`round-robin` picks valid entries in order. `random` picks a valid entry independently for each delegation. Invalid or incomplete entries are ignored; if no valid entry remains, the child inherits the parent route.
+`round-robin` 按顺序轮流选取有效条目；`random` 对每次派发独立随机选取。无效或不完整的条目会被忽略；若没有剩余的有效条目，子代理继承父会话路由。
 
-## Install
+## 安装
 
-Install the package into the DSH profile that should use it:
+将包安装到应使用它的 DSH profile：
 
 ```bash
-dsh plugin --profile web add /absolute/path/to/dsh-subagent-default-model/plugin
+dsh plugin --profile web add /绝对路径/dsh-subagent-default-model/plugin
 ```
 
-For a headless profile, replace `web` with `headless`.
+若用 headless profile，把 `web` 换成 `headless`。
 
-The package declares its `cordis.patch.yml` as a DSH bundle patch. Restart the relevant DSH process after adding or removing the bundle so that its profile composition is rebuilt. Settings-file edits are hot-reloaded and do not require a restart.
+该包把 `cordis.patch.yml` 声明为 DSH bundle patch。添加或移除 bundle 后需重启对应的 DSH 进程，以重建 profile 组合。设置文件的编辑是热加载的，无需重启。
 
-## Web settings
+## Web 设置
 
-The host plugin deliberately does not register a second web settings row. The **子代理默认模型** row in **设置 → 通用设置** is supplied by the maintained local fork at `vendor/dsh-subagent-max`.
+宿主插件刻意不注册第二个 Web 设置行。**设置 → 通用设置 → 子代理默认模型** 这一行由本地维护的 fork（`vendor/dsh-subagent-max`）提供。
 
-The row can:
+该行支持：
 
-- leave the selection empty to inherit the parent-session route;
-- add or remove one or more provider/model routes;
-- preserve stored routes that are temporarily unavailable from the model catalog; and
-- choose `round-robin` or `random` when multiple routes are configured.
+- 清空选择以继承父会话路由；
+- 添加或移除一个或多个 provider/model 路由；
+- 保留那些暂时在模型目录中不可用的已存路由；
+- 在配置了多个路由时选择 `round-robin` 或 `random`。
 
-Its saved value uses the same `subagent-default-model` section described above. It preserves unrelated fields in that section and never collapses an existing model list merely because the settings panel was opened.
+它保存的值使用上文所述的同一 `subagent-default-model` 段。它会保留该段中无关的字段，且不会仅仅因为打开过设置面板就弄丢已有的模型列表。
 
-### Exposing the section to the web configuration client
+### 将设置段暴露给 Web 配置客户端
 
-DSH's Host API proxy only serves settings namespaces that are either configurable LLM providers or on its own hard-coded allow-list. To make `subagent-default-model` readable and writable by the web row, the host plugin also registers it as a **dormant configurable provider** (`declared: false`) via `ctx.llm.registerConfigurableProviders`. Because the entry is dormant, it never appears in the active model catalog or model selection—it only widens the exposed-namespace set so `settings.describe` / `settings.mutate` can serve the section and persist it to `~/.dsh/settings.yaml`.
+DSH 的 Host API 代理只服务「可配置 LLM provider」或它自身硬编码白名单里的设置 namespace。为了让 `subagent-default-model` 能被 Web 设置行读写，宿主插件还通过 `ctx.llm.registerConfigurableProviders` 把它注册为 **dormant（休眠）可配置 provider**（`declared: false`）。因为是休眠条目，它不会出现在活跃模型目录或模型选择里——它只是扩大了暴露的 namespace 集合，使 `settings.describe` / `settings.mutate` 能服务该段并持久化到 `~/.dsh/settings.yaml`。
 
-### Fork fixes for the settings row
+### fork 对设置行的修复
 
-The `vendor/dsh-subagent-max` fork carries the row's persistence and rendering fixes:
+`vendor/dsh-subagent-max` fork 携带了该行的持久化与渲染修复：
 
-- Save is no longer permanently disabled when the scope snapshot omits the optional `writable` field—it is only disabled on an explicit `writable === false`.
-- Saving writes `provider`, `model`, `models`, `strategy` in order through the public `scope.set()` seam (compatible with the settings provider's revision/change queue), then re-reads the snapshot and compares every field; a mismatch reports a real failure instead of pretending success.
-- Unrelated fields in the section are preserved across open/save.
-- The row card gets a small vertical margin (`margin: 8px 0`) so it does not sit flush against adjacent flat rows in the General section.
+- 当 scope 快照缺失可选的 `writable` 字段时，保存按钮不再被永久禁用——只有显式为 `writable === false` 时才禁用。
+- 保存通过公开的 `scope.set()` 接缝按顺序写入 `provider`、`model`、`models`、`strategy`（兼容设置 provider 的 revision/变更队列），随后重读快照并逐字段比对；不一致会报告真实失败，而非假装成功。
+- 打开/保存过程中保留该段中无关的字段。
+- 行卡片加了一点垂直外边距（`margin: 8px 0`），避免与通用设置里相邻的扁平行贴在一起。
 
-### Wiring the local web profile
+### 接线本地 web profile
 
-The local web profile must load **both** the backend bundle and the fork (only one owner of the `subagent-model` row—never two owners of the row, or the panel renders duplicate controls). In `~/.dsh/profiles/web/package.json`:
+本地 web profile 必须同时加载**后端 bundle** 与 fork（`subagent-model` 行只能有一个 owner——绝不能有两个 owner，否则设置面板会渲染出重复控件）。在 `~/.dsh/profiles/web/package.json` 中：
 
 ```json
 "dependencies": {
-  "@aaravarr/dsh-subagent-max": "file:/abs/path/dsh-subagent-default-model/vendor/dsh-subagent-max",
-  "dsh-subagent-default-model": "file:/abs/path/dsh-subagent-default-model/plugin"
+  "@aaravarr/dsh-subagent-max": "file:/绝对路径/dsh-subagent-default-model/vendor/dsh-subagent-max",
+  "dsh-subagent-default-model": "file:/绝对路径/dsh-subagent-default-model/plugin"
 }
 ```
 
-with `dsh.profile.bundles` listing `@aaravarr/dsh-subagent-max` and `dsh-subagent-default-model`. After changing the plugin or fork source, refresh the installed copies and restart the web process:
+并且 `dsh.profile.bundles` 里列出 `@aaravarr/dsh-subagent-max` 与 `dsh-subagent-default-model`。修改插件或 fork 源码后，刷新安装副本并重启 web 进程：
 
 ```bash
-pnpm --dir ~/.dsh/profiles/web add @aaravarr/dsh-subagent-max@file:/abs/path/vendor/dsh-subagent-max
-pnpm --dir ~/.dsh/profiles/web add dsh-subagent-default-model@file:/abs/path/plugin
+pnpm --dir ~/.dsh/profiles/web add @aaravarr/dsh-subagent-max@file:/绝对路径/vendor/dsh-subagent-max
+pnpm --dir ~/.dsh/profiles/web add dsh-subagent-default-model@file:/绝对路径/plugin
 dsh web
 ```
 
-Hard-refresh the browser (`Cmd/Ctrl + Shift + R`) to load the new client bundle.
+硬刷新浏览器（`Cmd/Ctrl + Shift + R`）以加载新的 client bundle。
 
-## Development and tests
+> 若不再使用 `dsh-codex-connect`，从上述 `dependencies` 与 `dsh.profile.bundles` 中移除它（`pnpm --dir ~/.dsh/profiles/web remove dsh-codex-connect`），再重启 web 即可关闭。
 
-The plugin package owns its test dependencies and test command:
+## 开发与测试
+
+插件包自带测试依赖与测试命令：
 
 ```bash
 npm --prefix plugin install
 npm --prefix plugin test
 ```
 
-The tests use a real Cordis context and settings provider with a fake `subagents` service. They verify:
+测试使用真实的 Cordis 上下文和设置 provider，配一个假的 `subagents` 服务。它们覆盖：
 
-- fixed and multi-model selection;
-- round-robin routing and live settings updates;
-- explicit per-call override and fallback behavior;
-- normal and continuable child-agent requests;
-- Cordis disposal restoring the exact original service methods; and
-- the stable raw-service identity needed when Cordis returns traceable proxies.
+- 固定与多模型选择；
+- round-robin 轮换与实时设置更新；
+- 显式每次调用覆盖与回退行为；
+- 普通与可继续（continuable）子代理请求；
+- Cordis 销毁时精确还原原始服务方法；
+- 当 Cordis 返回 traceable proxy 时所需的稳定原始服务身份。
 
-The root compatibility commands run focused parts of the same suite:
+根目录的兼容命令运行同一套测试的聚焦部分：
 
 ```bash
-node integration.mjs # delegation and lifecycle integration tests
-node prove.mjs       # Cordis traceable-proxy regression test
+node integration.mjs # 派发与生命周期集成测试
+node prove.mjs       # Cordis traceable-proxy 回归测试
 ```
 
-## End-to-end verification
+## 端到端验证
 
-0. In the web UI, verify the settings row persists to disk: open **设置 → 通用设置 → 子代理默认模型**, change a route or the strategy, Save, confirm `subagent-default-model` in `~/.dsh/settings.yaml` matches, then close and reopen the panel to confirm the selection is retained. This "save → YAML update → reopen still present" flow has been verified live against a running DSH web process.
+0. 在 Web UI 中验证设置行确实落盘：打开 **设置 → 通用设置 → 子代理默认模型**，改动一个路由或策略，保存，确认 `~/.dsh/settings.yaml` 中的 `subagent-default-model` 与之一致，然后关闭并重新打开面板，确认选择被保留。这个「保存 → YAML 更新 → 重开仍保留」的流程已在运行中的 DSH web 进程上实测通过。
 
-1. Install the bundle into a disposable profile and configure a known model or two-model `round-robin` list.
-2. Restart the corresponding DSH process.
-3. Create several child agents without explicitly choosing a model.
-4. Inspect each child session's `request/header.config.model` in:
+1. 把 bundle 装进一个一次性 profile，并配置一个已知模型或包含两个模型的 `round-robin` 列表。
+2. 重启对应的 DSH 进程。
+3. 创建多个未显式选择模型的子代理。
+4. 检查每个子代理会话的 `request/header.config.model`：
 
    ```text
    ~/.dsh/sessions/<workspace>/<child-id>/session.jsonl.zstd
    ```
 
-   A configured round-robin list such as `pro, flash` should produce `pro → flash → pro` for consecutive child requests. A child created with explicit `agentOptions` should retain that explicit model.
+   一个形如 `pro, flash` 的 round-robin 列表，对连续的子代理请求应产生 `pro → flash → pro`。带显式 `agentOptions` 创建的子代理应保留其显式模型。
