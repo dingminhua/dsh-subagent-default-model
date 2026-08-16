@@ -77,14 +77,39 @@ The row can:
 
 Its saved value uses the same `subagent-default-model` section described above. It preserves unrelated fields in that section and never collapses an existing model list merely because the settings panel was opened.
 
-For the local web profile used in this checkout, link the fork and restart the web process after changing its client bundle:
+### Exposing the section to the web configuration client
+
+DSH's Host API proxy only serves settings namespaces that are either configurable LLM providers or on its own hard-coded allow-list. To make `subagent-default-model` readable and writable by the web row, the host plugin also registers it as a **dormant configurable provider** (`declared: false`) via `ctx.llm.registerConfigurableProviders`. Because the entry is dormant, it never appears in the active model catalog or model selection—it only widens the exposed-namespace set so `settings.describe` / `settings.mutate` can serve the section and persist it to `~/.dsh/settings.yaml`.
+
+### Fork fixes for the settings row
+
+The `vendor/dsh-subagent-max` fork carries the row's persistence and rendering fixes:
+
+- Save is no longer permanently disabled when the scope snapshot omits the optional `writable` field—it is only disabled on an explicit `writable === false`.
+- Saving writes `provider`, `model`, `models`, `strategy` in order through the public `scope.set()` seam (compatible with the settings provider's revision/change queue), then re-reads the snapshot and compares every field; a mismatch reports a real failure instead of pretending success.
+- Unrelated fields in the section are preserved across open/save.
+- The row card gets a small vertical margin (`margin: 8px 0`) so it does not sit flush against adjacent flat rows in the General section.
+
+### Wiring the local web profile
+
+The local web profile must load **both** the backend bundle and the fork (only one owner of the `subagent-model` row—never two owners of the row, or the panel renders duplicate controls). In `~/.dsh/profiles/web/package.json`:
+
+```json
+"dependencies": {
+  "@aaravarr/dsh-subagent-max": "file:/abs/path/dsh-subagent-default-model/vendor/dsh-subagent-max",
+  "dsh-subagent-default-model": "file:/abs/path/dsh-subagent-default-model/plugin"
+}
+```
+
+with `dsh.profile.bundles` listing `@aaravarr/dsh-subagent-max` and `dsh-subagent-default-model`. After changing the plugin or fork source, refresh the installed copies and restart the web process:
 
 ```bash
-pnpm --dir ~/.dsh/profiles/web install
+pnpm --dir ~/.dsh/profiles/web add @aaravarr/dsh-subagent-max@file:/abs/path/vendor/dsh-subagent-max
+pnpm --dir ~/.dsh/profiles/web add dsh-subagent-default-model@file:/abs/path/plugin
 dsh web
 ```
 
-The profile must load either this fork or another single owner of the `subagent-model` row—never both—so the settings panel cannot render duplicate controls.
+Hard-refresh the browser (`Cmd/Ctrl + Shift + R`) to load the new client bundle.
 
 ## Development and tests
 
@@ -112,6 +137,8 @@ node prove.mjs       # Cordis traceable-proxy regression test
 ```
 
 ## End-to-end verification
+
+0. In the web UI, verify the settings row persists to disk: open **设置 → 通用设置 → 子代理默认模型**, change a route or the strategy, Save, confirm `subagent-default-model` in `~/.dsh/settings.yaml` matches, then close and reopen the panel to confirm the selection is retained. This "save → YAML update → reopen still present" flow has been verified live against a running DSH web process.
 
 1. Install the bundle into a disposable profile and configure a known model or two-model `round-robin` list.
 2. Restart the corresponding DSH process.
