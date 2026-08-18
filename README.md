@@ -189,6 +189,64 @@ node integration.mjs # 派发与生命周期集成测试
 node prove.mjs       # Cordis traceable-proxy 回归测试
 ```
 
+## 卸载
+
+```bash
+dsh plugin --profile web remove dsh-subagent-default-model
+```
+
+移除后重启 DSH 进程。`~/.dsh/settings.yaml` 中的 `subagent-default-model` 配置段不会被自动删除，但不再生效；可以手动清理。
+
+## 更新
+
+```bash
+dsh plugin --profile web add dsh-subagent-default-model
+```
+
+版本号变更时，重新 `add` 会覆盖已有安装。更新后重启 DSH 进程。
+
+## 常见问题
+
+### 保存按钮灰色无法点击
+
+设置行的保存按钮要求「Provider 和 Model 都已选择」。如果有任何一条路由缺少其中一项，按钮保持禁用。填全后即可保存。
+
+### 保存后设置不生效
+
+1. 确认已重启 DSH 进程（bundle 层的加载需要重启）。
+2. 设置文件本身的编辑是热加载的，但 bundle 层只有首次启动时组合——所以修改 `settings.yaml` 里的模型列表后无需重启，但**安装或卸载插件**后必须重启。
+
+### 子代理仍然使用父会话模型
+
+检查 `~/.dsh/settings.yaml` 中 `subagent-default-model` 段是否完整：
+
+```yaml
+subagent-default-model:
+  provider: deepseek-official  # 必须填写
+  model: deepseek-v4-pro       # 至少填写 model，或使用 models 列表
+```
+
+如果 `provider` 为空或缺失，插件会跳过注入，子代理回退到继承父会话路由。
+
+### 如何让不同子代理使用不同模型？
+
+配置 `models` 列表并设置 `strategy`：
+
+```yaml
+subagent-default-model:
+  provider: deepseek-official
+  models:
+    - deepseek-v4-pro
+    - deepseek-v4-flash
+  strategy: round-robin  # round-robin 或 random
+```
+
+连续创建的子代理会按轮换或随机方式分配到不同模型。
+
+### 显式指定了 model 的子代理会被影响吗？
+
+不会。任何在创建子代理时显式传递了 `agentOptions` 的请求，插件完全不触碰——只有省略了 `agentOptions` 的请求才会使用默认模型。
+
 ## 端到端验证
 
 0. 在 Web UI 中验证设置行确实落盘：打开 **设置 → 通用设置 → 子代理默认模型**，改动一个路由或策略，保存，确认 `~/.dsh/settings.yaml` 中的 `subagent-default-model` 与之一致，然后关闭并重新打开面板，确认选择被保留。这个「保存 → YAML 更新 → 重开仍保留」的流程已在运行中的 DSH web 进程上实测通过。多模型轮换也已实测：配置 `[deepseek-v4-flash, aixforge/glm-5.2]` + `round-robin` 后，连续 3 个子代理实际路由为 `flash → glm-5.2 → flash`，与配置严格一致。
