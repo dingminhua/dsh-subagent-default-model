@@ -1201,7 +1201,8 @@ window.__ModuleLoader__.load({
       "row.save": "保存",
       "row.saved": "已保存",
       "row.incomplete": "请为每个模型路由选择 Provider 和 Model。",
-      "row.saveFailed": "保存失败，请重试。"
+      "row.saveFailed": "保存失败，请重试。",
+      "row.toastSaved": "子代理默认模型设置已保存。"
     };
     var SUBAGENT_ROW_EN = {
       "row.title": "Subagent default model",
@@ -1218,7 +1219,8 @@ window.__ModuleLoader__.load({
       "row.save": "Save",
       "row.saved": "Saved",
       "row.incomplete": "Choose a provider and model for every route.",
-      "row.saveFailed": "Could not save the setting. Try again."
+      "row.saveFailed": "Could not save the setting. Try again.",
+      "row.toastSaved": "Subagent default model settings saved."
     };
     function normalizeDefaultModels(value) {
       var result = [];
@@ -1277,6 +1279,8 @@ window.__ModuleLoader__.load({
       var strategyState = React.useState(value.strategy === "random" ? "random" : "round-robin");
       var savedState = React.useState(false);
       var saveErrorState = React.useState(false);
+      var toastState = React.useState(null);
+      var toastSeq = React.useRef(0);
       var dirtyState = React.useState(false);
       var busyState = React.useState(false);
       React.useEffect(function () {
@@ -1341,6 +1345,8 @@ window.__ModuleLoader__.load({
           dirtyState[1](false);
           busyState[1](false);
           savedState[1](true);
+          toastSeq.current = toastSeq.current + 1;
+          toastState[1]({ seq: toastSeq.current, text: t("row.toastSaved") });
         }).catch(function () {
           busyState[1](false);
           saveErrorState[1](true);
@@ -1421,7 +1427,8 @@ window.__ModuleLoader__.load({
         React.createElement("div", { className: "dsm-model-settings-actions" },
           React.createElement(Button, { type: "button", variant: "primary", size: "sm", disabled: saveDisabled, onClick: save }, busyState[0] ? t("row.save") + "…" : (savedState[0] ? t("row.saved") : t("row.save"))),
           savedState[0] ? React.createElement("span", { className: "dsm-model-settings-status" }, t("row.saved")) : null
-        )
+        ),
+        toastState[0] ? React.createElement(Toast, { key: toastState[0].seq, text: toastState[0].text, onDone: function () { toastState[1](null); } }) : null
       );
     }
 
