@@ -1,13 +1,19 @@
 {
   "name": "dsh-subagent-default-model",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Default model for subagent delegations, configurable via the `subagent-default-model` settings section (no explicit per-call model keeps inheriting the parent route).",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dingminhua/dsh-subagent-default-model.git"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
-    "./cordis.patch.yml": "./cordis.patch.yml"
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
   },
   "files": [
     "lib",
@@ -21,6 +27,12 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
     }
   },
   "dependencies": {
@@ -28,7 +40,11 @@
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-settings": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-subagent": "0.1.0-rc.6"
+    "@deepseek-ai/dsh-subagent": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-client-ui-primitives": { "optional": true }
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
