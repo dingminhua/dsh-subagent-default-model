@@ -11,7 +11,7 @@ window.__ModuleLoader__.load({
     var Toast = primitives.Toast;
 
     // ── CSS ──────────────────────────────────────────────────────────────
-    var SETTINGS_CSS = ".dsm-model-settings{display:flex;flex-direction:column;gap:14px;margin:20px 0;padding:14px 16px;background:var(--dsw-alias-bg-module-platform,var(--dsw-alias-bg-layer-1,#1c1d21));border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:12px}.dsm-model-settings-head{display:flex;flex-direction:column;gap:4px}.dsm-model-settings-title{font-size:14px;line-height:20px;font-weight:600;color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-model-settings-desc{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-list{display:flex;flex-direction:column;gap:8px}.dsm-model-settings-route{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;padding:8px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px}.dsm-model-settings-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-select{width:100%;height:32px;padding:0 28px 0 9px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font:inherit}.dsm-model-settings-select:focus{outline:2px solid var(--dsw-alias-state-business-primary,#5686fe);outline-offset:1px}.dsm-model-settings-remove{height:32px;min-width:32px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-remove:hover{color:var(--dsw-alias-state-error-primary,#ef4444);background:var(--dsw-alias-interactive-bg-hover-danger,rgba(242,90,90,.15))}.dsm-model-settings-options{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap}.dsm-model-settings-strategy{min-width:180px}.dsm-model-settings-actions{display:flex;align-items:center;gap:8px}.dsm-model-settings-status{font-size:12px;line-height:18px;color:var(--dsw-alias-state-success-primary,#22c55e)}.dsm-model-settings-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}";
+    var SETTINGS_CSS = ".dsm-model-settings{display:flex;flex-direction:column;gap:14px;margin:20px 0;padding:14px 16px;background:var(--dsw-alias-bg-module-platform,var(--dsw-alias-bg-layer-1,#1c1d21));border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:12px}.dsm-model-settings-head{display:flex;flex-direction:column;gap:4px}.dsm-model-settings-title{font-size:14px;line-height:20px;font-weight:600;color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-model-settings-desc{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-list{display:flex;flex-direction:column;gap:8px}.dsm-model-settings-route{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;padding:8px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px}.dsm-model-settings-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-select{width:100%;height:32px;padding:0 28px 0 9px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font:inherit}.dsm-model-settings-select:focus{outline:2px solid var(--dsw-alias-state-business-primary,#5686fe);outline-offset:1px}.dsm-model-settings-remove{height:32px;min-width:32px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-remove:hover{color:var(--dsw-alias-state-error-primary,#ef4444);background:var(--dsw-alias-interactive-bg-hover-danger,rgba(242,90,90,.15))}.dsm-model-settings-options{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap}.dsm-model-settings-strategy{min-width:180px}.dsm-model-settings-actions{display:flex;align-items:center;gap:8px}.dsm-model-settings-status{font-size:12px;line-height:18px;color:var(--dsw-alias-state-success-primary,#22c55e)}.dsm-model-settings-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}";
 
     if (typeof document !== "undefined") {
       var cssId = "dsh-subagent-default-model/client.css";
@@ -31,6 +31,7 @@ window.__ModuleLoader__.load({
       "row.desc": "为 subagent / subagent_fork 选择一个或多个默认路由；清空后子代理继承父会话路由。",
       "row.provider": "Provider",
       "row.model": "Model",
+      "row.effort": "推理强度",
       "row.add": "添加模型",
       "row.remove": "移除模型",
       "row.strategy": "分配策略",
@@ -38,6 +39,7 @@ window.__ModuleLoader__.load({
       "row.random": "随机",
       "row.inherit": "（继承父会话路由）",
       "row.empty": "尚未指定默认模型，子代理将继承父会话路由。",
+      "row.effortDefault": "Default",
       "row.save": "保存",
       "row.saved": "已保存",
       "row.incomplete": "请为每个模型路由选择 Provider 和 Model。",
@@ -49,12 +51,14 @@ window.__ModuleLoader__.load({
       "row.desc": "Choose one or more default routes for subagent / subagent_fork; clear them to inherit the parent session route.",
       "row.provider": "Provider",
       "row.model": "Model",
+      "row.effort": "Reasoning strength",
       "row.add": "Add model",
       "row.remove": "Remove model",
       "row.strategy": "Distribution",
       "row.roundRobin": "Round-robin",
       "row.random": "Random",
       "row.inherit": "(inherit parent route)",
+      "row.effortDefault": "Default",
       "row.empty": "No default model is selected; subagents inherit the parent route.",
       "row.save": "Save",
       "row.saved": "Saved",
@@ -71,11 +75,11 @@ window.__ModuleLoader__.load({
       if (Array.isArray(value.models) && value.models.length > 0) {
         for (var i = 0; i < value.models.length; i++) {
           var entry = value.models[i];
-          if (typeof entry === "string") result.push({ provider: value.provider || "", model: entry });
-          else if (entry && typeof entry === "object") result.push({ provider: entry.provider || "", model: entry.model || "" });
+          if (typeof entry === "string") result.push({ provider: value.provider || "", model: entry, reasoningEffort: "" });
+          else if (entry && typeof entry === "object") result.push({ provider: entry.provider || value.provider || "", model: entry.model || "", reasoningEffort: entry.reasoningEffort || "" });
         }
       } else if (value.provider || value.model) {
-        result.push({ provider: value.provider || "", model: value.model || "" });
+        result.push({ provider: value.provider || "", model: value.model || "", reasoningEffort: value.reasoningEffort || "" });
       }
       return result;
     }
@@ -87,15 +91,30 @@ window.__ModuleLoader__.load({
         next.model = "";
         next.models = [];
         next.strategy = "round-robin";
+        delete next.reasoningEffort;
         return next;
       }
       var provider = routes[0].provider;
+      var sharedEffort = routes[0].reasoningEffort;
+      var allSameEffort = routes.every(function (route) { return route.reasoningEffort === sharedEffort; });
       next.provider = provider;
       next.model = "";
       next.models = routes.map(function (route) {
-        return route.provider === provider ? route.model : { provider: route.provider, model: route.model };
+        if (route.provider === provider && !route.reasoningEffort) {
+          return route.model;
+        }
+        var base = { provider: route.provider, model: route.model };
+        if (route.reasoningEffort) {
+          base.reasoningEffort = route.reasoningEffort;
+        }
+        return base;
       });
       next.strategy = strategy === "random" ? "random" : "round-robin";
+      if (allSameEffort && sharedEffort) {
+        next.reasoningEffort = sharedEffort;
+      } else {
+        delete next.reasoningEffort;
+      }
       return next;
     }
 
@@ -106,6 +125,8 @@ window.__ModuleLoader__.load({
         return scope.set("models", value.models);
       }).then(function () {
         return scope.set("strategy", value.strategy);
+      }).then(function () {
+        return scope.set("reasoningEffort", value.reasoningEffort || "");
       });
     }
 
@@ -150,9 +171,12 @@ window.__ModuleLoader__.load({
         routesState[1](function (routes) {
           return routes.map(function (route, routeIndex) {
             if (routeIndex !== index) return route;
-            var next = { provider: route.provider, model: route.model };
+            var next = { provider: route.provider, model: route.model, reasoningEffort: route.reasoningEffort || "" };
             next[field] = nextValue;
-            if (field === "provider") next.model = "";
+            if (field === "provider") {
+              next.model = "";
+              next.reasoningEffort = "";
+            }
             return next;
           });
         });
@@ -163,7 +187,7 @@ window.__ModuleLoader__.load({
       function addRoute() {
         var firstGroup = groupsState[0][0];
         routesState[1](function (routes) {
-          return routes.concat({ provider: firstGroup ? firstGroup.id : "", model: "" });
+          return routes.concat({ provider: firstGroup ? firstGroup.id : "", model: "", reasoningEffort: "" });
         });
         savedState[1](false);
         saveErrorState[1](false);
@@ -186,7 +210,7 @@ window.__ModuleLoader__.load({
         }).then(function () {
           var accepted = props.settingsScope.getSnapshot();
           var acceptedValue = (accepted && accepted.status === "ready" && accepted.value) || {};
-          if (acceptedValue.provider !== nextValue.provider || acceptedValue.model !== nextValue.model || acceptedValue.strategy !== nextValue.strategy || JSON.stringify(acceptedValue.models || []) !== JSON.stringify(nextValue.models || [])) {
+          if (acceptedValue.provider !== nextValue.provider || acceptedValue.model !== nextValue.model || acceptedValue.strategy !== nextValue.strategy || (acceptedValue.reasoningEffort || "") !== (nextValue.reasoningEffort || "") || JSON.stringify(acceptedValue.models || []) !== JSON.stringify(nextValue.models || [])) {
             throw new Error("settings write was not accepted");
           }
           routesState[1](normalizeDefaultModels(acceptedValue));
@@ -214,6 +238,14 @@ window.__ModuleLoader__.load({
         if (route.model && !modelChoices.some(function (candidate) { return candidate.id === route.model; })) {
           modelChoices.unshift({ id: route.model, name: route.model });
         }
+        var selectedModel = null;
+        for (var modelIndex = 0; modelIndex < modelChoices.length; modelIndex++) {
+          if (modelChoices[modelIndex].id === route.model) { selectedModel = modelChoices[modelIndex]; break; }
+        }
+        var effortChoices = selectedModel && selectedModel.reasoning && Array.isArray(selectedModel.reasoning.efforts) ? selectedModel.reasoning.efforts.slice() : [];
+        if (route.reasoningEffort && !effortChoices.some(function (candidate) { return candidate.id === route.reasoningEffort; })) {
+          effortChoices.unshift({ id: route.reasoningEffort, name: route.reasoningEffort });
+        }
         return React.createElement("div", { className: "dsm-model-settings-route", key: index },
           React.createElement("label", { className: "dsm-model-settings-field" },
             t("row.provider"),
@@ -238,6 +270,20 @@ window.__ModuleLoader__.load({
             },
               React.createElement("option", { value: "" }, t("row.inherit")),
               modelChoices.map(function (candidate) {
+                return React.createElement("option", { key: candidate.id, value: candidate.id }, candidate.name || candidate.id);
+              })
+            )
+          ),
+          React.createElement("label", { className: "dsm-model-settings-field" },
+            t("row.effort"),
+            React.createElement("select", {
+              className: "dsm-model-settings-select",
+              value: route.reasoningEffort || "",
+              disabled: !route.model,
+              onChange: function (event) { updateRoute(index, "reasoningEffort", event.target.value); }
+            },
+              React.createElement("option", { value: "" }, t("row.effortDefault")),
+              effortChoices.map(function (candidate) {
                 return React.createElement("option", { key: candidate.id, value: candidate.id }, candidate.name || candidate.id);
               })
             )

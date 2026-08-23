@@ -33,7 +33,8 @@ const MODEL_ENTRY = z.union([
 	z.string(),
 	z.object({
 		provider: z.string(),
-		model: z.string()
+		model: z.string(),
+		reasoningEffort: z.string()
 	})
 ]);
 /** Schema of the `subagent-default-model` settings section; an absent section keeps inheriting the parent route. */
@@ -57,7 +58,11 @@ function resolveEntry(section, entry) {
 	if (entry !== null && typeof entry === "object") {
 		if (typeof entry.provider !== "string" || entry.provider.length === 0) return void 0;
 		if (typeof entry.model !== "string" || entry.model.length === 0) return void 0;
-		return { provider: entry.provider, model: entry.model };
+		const resolved = { provider: entry.provider, model: entry.model };
+		if (typeof entry.reasoningEffort === "string" && entry.reasoningEffort.length > 0) {
+			resolved.reasoningEffort = entry.reasoningEffort;
+		}
+		return resolved;
 	}
 	return void 0;
 }
@@ -79,7 +84,11 @@ function defaultModel(state) {
 	// Single-model form (backward compatible).
 	if (typeof section.model === "string" && section.model.length > 0) {
 		if (typeof section.provider !== "string" || section.provider.length === 0) return void 0;
-		return { provider: section.provider, model: section.model };
+		const result = { provider: section.provider, model: section.model };
+		if (typeof section.reasoningEffort === "string" && section.reasoningEffort.length > 0) {
+			result.reasoningEffort = section.reasoningEffort;
+		}
+		return result;
 	}
 
 	return void 0;

@@ -8,6 +8,7 @@ When a subagent is created without an explicit `model`, this plugin injects the 
 
 - **Single model** — all subagents run on one configured model.
 - **Multi-model** — a `models` list with `round-robin` or `random` strategy spreads parallel subagents across models.
+- **Reasoning strength** — optionally specify `reasoningEffort` per model entry (e.g. `high`, `medium`, `low`); the Web UI loads available efforts from the model catalog.
 - **Hot-reload** — settings changes apply to the very next delegation.
 - **Clean teardown** — Cordis disposal restores the original service methods.
 
@@ -34,14 +35,26 @@ subagent-default-model:
     - deepseek-v4-pro
     - deepseek-v4-flash
   strategy: round-robin  # round-robin | random
+
+# With reasoning strength
+subagent-default-model:
+  provider: deepseek-official
+  models:
+    - model: deepseek-v4-reasoner
+      reasoningEffort: high
+    - provider: other-provider
+      model: gpt-5.6
+      reasoningEffort: max
+  strategy: round-robin  # round-robin | random
 ```
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `provider` | string | — | Provider for string-type model entries. |
 | `model` | string | — | Single model id (backward compatible). |
-| `models` | array | `[]` | List of model entries (string or `{provider, model}` pair). |
+| `models` | array | `[]` | List of model entries (string or `{provider, model, reasoningEffort?}` pair). |
 | `strategy` | string | `round-robin` | Selection strategy: `round-robin` or `random`. |
+| `reasoningEffort` | string | — | Optional reasoning strength for a model entry (e.g. `high`, `max`). |
 
 ## How it works
 
