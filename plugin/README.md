@@ -18,6 +18,35 @@ When a subagent is created without an explicit `model`, this plugin injects the 
 dsh plugin --profile web add dsh-subagent-default-model
 ```
 
+## Release / Publish
+
+> **本插件不发布到 npm**，通过 Git 发布。安装方式为 `file:` 本地依赖，提交代码推送到 GitHub 即可完成发布。
+
+发布流程：
+
+```sh
+# 1. 更新版本号（plugin/package.json）和 CHANGELOG.md
+# 2. 提交并打标签
+git add -A
+git commit -m "feat: ..."
+git tag v0.3.0
+git push origin main --tags
+
+# 3. 同步到本地 web profile 的 file: 依赖
+cd ~/.dsh/profiles/web && pnpm install
+```
+
+> ⚠️ **Web profile 依赖变动注意（模块双胞胎）**：对 `~/.dsh/profiles/web` 执行 `pnpm install` / `add` / `remove` 后，**必须**先运行
+> `bash ~/.dsh/scripts/fix-module-twins.sh`
+> 看到末尾「自检通过：全部 SAME」后，重启 dsh web 进程。否则工具调用会全部失败（报 `reading 'prepare'`），且该会话历史会被污染需新开会话。
+> 该脚本幂等，重复执行无害。
+
+说明：
+
+- 插件的 web profile 安装方式为 `"dsh-subagent-default-model": "file:/Users/dmh2002/GithubProject/dsh-subagent-default-model/plugin"`（见 `~/.dsh/profiles/web/package.json`）
+- 代码修改后，`pnpm install` 会把 `file:` 依赖的最新文件同步到 web profile，然后刷新页面即可生效
+- 如需全新安装：`dsh plugin --profile web add dsh-subagent-default-model`
+
 ## Configuration
 
 Add to `~/.dsh/settings.yaml`:
