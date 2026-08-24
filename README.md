@@ -54,15 +54,15 @@ subagent-default-model:
 
 ## 安装
 
-将包安装到应使用它的 DSH profile：
+将包安装到应使用它的 DSH profile（当前环境为 DSH Desktop，使用 `desktop` profile）：
 
 ```bash
-dsh plugin --profile web add /绝对路径/dsh-subagent-default-model/plugin
+dsh plugin --profile desktop add /绝对路径/dsh-subagent-default-model/plugin
 ```
 
-若用 headless profile，把 `web` 换成 `headless`。
+该命令以 `link:` 方式把插件装入 `~/.dsh/profiles/desktop`（`dependencies` + `dsh.profile.bundles` 自动 reconcile）。若用 headless profile，把 `desktop` 换成 `headless`。
 
-该包把 `cordis.patch.yml` 声明为 DSH bundle patch。添加或移除 bundle 后需重启对应的 DSH 进程，以重建 profile 组合。设置文件的编辑是热加载的，无需重启。
+该包把 `cordis.patch.yml` 声明为 DSH bundle patch。添加或移除 bundle 后需**重启 DSH Desktop 进程**，以重建 profile 组合。设置文件的编辑是热加载的，无需重启。
 
 ## Web 设置
 
@@ -79,48 +79,9 @@ dsh plugin --profile web add /绝对路径/dsh-subagent-default-model/plugin
 
 > 历史说明：此设置行最初由本地 fork `vendor/dsh-subagent-max` 提供，其代码（仅 `lib/client.js` 里 `SubagentModelRow` 及配套 locale/CSS，约 380 行）已提取进本插件的 `plugin/lib/client.js`，fork 本身已不再作为依赖加载
 
-### 将设置段暴露给 Web 配置客户端
+### 将设置段暴露给 Web 配置客户端（当前版本已无需 patch）
 
-DSH 的 Host API 代理（`@deepseek-ai/dsh-host-apiproxy`）对 `settings.describe` / `settings.mutate` 做 namespace 白名单过滤：只有「可配置 LLM provider 的 `settingsNs`」加上包内硬编码的 `WEB_SETTINGS_NAMESPACES` / `PRODUCT_SETTINGS_NAMESPACES` 列表里的 namespace 才对 Web 客户端可读写。插件自己 `settings.register()` 的 namespace 默认**不会**被暴露（上游注释明确说明：把该声明移到 `settings.register()` 属于 deferred work）。被过滤的表现是：设置行控件不渲染、保存按钮永久灰色。
-
-因此需要在运行中的 DSH 安装里给 apiproxy 的白名单加一行。找到实际生效的 `dsh-host-apiproxy/lib/index.js`（注意 `~/.dsh/profiles/node_modules/@deepseek-ai/` 下多为指向 npx 缓存的 symlink，改 symlink 目标一处即可全局生效），把：
-
-```js
-const WEB_SETTINGS_NAMESPACES = [
-	"agent-loop",
-	"shell",
-	"locale",
-	"permission",
-	"ui-conversation",
-	"ui-theme",
-	"web-search-deepseek"
-];
-```
-
-改为：
-
-```js
-const WEB_SETTINGS_NAMESPACES = [
-	"agent-loop",
-	"shell",
-	"locale",
-	"permission",
-	"ui-conversation",
-	"ui-theme",
-	"web-search-deepseek",
-	"subagent-default-model"
-];
-```
-
-然后重启 DSH web 进程。可以用下面的调用自检（返回的 `namespaces` 里应出现 `subagent-default-model`）：
-
-```bash
-curl -s --noproxy '*' -X POST http://127.0.0.1:3080/api/settings.describe \
-  -H 'Content-Type: application/json' \
-  -d '{"type":"client-request","rpcId":"check","method":"settings.describe","payload":{}}'
-```
-
-> 注意：升级或重装 DSH 会覆盖该 patch，保存功能会再次失效（现象同上）；按本节重新打 patch 即可恢复。此前尝试过的 `ctx.llm.registerConfigurableProviders` 伪装 provider 方案已废弃——它会污染 Models 页面的 provider 目录，并在部分路径触发 `Cannot read properties of undefined (reading 'prepare')`。
+> **历史说明**：旧版 DSH（0.1.0-rc.6 时代）的 Host API 代理（`@deepseek-ai/dsh-host-apiproxy`）对 `settings.describe` / `settings.mutate` 做 `WEB_SETTINGS_NAMESPACES` 白名单过滤，插件自己 `settings.register()` 的 namespace 默认不会被暴露，需要手动修改 apiproxy 源码添加 namespace。该机制在 DSH **0.1.1-rc.2 已移除**：`settings.describe` 直接返回全部已注册 namespace（`settings.describe({ redactSecrets: true }).map(namespaceView)`），**无需任何 patch**。若未来版本重新引入白名单，再按上述方式处理。
 
 ### 设置行的持久化与渲染行为
 
@@ -133,18 +94,15 @@ curl -s --noproxy '*' -X POST http://127.0.0.1:3080/api/settings.describe \
 
 `subagent-model` 行只有一个 owner（本插件自身），不要在其他 bundle 里重复注册同名行，否则设置面板会渲染出重复控件。
 
-### 接线本地 web profile
+### 接线本地 desktop profile
 
-本地 web profile 只需加载本插件一个 bundle。在 `~/.dsh/profiles/web/package.json` 的 `dependencies` 与 `dsh.profile.bundles` 中只列 `dsh-subagent-default-model` 即可（`vendor/dsh-subagent-max` 不再需要）。修改插件源码后，刷新安装副本并重启 web 进程：
+本地 desktop profile 只需加载本插件一个 bundle。在 `~/.dsh/profiles/desktop/package.json` 的 `dependencies` 与 `dsh.profile.bundles` 中只列 `dsh-subagent-default-model` 即可（`vendor/dsh-subagent-max` 不再需要）。推荐用 `dsh plugin` 命令以 `link:` 方式安装（自动 reconcile）：
 
 ```bash
-pnpm --dir ~/.dsh/profiles/web add dsh-subagent-default-model@file:/绝对路径/plugin
-dsh web
+dsh plugin --profile desktop add /绝对路径/dsh-subagent-default-model/plugin
 ```
 
-硬刷新浏览器（`Cmd/Ctrl + Shift + R`）以加载新的 client bundle。
-
-> 若不再使用 `dsh-codex-connect`，从 `dependencies` 与 `dsh.profile.bundles` 中移除它（`pnpm --dir ~/.dsh/profiles/web remove dsh-codex-connect`），再重启 web 即可关闭。
+修改插件源码后（`link:` 软链即时同步），**重启 DSH Desktop** 使 bundle 层重新组合；浏览器硬刷新（`Cmd/Ctrl + Shift + R`）以加载新的 client bundle。
 
 ### 让 DSH 发现本插件的 Web 设置行（两个必填点）
 
@@ -178,17 +136,9 @@ DSH 的 `dsh-client-modules` 在启动时扫描加载器里所有声明了 `dsh.
 }
 ```
 
-### 安装后若工具调用全部失败（DSH 环境问题，与本插件功能无关）
+### 安装后若工具调用全部失败（历史问题，`link:` 安装已规避）
 
-对 web profile 执行 `pnpm install` / `add` / `remove`（包括安装本插件）可能触发 DSH 的 peer 依赖“模块双胞胎”，任何工具调用 0ms 失败（`Cannot read properties of undefined (reading 'prepare')`）。这是 DSH 安装布局的问题，不是本插件的功能缺陷。
-
-修复脚本与详细说明维护在 DSH 全局目录，不在本仓库：
-
-```bash
-bash ~/.dsh/scripts/fix-module-twins.sh   # 每次动过 web profile 依赖后运行，然后重启 web
-```
-
-详见 `~/.dsh/AGENTS.md`。
+> **历史说明**：对旧 `web` profile 执行 `pnpm install` / `add` / `remove` 可能触发 DSH 的 peer 依赖"模块双胞胎"（同一包被装成两份物理副本，模块级 `Symbol()` 钥匙互不相认），表现为任何工具调用 0ms 失败（`Cannot read properties of undefined (reading 'prepare')`）。旧 `dev-web.sh` + `web` profile 工作流已废弃删除；当前 `dsh plugin --profile desktop add` 以 `link:` 安装**不重装依赖树**，不会触发该问题。
 
 ## 开发与测试
 
@@ -218,18 +168,18 @@ node prove.mjs       # Cordis traceable-proxy 回归测试
 ## 卸载
 
 ```bash
-dsh plugin --profile web remove dsh-subagent-default-model
+dsh plugin --profile desktop remove dsh-subagent-default-model
 ```
 
-移除后重启 DSH 进程。`~/.dsh/settings.yaml` 中的 `subagent-default-model` 配置段不会被自动删除，但不再生效；可以手动清理。
+移除后重启 DSH Desktop 进程。`~/.dsh/settings.yaml` 中的 `subagent-default-model` 配置段不会被自动删除，但不再生效；可以手动清理。
 
 ## 更新
 
 ```bash
-dsh plugin --profile web add dsh-subagent-default-model
+dsh plugin --profile desktop add dsh-subagent-default-model
 ```
 
-版本号变更时，重新 `add` 会覆盖已有安装。更新后重启 DSH 进程。
+版本号变更时，重新 `add` 会覆盖已有安装。更新后重启 DSH Desktop 进程。
 
 ## 常见问题
 
