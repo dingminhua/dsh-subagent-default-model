@@ -156,6 +156,8 @@ DSH 的 `dsh-client-modules` 在启动时扫描加载器里所有声明了 `dsh.
 
 ## 开发与测试
 
+> 📦 **发布流程见 [`RELEASING.md`](RELEASING.md)**（npm 发布、2FA 确认、git 打 tag 的完整权威步骤）。
+
 插件包自带测试依赖与测试命令：
 
 ```bash

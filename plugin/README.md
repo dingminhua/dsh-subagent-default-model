@@ -44,20 +44,23 @@ dsh plugin --profile desktop add dsh-subagent-default-model
 
 ## 发布（Release / Publish）
 
-发布到 npm registry：
+发布到 npm registry。**完整权威流程见仓库根目录 [`RELEASING.md`](../../RELEASING.md)**（含 2FA 确认、tag 修正、代理、验证步骤）。
+
+要点速览：
 
 ```sh
-# 1. 更新版本号（plugin/package.json 的 version 字段）和 CHANGELOG.md
-# 2. 提交并打标签
-git add -A
-git commit -m "feat: ..."
-git tag v0.3.1
-git push origin main --tags
+# 1. 测试：npm --prefix plugin test
+# 2. 更新版本号（plugin/package.json 的 version 字段）和 CHANGELOG.md
+# 3. 提交并打标签
+git add plugin/package.json plugin/CHANGELOG.md
+git commit -m "chore: 版本升级至 X.Y.Z"
+git tag -a vX.Y.Z -m "vX.Y.Z: <说明>"
+git push origin main
+git push origin vX.Y.Z
 
-# 3. 发布到 npm
+# 4. 发布到 npm（账号若开启 2FA，需在浏览器确认一步）
 cd plugin
-npm login        # 首次发布前登录一次；账号若开启 2FA，publish 时需在浏览器确认一步
-npm publish      # files 字段已限定发布内容：lib/、cordis.patch.yml 等
+npm publish
 ```
 
 > ⚠️ 发布前先跑一遍测试：`npm --prefix plugin test`。

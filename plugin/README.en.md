@@ -44,20 +44,23 @@ dsh plugin --profile desktop add dsh-subagent-default-model
 
 ## Release / Publish
 
-Publish to the npm registry:
+Publish to the npm registry. **The full authoritative flow lives in [`RELEASING.md`](../../RELEASING.md)** (2FA confirmation, tag fix, proxy, verification).
+
+Quick reference:
 
 ```sh
-# 1. Bump the version (plugin/package.json `version`) and update CHANGELOG.md
-# 2. Commit and tag
-git add -A
-git commit -m "feat: ..."
-git tag v0.3.1
-git push origin main --tags
+# 1. Test: npm --prefix plugin test
+# 2. Bump version (plugin/package.json `version`) and update CHANGELOG.md
+# 3. Commit and tag
+git add plugin/package.json plugin/CHANGELOG.md
+git commit -m "chore: bump version to X.Y.Z"
+git tag -a vX.Y.Z -m "vX.Y.Z: <summary>"
+git push origin main
+git push origin vX.Y.Z
 
-# 3. Publish to npm
+# 4. Publish to npm (if the account has 2FA, confirm in the browser)
 cd plugin
-npm login        # Log in once before the first publish; if the account has 2FA, confirm in the browser during publish
-npm publish      # `files` limits the published content: lib/, cordis.patch.yml, etc.
+npm publish
 ```
 
 > ⚠️ Run the tests first: `npm --prefix plugin test`.

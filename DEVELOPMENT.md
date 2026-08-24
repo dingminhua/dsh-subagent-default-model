@@ -1,5 +1,7 @@
 # 本地开发工作流（DSH Desktop + desktop profile）
 
+> 📦 发布流程见 [`RELEASING.md`](RELEASING.md)。
+
 ## 一句话原则
 
 **用 `dsh plugin add` 以 `link:` 方式装入 desktop profile，改代码即时生效（重启 DSH Desktop 生效），不复制文件、不重装依赖树。**
