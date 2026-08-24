@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 (2026-08-24)
+
+### Docs
+
+- **README 中英双语双文件**: `README.md` 重写为纯简体中文，新增 `README.en.md` 英文翻译，顶部加语言切换链接；`package.json` 的 `files` 加入 `README.en.md`
+
 ## 0.3.0 (2026-08-23)
 
 ### Features
