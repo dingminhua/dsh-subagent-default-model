@@ -22,6 +22,10 @@ When a subagent is created without an explicit `model`, this plugin injects the 
 
 ![Subagent default model distribution](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_02.png)
 
+## Marketplace
+
+[![dshfind plugin](https://dshfind.com/api/badge/dingminhua/dsh-subagent-default-model)](https://dshfind.com/plugins/dingminhua/dsh-subagent-default-model)
+
 ## Install
 
 从 npm registry 安装：

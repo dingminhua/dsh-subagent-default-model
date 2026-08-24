@@ -34,6 +34,10 @@
 
 ![子代理默认模型分配统计](assets/pic_02.png)
 
+## 市场
+
+[![dshfind 插件](https://dshfind.com/api/badge/dingminhua/dsh-subagent-default-model)](https://dshfind.com/plugins/dingminhua/dsh-subagent-default-model)
+
 ## 配置
 
 在 `~/.dsh/settings.yaml` 中添加以下任一形式。
