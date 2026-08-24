@@ -1,32 +1,34 @@
 # dsh-subagent-default-model
 
-Default model for subagent delegations in [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness), configurable via `~/.dsh/settings.yaml`.
+[English](README.en.md) | 中文
 
-When a subagent is created without an explicit `model`, this plugin injects the configured default — so every `subagent`, `subagent_fork`, and any tool that omits `agentOptions` routes through it. Explicit per-call overrides always win; an absent or incomplete settings section keeps the historical behavior (children inherit the parent route).
+为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 中的子代理（subagent）派发选择默认模型，可通过 `~/.dsh/settings.yaml` 配置。
 
-## Features
+当创建子代理时未显式指定 `model`，本插件注入配置的默认模型 —— 因此所有 `subagent`、`subagent_fork` 以及任何省略 `agentOptions` 的工具调用都会经过它。显式传参的覆盖始终生效；配置段缺失或不完整时保持原有行为（子代理继承父会话路由）。
 
-- **Single model** — all subagents run on one configured model.
-- **Multi-model** — a `models` list with `round-robin` or `random` strategy spreads parallel subagents across models.
-- **Reasoning strength** — optionally specify `reasoningEffort` per model entry (e.g. `high`, `medium`, `low`); the Web UI loads available efforts from the model catalog.
-- **Hot-reload** — settings changes apply to the very next delegation.
-- **Clean teardown** — Cordis disposal restores the original service methods.
+## 功能特性
 
-## Screenshots
+- **单模型** —— 所有子代理运行在同一个配置模型上。
+- **多模型** —— `models` 列表配合 `round-robin` / `random` 策略，让并行子代理分散到多个模型。
+- **推理强度** —— 可为每个模型条目指定 `reasoningEffort`（如 `high`、`medium`、`low`）；Web 界面从模型目录加载可用的强度。
+- **热重载** —— 设置变更立即作用于下一次派发。
+- **干净卸载** —— Cordis 销毁时还原原始服务方法。
 
-**Settings panel** (`Settings → General → Subagent default model`): configure one or more model routes with `round-robin` / `random` strategy and per-route reasoning effort.
+## 截图
 
-![Subagent default model settings panel](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_01.png)
+**设置面板**（`设置 → 通用设置 → 子代理默认模型`）：配置一个或多个模型路由，支持 `round-robin` / `random` 分配策略与每路由推理强度。
 
-**Effect verification**: 10 subagents split 5/5 between `deepseek-v4-flash` and `Kimi-k3` (round-robin).
+![子代理默认模型设置面板](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_01.png)
 
-![Subagent default model distribution](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_02.png)
+**效果验证**：10 个子代理在 `deepseek-v4-flash` 与 `Kimi-k3` 之间 5/5 均衡分配（round-robin 实测）。
 
-## Marketplace
+![子代理默认模型分配统计](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_02.png)
 
-[![dshfind plugin](https://dshfind.com/api/badge/dingminhua/dsh-subagent-default-model)](https://dshfind.com/plugins/dingminhua/dsh-subagent-default-model)
+## 市场
 
-## Install
+[![dshfind 插件](https://dshfind.com/api/badge/dingminhua/dsh-subagent-default-model)](https://dshfind.com/plugins/dingminhua/dsh-subagent-default-model)
+
+## 安装
 
 从 npm registry 安装：
 
@@ -40,7 +42,7 @@ npm install dsh-subagent-default-model
 dsh plugin --profile desktop add dsh-subagent-default-model
 ```
 
-## Release / Publish
+## 发布（Release / Publish）
 
 发布到 npm registry：
 
@@ -59,7 +61,7 @@ npm publish      # files 字段已限定发布内容：lib/、cordis.patch.yml �
 ```
 
 > ⚠️ 发布前先跑一遍测试：`npm --prefix plugin test`。
-> `package.json` 的 `files` 字段已限定只发布 `lib/`、`cordis.patch.yml`、`LICENSE`、`README.md`、`CHANGELOG.md`，`test/` 和 `node_modules/` 不会进入发布包。
+> `package.json` 的 `files` 字段已限定只发布 `lib/`、`cordis.patch.yml`、`LICENSE`、`README.md`、`README.en.md`、`CHANGELOG.md`，`test/` 和 `node_modules/` 不会进入发布包。
 
 本地安装（DSH Desktop / desktop profile）：
 
@@ -74,17 +76,17 @@ npm install dsh-subagent-default-model
 - 本地开发用 `link:` 安装：`dsh plugin --profile desktop add /Users/dmh2002/DshProject/dsh-subagent-default-model/plugin`，node_modules 里是源码软链，改代码后**重启 DSH Desktop** 生效
 - 正式安装 / 他机安装使用 npm registry 版本（见上方 Install）
 
-## Configuration
+## 配置
 
-Add to `~/.dsh/settings.yaml`:
+在 `~/.dsh/settings.yaml` 中添加：
 
 ```yaml
-# Single model
+# 单模型
 subagent-default-model:
   provider: deepseek-official
   model: deepseek-v4-pro
 
-# Or multiple models
+# 或多模型
 subagent-default-model:
   provider: deepseek-official
   models:
@@ -92,7 +94,7 @@ subagent-default-model:
     - deepseek-v4-flash
   strategy: round-robin  # round-robin | random
 
-# With reasoning strength
+# 带推理强度
 subagent-default-model:
   provider: deepseek-official
   models:
@@ -104,24 +106,24 @@ subagent-default-model:
   strategy: round-robin  # round-robin | random
 ```
 
-| Field | Type | Default | Description |
+| 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `provider` | string | — | Provider for string-type model entries. |
-| `model` | string | — | Single model id (backward compatible). |
-| `models` | array | `[]` | List of model entries (string or `{provider, model, reasoningEffort?}` pair). |
-| `strategy` | string | `round-robin` | Selection strategy: `round-robin` or `random`. |
-| `reasoningEffort` | string | — | Optional reasoning strength for a model entry (e.g. `high`, `max`). |
+| `provider` | string | — | 字符串类型模型条目的 provider。 |
+| `model` | string | — | 单模型 id（向后兼容）。 |
+| `models` | array | `[]` | 模型条目列表（string 或 `{provider, model, reasoningEffort?}` 对）。 |
+| `strategy` | string | `round-robin` | 分配策略：`round-robin` 或 `random`。 |
+| `reasoningEffort` | string | — | 可选推理强度（如 `high`、`max`）。 |
 
-## How it works
+## 工作原理
 
 ```text
-Explicit agentOptions on the request
-  → subagent-default-model settings
-  → inherit parent session route
+请求携带显式 agentOptions
+  → subagent-default-model 设置
+  → 继承父会话路由
 ```
 
-The plugin wraps the host `ctx.subagents` service (`start` / `startContinuable`), so it covers every delegation path — built-in `subagent` / `subagent_fork` tools and any custom tool that calls the service without providing `agentOptions`.
+插件包装宿主 `ctx.subagents` 服务（`start` / `startContinuable`），覆盖所有派发路径 —— 内置的 `subagent` / `subagent_fork` 工具，以及任何调用该服务但未提供 `agentOptions` 的自定义工具。
 
-## License
+## 许可证
 
 [MIT](LICENSE)

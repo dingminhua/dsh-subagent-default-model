@@ -20,6 +20,7 @@
     "cordis.patch.yml",
     "LICENSE",
     "README.md",
+    "README.en.md",
     "CHANGELOG.md"
   ],
   "scripts": {
