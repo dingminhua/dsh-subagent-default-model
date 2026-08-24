@@ -12,6 +12,16 @@ When a subagent is created without an explicit `model`, this plugin injects the 
 - **Hot-reload** — settings changes apply to the very next delegation.
 - **Clean teardown** — Cordis disposal restores the original service methods.
 
+## Screenshots
+
+**Settings panel** (`Settings → General → Subagent default model`): configure one or more model routes with `round-robin` / `random` strategy and per-route reasoning effort.
+
+![Subagent default model settings panel](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_01.png)
+
+**Effect verification**: 10 subagents split 5/5 between `deepseek-v4-flash` and `Kimi-k3` (round-robin).
+
+![Subagent default model distribution](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_02.png)
+
 ## Install
 
 从 npm registry 安装：
