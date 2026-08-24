@@ -54,8 +54,8 @@ git push origin main --tags
 
 # 3. 发布到 npm
 cd plugin
-npm login        # 首次发布前登录一次
-npm publish
+npm login        # 首次发布前登录一次；账号若开启 2FA，publish 时需在浏览器确认一步
+npm publish      # files 字段已限定发布内容：lib/、cordis.patch.yml 等
 ```
 
 > ⚠️ 发布前先跑一遍测试：`npm --prefix plugin test`。
