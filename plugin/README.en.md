@@ -64,7 +64,7 @@ npm publish
 ```
 
 > ⚠️ Run the tests first: `npm --prefix plugin test`.
-> The `files` field in `package.json` limits publishing to `lib/`, `cordis.patch.yml`, `LICENSE`, `README.md`, `README.en.md`, `CHANGELOG.md` — `test/` and `node_modules/` are never packed.
+> The `files` field in `package.json` limits publishing to `lib/`, `icons/`, `cordis.patch.yml`, `LICENSE`, `README.md`, `README.en.md`, `CHANGELOG.md` — `test/` and `node_modules/` are never packed.
 
 Local install (DSH Desktop / desktop profile):
 

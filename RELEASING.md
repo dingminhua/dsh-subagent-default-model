@@ -56,7 +56,7 @@ cd plugin
 npm publish
 ```
 
-**打包内容**：`package.json` 的 `files` 字段已限定只发布 `lib/`、`cordis.patch.yml`、`LICENSE`、`README.md`、`README.en.md`、`CHANGELOG.md`，`test/` 和 `node_modules/` 不会进入发布包。
+**打包内容**：`package.json` 的 `files` 字段已限定只发布 `lib/`、`icons/`、`cordis.patch.yml`、`LICENSE`、`README.md`、`README.en.md`、`CHANGELOG.md`，`test/` 和 `node_modules/` 不会进入发布包。
 
 **发布前检查**（可选但推荐）：
 

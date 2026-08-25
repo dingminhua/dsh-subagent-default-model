@@ -64,7 +64,7 @@ npm publish
 ```
 
 > ⚠️ 发布前先跑一遍测试：`npm --prefix plugin test`。
-> `package.json` 的 `files` 字段已限定只发布 `lib/`、`cordis.patch.yml`、`LICENSE`、`README.md`、`README.en.md`、`CHANGELOG.md`，`test/` 和 `node_modules/` 不会进入发布包。
+> `package.json` 的 `files` 字段已限定只发布 `lib/`、`icons/`、`cordis.patch.yml`、`LICENSE`、`README.md`、`README.en.md`、`CHANGELOG.md`，`test/` 和 `node_modules/` 不会进入发布包。
 
 本地安装（DSH Desktop / desktop profile）：
 
