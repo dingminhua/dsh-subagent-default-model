@@ -11,7 +11,7 @@ window.__ModuleLoader__.load({
     var Toast = primitives.Toast;
 
     // ── CSS ──────────────────────────────────────────────────────────────
-    var SETTINGS_CSS = ".dsm-model-settings{display:flex;flex-direction:column;gap:14px;margin:20px 0;padding:14px 16px;background:var(--dsw-alias-bg-module-platform,var(--dsw-alias-bg-layer-1,#1c1d21));border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:12px}.dsm-model-settings-head{display:flex;flex-direction:column;gap:4px}.dsm-model-settings-title{font-size:14px;line-height:20px;font-weight:600;color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-model-settings-desc{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-list{display:flex;flex-direction:column;gap:8px}.dsm-model-settings-route{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;padding:8px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px}.dsm-model-settings-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-select{width:100%;height:32px;padding:0 28px 0 9px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font:inherit}.dsm-model-settings-select:focus{outline:2px solid var(--dsw-alias-state-business-primary,#5686fe);outline-offset:1px}.dsm-model-settings-remove{height:32px;min-width:32px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-remove:hover{color:var(--dsw-alias-state-error-primary,#ef4444);background:var(--dsw-alias-interactive-bg-hover-danger,rgba(242,90,90,.15))}.dsm-model-settings-options{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap}.dsm-model-settings-strategy{min-width:180px}.dsm-model-settings-actions{display:flex;align-items:center;gap:8px}.dsm-model-settings-status{font-size:12px;line-height:18px;color:var(--dsw-alias-state-success-primary,#22c55e)}.dsm-model-settings-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}";
+    var SETTINGS_CSS = ".dsm-model-settings{display:flex;flex-direction:column;gap:14px;margin:20px 0;padding:14px 16px;background:var(--dsw-alias-bg-module-platform,var(--dsw-alias-bg-layer-1,#1c1d21));border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:12px}.dsm-model-settings-head{display:flex;flex-direction:column;gap:4px}.dsm-model-settings-title{font-size:14px;line-height:20px;font-weight:600;color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-model-settings-desc{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-list{display:flex;flex-direction:column;gap:8px}.dsm-model-settings-route{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;padding:8px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px}.dsm-model-settings-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-select{width:100%;height:32px;padding:0 28px 0 9px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font:inherit}.dsm-model-settings-select:focus{outline:2px solid var(--dsw-alias-state-business-primary,#5686fe);outline-offset:1px}.dsm-model-settings-remove{height:32px;min-width:32px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-remove:hover{color:var(--dsw-alias-state-error-primary,#ef4444);background:var(--dsw-alias-interactive-bg-hover-danger,rgba(242,90,90,.15))}.dsm-model-settings-options{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap}.dsm-model-settings-strategy{min-width:180px}.dsm-model-settings-actions{display:flex;align-items:center;gap:8px}.dsm-model-settings-status{font-size:12px;line-height:18px;color:var(--dsw-alias-state-success-primary,#22c55e)}.dsm-plugin-card{border:1px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-3,#202126);border-radius:12px;list-style:none;transition:border-color .16s,background .16s}.dsm-plugin-card:hover{border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-open{background:var(--dsw-alias-bg-layer-2,#25262b);border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.dsm-plugin-card-header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:-2px}.dsm-plugin-card-head{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.dsm-plugin-card-title{color:var(--dsw-alias-label-primary,#e6e6e6);font-size:15px;font-weight:600;line-height:1.4}.dsm-plugin-card-description{color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5}.dsm-plugin-card-chevron{color:var(--dsw-alias-label-tertiary,#999);flex:none;transition:transform .16s}.dsm-plugin-card-chevron-open{transform:rotate(180deg)}.dsm-plugin-card-body{border-top:1px solid var(--dsw-alias-border-l2,#36373b);margin:0 16px;padding:0 0 8px}.dsm-plugin-card-body .dsm-model-settings{margin:0;padding:12px 0 0;background:transparent;border:0;border-radius:0}.dsm-plugin-card-body .dsm-model-settings-head{display:none}.dsm-model-settings-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}";
 
     if (typeof document !== "undefined") {
       var cssId = "dsh-subagent-default-model/client.css";
@@ -27,7 +27,7 @@ window.__ModuleLoader__.load({
     // ── locale ───────────────────────────────────────────────────────────
     var SUBAGENT_ROW_LOCALE = "settings.subagentModel";
     var SUBAGENT_ROW_ZH = {
-      "row.title": "子代理默认模型",
+      "row.title": "子代理默认模型（dsh-subagent-default-model）",
       "row.desc": "为 subagent / subagent_fork 选择一个或多个默认路由；清空后子代理继承父会话路由。",
       "row.provider": "Provider",
       "row.model": "Model",
@@ -47,7 +47,7 @@ window.__ModuleLoader__.load({
       "row.toastSaved": "子代理默认模型设置已保存。"
     };
     var SUBAGENT_ROW_EN = {
-      "row.title": "Subagent default model",
+      "row.title": "Subagent default model (dsh-subagent-default-model)",
       "row.desc": "Choose one or more default routes for subagent / subagent_fork; clear them to inherit the parent session route.",
       "row.provider": "Provider",
       "row.model": "Model",
@@ -327,6 +327,34 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // ── SubagentModelCard: collapsible card shell (default collapsed) ─────
+    function SubagentModelCard(props) {
+      var openState = React.useState(false);
+      var open = openState[0];
+      var setOpen = openState[1];
+      var t = props.t;
+      var title = t("row.title");
+      var description = t("row.desc");
+      return React.createElement("li", { className: "dsm-plugin-card" + (open ? " dsm-plugin-card-open" : "") },
+        React.createElement("button", {
+          type: "button",
+          className: "dsm-plugin-card-header",
+          "aria-expanded": open,
+          "aria-label": title,
+          onClick: function () { setOpen(!open); }
+        },
+          React.createElement("span", { className: "dsm-plugin-card-head" },
+            React.createElement("span", { className: "dsm-plugin-card-title" }, title),
+            React.createElement("span", { className: "dsm-plugin-card-description" }, description)
+          ),
+          React.createElement("span", { className: "dsm-plugin-card-chevron" + (open ? " dsm-plugin-card-chevron-open" : "") }, "\u25be")
+        ),
+        React.createElement("div", { className: "dsm-plugin-card-body", hidden: !open },
+          React.createElement(SubagentModelRow, props)
+        )
+      );
+    }
+
     // ── apply: inject settings row ───────────────────────────────────────
     var inject = ["sessions", "connection", "slots", "locale", "settingsScope", "remote"];
 
@@ -353,14 +381,13 @@ window.__ModuleLoader__.load({
         };
       };
 
-      ctx.slots.inject("settings.general.item", function () {
+      ctx.slots.inject("settings.plugin.item", function () {
         return ctx.slots.register({
-          name: "settings.general.item",
-          id: "subagent-model",
-          order: 5,
+          name: "settings.plugin.item",
+          key: "subagent-default-model",
           locale: SUBAGENT_ROW_LOCALE,
           inject: subagentRowInjected
-        }, SubagentModelRow);
+        }, SubagentModelCard);
       });
     }
 

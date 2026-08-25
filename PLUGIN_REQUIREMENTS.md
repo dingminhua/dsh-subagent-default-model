@@ -64,15 +64,15 @@ var inject = ["sessions", "connection", "slots", "locale", "settingsScope", "rem
 // ^ 此数组中的 connection、slots 是白名单问题的关键
 ```
 
-### 设置行注册模式：
+### 设置卡片注册模式：
 ```js
-ctx.slots.inject("settings.general.item", function() {
+ctx.slots.inject("settings.plugin.item", function() {
   return ctx.slots.register({
-    name: "settings.general.item",
-    id: "唯一-id",
-    order: 5
+    name: "settings.plugin.item",
+    key: "subagent-default-model",
+    locale: "settings.subagentModel"
     // ...
-  }, SubagentModelRow);
+  }, SubagentModelCard);
 });
 ```
 

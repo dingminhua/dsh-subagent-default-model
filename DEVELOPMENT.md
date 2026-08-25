@@ -52,6 +52,6 @@ node prove.mjs             # Cordis traceable-proxy 回归测试
 ## 验证清单（修改后）
 
 1. 重启 DSH Desktop
-2. 打开 **设置 → 通用设置 → 子代理默认模型**，确认设置行出现
+2. 打开 **设置 → 插件配置 → 子代理默认模型**，确认设置行出现
 3. 保存后确认 `~/.dsh/settings.yaml` 的 `subagent-default-model` 段更新
 4. 创建一个不带显式 `agentOptions` 的子代理，确认其路由到配置的默认模型

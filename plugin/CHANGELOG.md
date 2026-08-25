@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 (2026-08-24)
+
+### Changed
+
+- **设置面板迁移到「插件配置」**: 设置行从 `settings.general.item`（通用设置）迁移到 `settings.plugin.item`（插件配置），key 为 `subagent-default-model`。新增 `SubagentModelCard` 折叠卡片外壳，默认收起、点击展开，样式与其它可配置插件一致；卡片标题带插件名括号（如「子代理默认模型（dsh-subagent-default-model）」）。
+- 文档同步：`README.md`、`plugin/README.md`、`PLUGIN_REQUIREMENTS.md`、`DEVELOPMENT.md` 中的「设置 → 通用设置 → 子代理默认模型」更新为「设置 → 插件配置 → 子代理默认模型」。
+
 ## 0.3.1 (2026-08-24)
 
 ### Docs
@@ -30,7 +37,7 @@
 
 ### Features
 
-- Web 设置面板（通用设置 → 子代理默认模型）
+- Web 设置面板（插件配置 → 子代理默认模型）
 - 保存成功 Toast 通知
 
 ## 0.1.0 (2026-08-16)

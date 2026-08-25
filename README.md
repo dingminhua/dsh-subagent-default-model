@@ -26,7 +26,7 @@
 
 ## 截图
 
-**设置面板**（`设置 → 通用设置 → 子代理默认模型`）：配置一个或多个模型路由，支持 `round-robin` / `random` 分配策略与每路由推理强度。
+**设置面板**（`设置 → 插件配置 → 子代理默认模型`）：配置一个或多个模型路由，支持 `round-robin` / `random` 分配策略与每路由推理强度。
 
 ![子代理默认模型设置面板](assets/pic_01.png)
 
@@ -80,7 +80,7 @@ dsh plugin --profile desktop add /绝对路径/dsh-subagent-default-model/plugin
 
 ## Web 设置
 
-本插件自带 Web 设置行：**设置 → 通用设置 → 子代理默认模型** 由 `plugin/lib/client.js`（浏览器半边）渲染，宿主半边在 `plugin/lib/index.js` 注册 `subagent-default-model` 设置段并包装 `ctx.subagents` 服务。设置行与后端共用同一个 `subagent-default-model` 段，二者不再由两个独立包分别维护。
+本插件自带 Web 设置卡片：**设置 → 插件配置 → 子代理默认模型** 由 `plugin/lib/client.js`（浏览器半边）渲染，宿主半边在 `plugin/lib/index.js` 注册 `subagent-default-model` 设置段并包装 `ctx.subagents` 服务。设置行与后端共用同一个 `subagent-default-model` 段，二者不再由两个独立包分别维护。
 
 该行支持：
 
@@ -91,22 +91,23 @@ dsh plugin --profile desktop add /绝对路径/dsh-subagent-default-model/plugin
 
 它保存的值使用上文所述的同一 `subagent-default-model` 段。它会保留该段中无关的字段，且不会仅仅因为打开过设置面板就弄丢已有的模型列表。
 
-> 历史说明：此设置行最初由本地 fork `vendor/dsh-subagent-max` 提供，其代码（仅 `lib/client.js` 里 `SubagentModelRow` 及配套 locale/CSS，约 380 行）已提取进本插件的 `plugin/lib/client.js`，fork 本身已不再作为依赖加载
+> 历史说明：此设置卡片最初由本地 fork `vendor/dsh-subagent-max` 提供，其代码（仅 `lib/client.js` 里 `SubagentModelRow` 及配套 locale/CSS，约 380 行）已提取进本插件的 `plugin/lib/client.js`，fork 本身已不再作为依赖加载
 
 ### 将设置段暴露给 Web 配置客户端（当前版本已无需 patch）
 
 > **历史说明**：旧版 DSH（0.1.0-rc.6 时代）的 Host API 代理（`@deepseek-ai/dsh-host-apiproxy`）对 `settings.describe` / `settings.mutate` 做 `WEB_SETTINGS_NAMESPACES` 白名单过滤，插件自己 `settings.register()` 的 namespace 默认不会被暴露，需要手动修改 apiproxy 源码添加 namespace。该机制在 DSH **0.1.1-rc.2 已移除**：`settings.describe` 直接返回全部已注册 namespace（`settings.describe({ redactSecrets: true }).map(namespaceView)`），**无需任何 patch**。若未来版本重新引入白名单，再按上述方式处理。
 
-### 设置行的持久化与渲染行为
+### 设置卡片的持久化与渲染行为
 
-本插件的设置行（`plugin/lib/client.js`）自带以下行为：
+本插件的设置卡片（`plugin/lib/client.js`，注册到 `settings.plugin.item` 插槽，key 为 `subagent-default-model`）自带以下行为：
 
+- 卡片默认**收起**，点击标题展开/折叠，样式与其它可配置插件（如「模型代理」）一致。
 - 当 scope 快照缺失可选的 `writable` 字段时，保存按钮不再被永久禁用——只有显式为 `writable === false` 时才禁用。
 - 保存通过公开的 `scope.set()` 接缝按顺序写入 `provider`、`model`、`models`、`strategy`（兼容设置 provider 的 revision/变更队列），随后重读快照并逐字段比对；不一致会报告真实失败，而非假装成功。
 - 打开/保存过程中保留该段中无关的字段。
-- 行卡片加了一点垂直外边距（`margin: 20px 0`），避免与通用设置里相邻的扁平行贴在一起。
+- 卡片间距由「插件配置」页面的卡片列表统一控制，无需额外外边距。
 
-`subagent-model` 行只有一个 owner（本插件自身），不要在其他 bundle 里重复注册同名行，否则设置面板会渲染出重复控件。
+`subagent-default-model` 卡片只有一个 owner（本插件自身），不要在其他 bundle 里重复注册同名 key，否则插件配置列表会渲染出重复卡片。
 
 ### 接线本地 desktop profile
 
@@ -118,9 +119,9 @@ dsh plugin --profile desktop add /绝对路径/dsh-subagent-default-model/plugin
 
 修改插件源码后（`link:` 软链即时同步），**重启 DSH Desktop** 使 bundle 层重新组合；浏览器硬刷新（`Cmd/Ctrl + Shift + R`）以加载新的 client bundle。
 
-### 让 DSH 发现本插件的 Web 设置行（两个必填点）
+### 让 DSH 发现本插件的 Web 设置卡片（两个必填点）
 
-DSH 的 `dsh-client-modules` 在启动时扫描加载器里所有声明了 `dsh.client` 的 bundle，并对每个包调用 `require.resolve("<pkg>/package.json")` 定位其 `package.json`。以下两点任一缺失都会导致设置行加载失败（表现为 404 或启动报 `failed to apply loader entry ... cannot get property "connection" without inject`）：
+DSH 的 `dsh-client-modules` 在启动时扫描加载器里所有声明了 `dsh.client` 的 bundle，并对每个包调用 `require.resolve("<pkg>/package.json")` 定位其 `package.json`。以下两点任一缺失都会导致设置卡片加载失败（表现为 404 或启动报 `failed to apply loader entry ... cannot get property "connection" without inject`）：
 
 1. **`package.json` 的 `exports` 必须暴露 `./package.json` 子路径**——否则 `dsh-client-modules` 解析包位置失败，整条 client 扫描跳过本插件：
 
@@ -133,7 +134,7 @@ DSH 的 `dsh-client-modules` 在启动时扫描加载器里所有声明了 `dsh.
    }
    ```
 
-2. **`plugin/lib/client.js` 的 `inject` 数组必须包含 `connection` 与 `slots`**——设置行在 `apply(ctx)` 里用到 `ctx.connection.api`（拉模型目录）和 `ctx.slots.inject`（注册设置行），二者缺一不可：
+2. **`plugin/lib/client.js` 的 `inject` 数组必须包含 `connection` 与 `slots`**——设置卡片在 `apply(ctx)` 里用到 `ctx.connection.api`（拉模型目录）和 `ctx.slots.inject`（注册设置卡片），二者缺一不可：
 
    ```js
    var inject = ["sessions", "connection", "slots", "locale", "settingsScope", "remote"];
@@ -201,7 +202,7 @@ dsh plugin --profile desktop add dsh-subagent-default-model
 
 ### 保存按钮灰色无法点击
 
-设置行的保存按钮要求「Provider 和 Model 都已选择」。如果有任何一条路由缺少其中一项，按钮保持禁用。填全后即可保存。
+设置卡片的保存按钮要求「Provider 和 Model 都已选择」。如果有任何一条路由缺少其中一项，按钮保持禁用。填全后即可保存。
 
 ### 保存后设置不生效
 
@@ -241,7 +242,7 @@ subagent-default-model:
 
 ## 端到端验证
 
-0. 在 Web UI 中验证设置行确实落盘：打开 **设置 → 通用设置 → 子代理默认模型**，改动一个路由或策略，保存，确认 `~/.dsh/settings.yaml` 中的 `subagent-default-model` 与之一致，然后关闭并重新打开面板，确认选择被保留。这个「保存 → YAML 更新 → 重开仍保留」的流程已在运行中的 DSH web 进程上实测通过。多模型轮换也已实测：配置 `[deepseek-v4-flash, aixforge/glm-5.2]` + `round-robin` 后，连续 3 个子代理实际路由为 `flash → glm-5.2 → flash`，与配置严格一致。
+0. 在 Web UI 中验证设置卡片确实落盘：打开 **设置 → 插件配置 → 子代理默认模型**，改动一个路由或策略，保存，确认 `~/.dsh/settings.yaml` 中的 `subagent-default-model` 与之一致，然后关闭并重新打开面板，确认选择被保留。这个「保存 → YAML 更新 → 重开仍保留」的流程已在运行中的 DSH web 进程上实测通过。多模型轮换也已实测：配置 `[deepseek-v4-flash, aixforge/glm-5.2]` + `round-robin` 后，连续 3 个子代理实际路由为 `flash → glm-5.2 → flash`，与配置严格一致。
 
 > **故障排查：`An assistant message with 'tool_calls' must be followed by tool messages ...`**
 >

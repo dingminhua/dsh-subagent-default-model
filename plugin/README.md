@@ -16,7 +16,7 @@
 
 ## 截图
 
-**设置面板**（`设置 → 通用设置 → 子代理默认模型`）：配置一个或多个模型路由，支持 `round-robin` / `random` 分配策略与每路由推理强度。
+**设置面板**（`设置 → 插件配置 → 子代理默认模型`）：配置一个或多个模型路由，支持 `round-robin` / `random` 分配策略与每路由推理强度。
 
 ![子代理默认模型设置面板](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_01.png)
 
