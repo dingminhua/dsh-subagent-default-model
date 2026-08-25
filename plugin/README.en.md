@@ -16,7 +16,7 @@ When a subagent is created without an explicit `model`, this plugin injects the 
 
 ## Screenshots
 
-**Settings panel** (`Settings → General → Subagent default model`): configure one or more model routes with `round-robin` / `random` strategy and per-route reasoning effort.
+**Settings panel** (`Settings → Plugins → Plugin configuration → Subagent default model`): configure one or more model routes with `round-robin` / `random` strategy and per-route reasoning effort.
 
 ![Subagent default model settings panel](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_01.png)
 
