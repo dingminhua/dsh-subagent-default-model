@@ -27,6 +27,7 @@
   },
   "type": "module",
   "main": "lib/index.js",
+  "icon": "icons/ldvh-plugin-icon-128.png",
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
@@ -35,6 +36,7 @@
   },
   "files": [
     "lib",
+    "icons",
     "cordis.patch.yml",
     "LICENSE",
     "README.md",
