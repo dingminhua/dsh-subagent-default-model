@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.4 (2026-08-26)
+
+### Changed
+
+- **设置卡片 UI 对齐内置插件**: 「子代理默认模型」卡片底部新增「放弃修改」按钮，与「保存」一起放入带顶边框的 footer；按钮样式精确复刻 DSH 内置设置卡片（描边「放弃修改」+ 实心「保存」、`border-radius:8px`、`padding:5px 14px`、禁用 `opacity:.4`）
+- **添加模型按钮** 改为与内置一致描边样式
+- **分配策略单行**: 「分配策略」标签改用纯文本 + `white-space:nowrap`，与下拉框（`max-width:150px`）同排一行
+- **下拉框收窄**: 所有设置下拉与路由输入框 `max-width:220px`（策略行 `150px`），不再撑满整行
+- 移除渲染中不再使用的内置 `Button` 引用
+
+### Docs
+
+- 同步 `README.md`、`README.en.md`、`RELEASING.md` 中发布包 `files` 说明（加入 `icons/`）
+
 ## 0.3.3 (2026-08-26)
 
 ### Features
