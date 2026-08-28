@@ -148,4 +148,6 @@ dsh plugin --profile desktop remove dsh-subagent-default-model
 
 ## 许可证
 
-[MIT](LICENSE)
+本项目采用 [MIT 许可证](LICENSE) 开源发布，版权归属：**Copyright (c) 2026 LaoDing**。
+
+MIT 许可证授予任何人免费处理本软件（包括使用、复制、修改、合并、发布、分发、再许可及出售副本）的权利，前提是所有副本或实质性部分均保留上述版权声明与本许可声明；软件按“原样”提供，不附带任何明示或暗示的担保。完整条款见 [LICENSE](LICENSE)。

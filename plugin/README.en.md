@@ -129,4 +129,6 @@ The plugin wraps the host `ctx.subagents` service (`start` / `startContinuable`)
 
 ## License
 
-[MIT](LICENSE)
+This project is open-sourced under the [MIT License](LICENSE), copyright (c) 2026 LaoDing.
+
+The MIT License grants anyone the freedom to deal in the Software without restriction, including using, copying, modifying, merging, publishing, distributing, sublicensing, and/or selling copies, provided that all copies or substantial portions retain the above copyright notice and this permission notice; the Software is provided "AS IS", without warranty of any kind. See [LICENSE](LICENSE) for the full text.
