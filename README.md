@@ -29,6 +29,7 @@
 
 - **单模型默认路由**：所有未显式选模型的子代理使用同一条配置路由。
 - **多模型调度**：通过 `round-robin` 或 `random` 在多个 provider/model 路由间分配。
+- **连接失败自动切换**：子代理的模型请求遇到限流/配额/服务端错误时，自动在 `models` 列表内按队列或随机切换模型重试，主代理循环不受影响。
 - **逐路由推理强度**：每个模型条目可独立配置 `reasoningEffort`。
 - **完整覆盖派发入口**：同时包装 `start()` 与 `startContinuable()`，覆盖 `subagent`、`subagent_fork` 以及其他调用 `ctx.subagents` 的发起方。
 - **设置热更新**：编辑设置后，下一次派发立即采用新配置。
@@ -104,12 +105,35 @@ subagent-default-model:
   strategy: round-robin # round-robin | random
 ```
 
+### 子代理连接失败自动切换（默认开启）
+
+当子代理（subagent）自身的循环遇到连接类失败时，插件会自动在 `models` 列表内切换模型并按 `strategy` 规则重试——**仅对 subagent 生效，主代理循环不受影响**。
+
+- **触发码**：命中以下任一错误码才切换——`RATE_LIMIT`、`QUOTA`、`SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE`。认证错误（如 `AUTH`）不会触发切换。
+- **队列**：`round-robin` 策略下按列表顺序切到下一个模型。
+- **随机**：`random` 策略下随机挑一个模型（不判断之前是否用过）。
+- **需要 ≥ 2 个模型**：`models` 少于 2 项时本功能不生效。
+- **耗尽即放行**：列表内全部模型轮试失败后放行真实错误，不做无限重试。
+- **切换时丢弃继承的 `reasoningEffort`**：换到新 provider/model 后按默认推理强度请求，避免把主模型强度强加给不支持它的 provider。
+- **Run 内粘性**：同一子代理 run 的后续 step 保持在切换后的模型上。
+- 该行为由 `failoverEnabled` 开关控制，默认 `true`：
+
+```yaml
+subagent-default-model:
+  provider: deepseek-official
+  models:
+    - deepseek-v4-pro
+    - deepseek-v4-flash
+  failoverEnabled: true # 连接失败时按队列与策略切换模型
+```
+
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `provider` | string | — | 字符串模型条目共用的 provider。 |
 | `model` | string | — | 单模型 ID，保留用于向后兼容。 |
 | `models` | array | `[]` | 字符串或 `{ provider, model, reasoningEffort? }` 条目列表。 |
 | `strategy` | string | `round-robin` | 多模型分配策略。 |
+| `failoverEnabled` | boolean | `true` | 连接失败时在 `models` 列表内按队列与策略切换模型（仅 subagent）。 |
 | `reasoningEffort` | string | — | 可选的逐路由推理强度。 |
 
 ## 市场收录与展示

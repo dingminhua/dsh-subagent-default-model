@@ -10,6 +10,7 @@
 
 - **单模型** —— 所有子代理运行在同一个配置模型上。
 - **多模型** —— `models` 列表配合 `round-robin` / `random` 策略，让并行子代理分散到多个模型。
+- **连接失败自动切换** —— 子代理遇到连接类失败时，在 `models` 列表内按 `strategy` 自动切换模型重试（仅 subagent，主代理不受影响）。
 - **推理强度** —— 可为每个模型条目指定 `reasoningEffort`（如 `high`、`medium`、`low`）；Web 界面从模型目录加载可用的强度。
 - **热重载** —— 设置变更立即作用于下一次派发。
 - **干净卸载** —— Cordis 销毁时还原原始服务方法。
@@ -115,7 +116,22 @@ subagent-default-model:
 | `model` | string | — | 单模型 id（向后兼容）。 |
 | `models` | array | `[]` | 模型条目列表（string 或 `{provider, model, reasoningEffort?}` 对）。 |
 | `strategy` | string | `round-robin` | 分配策略：`round-robin` 或 `random`。 |
+| `failoverEnabled` | boolean | `true` | 子代理连接失败时在 `models` 列表内按队列与策略切换模型（仅 subagent）。 |
 | `reasoningEffort` | string | — | 可选推理强度（如 `high`、`max`）。 |
+
+## 子代理连接失败自动切换
+
+开启 `failoverEnabled`（默认开启）后，子代理自身的循环遇到连接类失败时，插件会在 `models` 列表内按 `strategy` 自动切换模型并重试：
+
+- **连接类失败** —— 命中以下任一错误码才切换：`RATE_LIMIT`、`QUOTA`、`SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE`。认证错误（如 `AUTH`）等非连接类失败**不会**触发切换。
+- `round-robin`：按列表顺序切到下一个模型（队列）。
+- `random`：随机挑一个模型（不判断之前是否用过）。
+- **需要 ≥ 2 个模型** —— 当 `models` 少于 2 项时本功能不生效。
+- **耗尽即放行** —— 列表内全部模型轮试失败后，放行真实错误，不做无限重试。
+- **切换时丢弃继承的 `reasoningEffort`** —— 换到新 provider/model 后按默认推理强度请求，避免把主模型的强度强加给不支持它的 provider。
+- **Run 内粘性** —— 同一子代理 run 的后续 step 保持在切换后的模型上。
+
+该机制基于官方 `agent/request-error` + `agent/request` 瀑布，且**仅对 subagent 生效**——主代理循环不会被切换。
 
 ## 工作原理
 

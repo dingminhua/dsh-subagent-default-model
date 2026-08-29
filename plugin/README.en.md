@@ -10,6 +10,7 @@ When a subagent is created without an explicit `model`, this plugin injects the 
 
 - **Single model** — all subagents run on one configured model.
 - **Multi-model** — a `models` list with `round-robin` or `random` strategy spreads parallel subagents across models.
+- **Connection-failure failover** — when a subagent hits a connection-class failure, switch to another model in the `models` list by `strategy` and retry (subagents only; the main agent is never touched).
 - **Reasoning strength** — optionally specify `reasoningEffort` per model entry (e.g. `high`, `medium`, `low`); the Web UI loads available efforts from the model catalog.
 - **Hot-reload** — settings changes apply to the very next delegation.
 - **Clean teardown** — Cordis disposal restores the original service methods.
@@ -115,7 +116,22 @@ subagent-default-model:
 | `model` | string | — | Single model id (backward compatible). |
 | `models` | array | `[]` | List of model entries (string or `{provider, model, reasoningEffort?}` pair). |
 | `strategy` | string | `round-robin` | Selection strategy: `round-robin` or `random`. |
+| `failoverEnabled` | boolean | `true` | Switch models by queue and strategy inside the `models` list when a subagent hits a connection failure (subagents only). |
 | `reasoningEffort` | string | — | Optional reasoning strength for a model entry (e.g. `high`, `max`). |
+
+## Subagent connection-failure failover
+
+With `failoverEnabled` on (the default), when a subagent's own loop hits a connection-class failure, the plugin automatically switches models inside the `models` list and retries, following `strategy`:
+
+- **Connection-class failures** — the switch triggers only on these error codes: `RATE_LIMIT`, `QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`. Non-connection failures (e.g. `AUTH`) do **not** trigger a switch.
+- `round-robin`: advance to the next model in the list (the queue).
+- `random`: pick any model (without checking whether it was used before).
+- **Needs ≥ 2 models** — with fewer than 2 entries in `models`, the feature is inactive.
+- **Exhaustion passes through** — once every pool entry has been tried and failed, the real error is let through; no infinite retries.
+- **Inherited `reasoningEffort` is dropped on switch** — the new provider/model is requested at the default reasoning strength instead of forcing the primary's strength onto a provider that may not support it.
+- **Sticky within a run** — subsequent steps of the same subagent run stay on the switched model.
+
+It builds on the official `agent/request-error` + `agent/request` waterfalls and applies **only to subagents** — the main agent loop is never switched.
 
 ## How it works
 

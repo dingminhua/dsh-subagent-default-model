@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.0 (2026-08-29)
+
+### Features
+
+- **子代理连接失败自动切换（failover）**: 新增 `failoverEnabled` 复选框（默认勾选），子代理的模型请求遇到限流（RATE_LIMIT）、配额（QUOTA）、服务端/传输错误、空响应时，自动在 `models` 列表内按 `strategy`（轮换/随机）切换模型重试——**仅对 subagent 生效**，主代理循环不受影响。基于官方 `agent/request-error` + `agent/request` 瀑布，与社区的 `dsh-llm-fallback` / `dsh-model-failover` 插件同机制。
+- **设置卡片新增复选框**: 设置面板「子代理默认模型」卡片的分配策略下方新增「连接失败时按队列与策略切换模型」复选框，默认勾选，保存后生效。
+
+### Docs
+
+- README 新增「子代理连接失败自动切换」章节，含配置示例与字段说明表。
+
 ## 0.3.5 (2026-08-28)
 
 ### Added
