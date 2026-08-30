@@ -1,6 +1,6 @@
 {
   "name": "dsh-subagent-default-model",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Configure default model routes for DeepSeek Harness subagents, with single-model, round-robin, random, and per-route reasoning-effort options.",
   "keywords": [
     "deepseek-harness",
@@ -44,7 +44,9 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "mock": "node scripts/mock-llm-server.mjs",
+    "simulate": "node scripts/simulate-retry.mjs"
   },
   "dsh": {
     "bundle": {

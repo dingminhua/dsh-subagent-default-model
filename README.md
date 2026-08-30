@@ -116,6 +116,7 @@ subagent-default-model:
 - **耗尽即放行**：列表内全部模型轮试失败后放行真实错误，不做无限重试。
 - **切换时丢弃继承的 `reasoningEffort`**：换到新 provider/model 后按默认推理强度请求，避免把主模型强度强加给不支持它的 provider。
 - **Run 内粘性**：同一子代理 run 的后续 step 保持在切换后的模型上。
+- **轨迹视图可见**：每次请求用的 provider/model 会显示在子代理的**轨迹视图**里——换模型（含 failover 切换）后自动多出一行「子代理模型：`provider/model`」，方便确认重试/切换时用的到底是哪个模型。
 - 该行为由 `failoverEnabled` 开关控制，默认 `true`：
 
 ```yaml
