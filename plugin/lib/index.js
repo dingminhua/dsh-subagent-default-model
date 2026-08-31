@@ -38,7 +38,9 @@ import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-sett
  */
 
 export const name = "dsh-subagent-default-model";
-export const inject = ["subagents"];
+// Do not hard-inject `subagents` at the plugin root: DSH 0.1.2 may mount that
+// service after this row. The settings section must become available
+// independently; `apply()` attaches the service wrapper through `ctx.inject()`.
 
 /** Settings namespace: default model route for subagent runs without an explicit `agentOptions`. */
 const SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE = settingsNamespace("subagent-default-model");
@@ -246,29 +248,7 @@ function installFailover(ctx, state) {
 	}, "dsh-subagent-default-model: failover listeners");
 }
 
-export function apply(ctx) {
-	const state = {
-		settingsSource: void 0,
-		rrCursor: 0
-	};
-
-	// The settings seam owns its own injected lifecycle and provides a live
-	// source thunk. Register it unconditionally so the web settings row
-	// (`subagent-default-model` namespace) is available even when the host
-	// `subagents` service is not yet mounted or a previous fiber already wrapped
-	// it — the service-method guard below must never gate settings registration.
-	installSettingsSection(ctx, SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA, {}, {
-		setSource: (current) => {
-			state.settingsSource = current;
-		},
-		onChange: () => {}
-	});
-
-	// Subagent-only failover hooks the agent loop, not the subagents service,
-	// so it is installed unconditionally: listeners no-op when the `failover`
-	// section is absent/disabled or when the failing agent is the main loop.
-	installFailover(ctx, state);
-
+function installSubagentWrapper(ctx, state) {
 	// `ctx.subagents` is a per-call Cordis traceable proxy, so reach the raw
 	// service object behind it for a stable handle and to install own methods.
 	const raw = ctx.subagents?.[Symbol.for("cordis.original")] ?? ctx.subagents;
@@ -300,6 +280,38 @@ export function apply(ctx) {
 		if (wrappedStart !== void 0 && raw.start === wrappedStart) raw.start = originalStart;
 		if (wrappedStartContinuable !== void 0 && raw.startContinuable === wrappedStartContinuable) raw.startContinuable = originalStartContinuable;
 		if (raw[WRAPPED] === state) delete raw[WRAPPED];
+	});
+}
+
+export function apply(ctx) {
+	const state = {
+		settingsSource: void 0,
+		rrCursor: 0
+	};
+
+	// Register settings independently from the `subagents` service lifecycle.
+	// DSH 0.1.2 can mount that service later or in a different service wave; a
+	// root-level hard inject would otherwise keep this whole plugin waiting and
+	// hide its settings card even though the Client half is already registered.
+	installSettingsSection(ctx, SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA, {}, {
+		setSource: (current) => {
+			state.settingsSource = current;
+		},
+		onChange: () => {}
+	});
+
+	// Subagent-only failover hooks the agent loop, not the subagents service,
+	// so it is installed unconditionally: listeners no-op when the `failover`
+	// section is absent/disabled or when the failing agent is the main loop.
+	installFailover(ctx, state);
+
+	// Attach the method wrapper only while the service exists. Cordis re-runs
+	// this child fiber if the provider is replaced, while settings stay served.
+	ctx.inject(["subagents"], (subagentCtx) => {
+		installSubagentWrapper(subagentCtx, state);
+	});
+
+	ctx.effect(() => () => {
 		state.settingsSource = void 0;
 		state.rrCursor = 0;
 	});
