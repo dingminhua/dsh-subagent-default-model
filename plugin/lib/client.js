@@ -408,10 +408,20 @@ window.__ModuleLoader__.load({
     }
 
     // ── apply: inject settings row ───────────────────────────────────────
-    var inject = ["sessions", "connection", "slots", "locale", "settingsScope", "remote", "uiConversation"];
+    var inject = ["slots", "locale", "settingsScope", "remote", "remote.session", "uiConversation"];
 
     function apply(ctx) {
-      var api = ctx.connection.api;
+      // The old `connection.api.llm.models()` seat no longer exists. Resolve
+      // the current model-catalog remote defensively so a missing/changed seat
+      // degrades to an empty selector instead of crashing the Plugins tab.
+      var sessionRemote = typeof ctx.get === "function" ? ctx.get("remote.session") : undefined;
+      var loadCatalog = function () {
+        if (!sessionRemote || typeof sessionRemote.modelCatalog !== "function") return Promise.resolve([]);
+        return sessionRemote.modelCatalog().then(function (response) {
+          if (!response || !response.ok) return [];
+          return (response.value && response.value.groups) || [];
+        }).catch(function () { return []; });
+      };
 
       // Register locale for this component
       ctx.locale.register(SUBAGENT_ROW_LOCALE, "zh", SUBAGENT_ROW_ZH);
@@ -516,12 +526,7 @@ window.__ModuleLoader__.load({
       var subagentRowInjected = function () {
         return {
           settingsScope: subagentScope,
-          loadCatalog: function () {
-            return api.llm.models({}).then(function (r) {
-              if (!r.result.ok) throw new Error("llm.models failed: " + r.result.error.code);
-              return r.result.value.groups || [];
-            });
-          },
+          loadCatalog: loadCatalog,
           write: function (value) {
             return persistDefaultModels(subagentScope, value);
           }
