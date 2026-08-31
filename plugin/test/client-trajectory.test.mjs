@@ -34,14 +34,23 @@ function factoryRequire(id) {
 
 function makeCtx(overrides = {}) {
 	const registrations = [];
+	const slotRegistrations = [];
 	const dictionaries = {};
 	const t =
 		overrides.t ??
 		function (key) {
 			return (dictionaries.zh ?? {})[key] ?? key;
 		};
+	const remoteSession = overrides.remoteSession ?? {
+		async modelCatalog() {
+			return { ok: true, value: { groups: [{ id: "mock", models: [{ id: "deepseek-v4-pro" }] }] } };
+		}
+	};
 	const ctx = {
-		connection: { api: {} },
+		get(name) {
+			if (name === "remote.session") return remoteSession;
+			return undefined;
+		},
 		locale: {
 			register(ns, lang, dict) {
 				dictionaries[lang] = { ...(dictionaries[lang] ?? {}), ...dict };
@@ -59,7 +68,12 @@ function makeCtx(overrides = {}) {
 			}
 		},
 		slots: {
-			inject() {}
+			inject(name, callback) {
+				slotRegistrations.push({ name, value: callback() });
+			},
+			register(options, component) {
+				return { options, component };
+			}
 		},
 		uiConversation: {
 			events: {
@@ -70,7 +84,7 @@ function makeCtx(overrides = {}) {
 		},
 		...overrides.ctx
 	};
-	return { ctx, registrations, dictionaries };
+	return { ctx, registrations, slotRegistrations, dictionaries, remoteSession };
 }
 
 function trajectoryDefinition() {
@@ -90,6 +104,20 @@ function chatDefinition() {
 	assert.ok(definition, "expected a chat-subagent-model definition to be registered");
 	return definition;
 }
+
+test("client registers the subagent-default-model settings card and loads the model catalog", async () => {
+	const { ctx, slotRegistrations } = makeCtx();
+	const { apply, inject } = capturedModule.factory(factoryRequire);
+	assert.deepEqual(Array.from(inject), ["slots", "locale", "settingsScope", "remote", "remote.session", "uiConversation"]);
+	apply(ctx);
+	assert.equal(slotRegistrations.length, 1);
+	assert.equal(slotRegistrations[0].name, "settings.plugin.item");
+	assert.equal(slotRegistrations[0].value.options.key, "subagent-default-model");
+	const props = slotRegistrations[0].value.options.inject();
+	const groups = await props.loadCatalog();
+	assert.equal(groups.length, 1);
+	assert.equal(groups[0].id, "mock");
+});
 
 test("client registers a trajectory-subagent-model definition", () => {
 	const definition = trajectoryDefinition();
