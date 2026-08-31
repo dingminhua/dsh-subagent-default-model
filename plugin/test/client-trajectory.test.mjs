@@ -53,6 +53,9 @@ function makeCtx(overrides = {}) {
 		settingsScope: {
 			bind() {
 				return { get: async () => ({}), set: async () => {} };
+			},
+			describe() {
+				return { load: async () => {} };
 			}
 		},
 		slots: {

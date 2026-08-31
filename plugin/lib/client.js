@@ -536,6 +536,12 @@ window.__ModuleLoader__.load({
           inject: subagentRowInjected
         }, SubagentModelCard);
       });
+
+      // The Plugins tab renders the intersection of registered cards and the
+      // Host settings namespace directory. Community Host plugins can finish
+      // registration after the core mirror's first read; force one fresh read
+      // after claiming our card so `subagent-default-model` becomes active.
+      ctx.settingsScope.describe().load();
     }
 
     return { apply: apply, inject: inject };
