@@ -7,7 +7,7 @@
 //
 // Purpose: point a custom DSH provider at this server, configure the plugin
 // with two routes, and watch failover switch the subagent from the failing
-// model to the working one (a "子代理模型" row appears in the trajectory).
+// model to the working one (a "当前供应商/模型" row appears in the trajectory).
 //
 // Usage:
 //   node plugin/scripts/mock-llm-server.mjs [port]

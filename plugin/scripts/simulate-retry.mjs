@@ -1,4 +1,4 @@
-// End-to-end retry simulation for the failover "Subagent model" trajectory row.
+// End-to-end retry simulation for the failover "Current provider/model" row.
 //
 // Drives the REAL plugin host code: a subagent request hits a connection-class
 // error (RATE_LIMIT) → failover returns {kind:"retry"} and switches to the next
@@ -106,8 +106,8 @@ function loadClientDefinitions() {
 	});
 	const registrations = [];
 	const zh = {
-		"row.trajectoryModel": "子代理模型",
-		"row.chatModelInitial": "子代理模型",
+		"row.trajectoryModel": "当前供应商/模型",
+		"row.chatModelInitial": "当前供应商/模型",
 		"row.chatModelChange": "已切换到",
 		"row.chatModelResume": "继续使用"
 	};
@@ -213,7 +213,7 @@ try {
 	for (const n of chatNodes) {
 		console.log("   -", JSON.stringify(n.data.content[0].text));
 	}
-	assert.match(chatNodes[0].data.content[0].text, /子代理模型/);
+	assert.match(chatNodes[0].data.content[0].text, /当前供应商\/模型/);
 	assert.match(chatNodes[0].data.content[0].text, /deepseek-v4-pro/);
 	assert.match(chatNodes[1].data.content[0].text, /已切换到/);
 	assert.match(chatNodes[1].data.content[0].text, /deepseek-v4-flash/);

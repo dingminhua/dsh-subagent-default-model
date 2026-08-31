@@ -40,7 +40,7 @@ if (previousRetry >= policy.maxRetries) return next();   // 配额已满 → 不
 
 这正好解释用户观察到的现象：
 ```
-子代理模型：test/deepseek-v4-flash     ← 初始模型
+当前供应商/模型：test/deepseek-v4-flash     ← 初始模型
 已重试模型请求（5/5）· 8s               ← flash 重试 5 次全失败
 已切换到：test/deepseek-v4-pro         ← 插件切一次
 本轮运行失败 429                        ← pro 直接失败（没有自己的 5 次重试）

@@ -1,6 +1,6 @@
 # 本地模拟连接失败，测试 subagent failover 切换
 
-这个 mock 服务在本地模拟一个「OpenAI 兼容」的 LLM 端点：**第一个模型总是返回 429（RATE_LIMIT），第二个模型总是返回 200**。把它配进 DSH 后，subagent 请求第一个模型会触发连接类失败，插件 failover 自动切到第二个模型重试，轨迹视图里就会出现一行「子代理模型：provider/model」。
+这个 mock 服务在本地模拟一个「OpenAI 兼容」的 LLM 端点：**第一个模型总是返回 429（RATE_LIMIT），第二个模型总是返回 200**。把它配进 DSH 后，subagent 请求第一个模型会触发连接类失败，插件 failover 自动切到第二个模型重试，轨迹视图里就会出现一行「当前供应商/模型：provider/model」。
 
 > 目的：不改任何中转商配置、不花真实 token，就能亲眼看到 failover 的完整链路。仅供本地测试用。
 
@@ -65,7 +65,7 @@ subagent-default-model:
 2. 在 DSH 里让主代理调用任意 **subagent 工具**（`subagent` / `subagent_fork` 等）跑一个小任务。
 3. 打开该 **subagent 的轨迹视图**：
    - 官方行：`已重试模型请求（1/5）`、`失败原因：...`（DSH 内置重试行）
-   - 插件行：`子代理模型：mock-local/deepseek-v4-flash`（**本插件新增**，路径 A）
+   - 插件行：`当前供应商/模型：mock-local/deepseek-v4-flash`（**本插件新增**，路径 A）
 
 看到插件行出现，说明 failover 真实切换成功。
 

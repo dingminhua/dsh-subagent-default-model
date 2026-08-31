@@ -52,8 +52,8 @@ window.__ModuleLoader__.load({
       "row.toastSaved": "子代理默认模型设置已保存。",
       "row.failoverEnabled": "连接失败时按队列与策略切换模型",
       "row.failoverHint": "（需配置 ≥2 个 Provider，切换才会生效）。",
-      "row.trajectoryModel": "子代理模型",
-      "row.chatModelInitial": "子代理模型",
+      "row.trajectoryModel": "当前供应商/模型",
+      "row.chatModelInitial": "当前供应商/模型",
       "row.chatModelChange": "已切换到",
       "row.chatModelResume": "继续使用"
     };
@@ -80,8 +80,8 @@ window.__ModuleLoader__.load({
       "row.toastSaved": "Subagent default model settings saved.",
       "row.failoverEnabled": "Switch models by queue and strategy on connection failure",
       "row.failoverHint": "(requires at least 2 configured providers).",
-      "row.trajectoryModel": "Subagent model",
-      "row.chatModelInitial": "Subagent model",
+      "row.trajectoryModel": "Current provider/model",
+      "row.chatModelInitial": "Current provider/model",
       "row.chatModelChange": "Switched to",
       "row.chatModelResume": "Resumed on"
     };
@@ -421,7 +421,7 @@ window.__ModuleLoader__.load({
       // agent-loop appends a `request/context` frame (provider/model) whenever
       // the provider or model changes — failover switches trigger it with zero
       // host changes. Register a trajectory definition that renders that frame
-      // as a compact "Subagent model" row inside the subagent's trajectory view.
+      // as a compact "Current provider/model" row inside the subagent's trajectory view.
       if (ctx.conversationEvents && typeof ctx.conversationEvents.register === "function") {
         var trajectoryT = ctx.locale.bind(SUBAGENT_ROW_LOCALE);
         var modelContextDefinition = {

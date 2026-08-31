@@ -99,8 +99,8 @@ test("client locales include the trajectory model label (zh/en)", () => {
 	const { ctx, dictionaries } = makeCtx();
 	const { apply } = capturedModule.factory(factoryRequire);
 	apply(ctx);
-	assert.equal(dictionaries.zh["row.trajectoryModel"], "子代理模型");
-	assert.equal(dictionaries.en["row.trajectoryModel"], "Subagent model");
+	assert.equal(dictionaries.zh["row.trajectoryModel"], "当前供应商/模型");
+	assert.equal(dictionaries.en["row.trajectoryModel"], "Current provider/model");
 });
 
 test("match only claims request/context frames", () => {
@@ -125,7 +125,7 @@ test("start builds a context node labeled with provider/model (zh)", () => {
 	assert.equal(state.seq, 7);
 	assert.equal(state.time, 1000);
 	assert.equal(state.content[0].type, "text");
-	assert.match(state.content[0].text, /子代理模型/);
+	assert.match(state.content[0].text, /当前供应商\/模型/);
 	assert.match(state.content[0].text, /deepseek-official/);
 	assert.match(state.content[0].text, /deepseek-v4-flash/);
 	assert.equal(state.source.kind, "plugin");
@@ -134,7 +134,7 @@ test("start builds a context node labeled with provider/model (zh)", () => {
 test("start labels the model with the English locale when bound to en", () => {
 	const { ctx, registrations } = makeCtx({
 		t(key) {
-			return { "row.trajectoryModel": "Subagent model" }[key] ?? key;
+			return { "row.trajectoryModel": "Current provider/model" }[key] ?? key;
 		}
 	});
 	const { apply } = capturedModule.factory(factoryRequire);
@@ -149,7 +149,7 @@ test("start labels the model with the English locale when bound to en", () => {
 			data: { provider: "p1", model: "m1" }
 		}
 	});
-	assert.match(state.content[0].text, /Subagent model/);
+	assert.match(state.content[0].text, /Current provider\/model/);
 	assert.match(state.content[0].text, /p1/);
 });
 
@@ -159,7 +159,7 @@ test("update is a passthrough and buildViewNode emits a trajectory node", () => 
 		kind: "context",
 		seq: 7,
 		time: 1000,
-		content: [{ type: "text", text: "子代理模型：deepseek-official/deepseek-v4-flash" }],
+		content: [{ type: "text", text: "当前供应商/模型：deepseek-official/deepseek-v4-flash" }],
 		source: { kind: "plugin", plugin: "dsh-subagent-default-model" }
 	};
 	assert.equal(definition.update({ state }), state);
@@ -205,10 +205,10 @@ test("client locales include the chat model labels (zh/en)", () => {
 	const { ctx, dictionaries } = makeCtx();
 	const { apply } = capturedModule.factory(factoryRequire);
 	apply(ctx);
-	assert.equal(dictionaries.zh["row.chatModelInitial"], "子代理模型");
+	assert.equal(dictionaries.zh["row.chatModelInitial"], "当前供应商/模型");
 	assert.equal(dictionaries.zh["row.chatModelChange"], "已切换到");
 	assert.equal(dictionaries.zh["row.chatModelResume"], "继续使用");
-	assert.equal(dictionaries.en["row.chatModelInitial"], "Subagent model");
+	assert.equal(dictionaries.en["row.chatModelInitial"], "Current provider/model");
 	assert.equal(dictionaries.en["row.chatModelChange"], "Switched to");
 	assert.equal(dictionaries.en["row.chatModelResume"], "Resumed on");
 });
@@ -239,7 +239,7 @@ test("chat start labels the initial request with the route (zh)", () => {
 	assert.equal(state.source.kind, "plugin");
 	assert.equal(state.source.summary, state.content[0].text);
 	assert.equal(state.provenance.role, "inject");
-	assert.match(state.content[0].text, /子代理模型/);
+	assert.match(state.content[0].text, /当前供应商\/模型/);
 	assert.match(state.content[0].text, /mock-local/);
 	assert.match(state.content[0].text, /deepseek-v4-flash/);
 });
@@ -283,7 +283,7 @@ test("chat update is a passthrough and buildViewNode emits a chat context node",
 		kind: "context",
 		seq: 9,
 		time: 3000,
-		content: [{ type: "text", text: "子代理模型：mock-local/deepseek-v4-flash" }],
+		content: [{ type: "text", text: "当前供应商/模型：mock-local/deepseek-v4-flash" }],
 		source: { kind: "plugin", plugin: "dsh-subagent-default-model" },
 		provenance: { role: "inject", label: "dsh-subagent-default-model" },
 		form: "notice"
@@ -302,7 +302,7 @@ test("chat update is a passthrough and buildViewNode emits a chat context node",
 	assert.equal(node.anchorSeq, 9);
 	assert.equal(node.visibility, "visible");
 	assert.equal(node.data.kind, "context");
-	assert.equal(node.data.content[0].text, "子代理模型：mock-local/deepseek-v4-flash");
+	assert.equal(node.data.content[0].text, "当前供应商/模型：mock-local/deepseek-v4-flash");
 });
 
 test("chat buildViewNode returns null when no state has been started", () => {
