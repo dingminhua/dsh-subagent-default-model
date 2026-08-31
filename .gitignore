@@ -1,3 +1,5 @@
 node_modules/
 .DS_Store
 .dsh-vision-router/
+# 本地安装用的包名软链（解决市场卡片标题显示问题）
+dsh-subagent-default-model
