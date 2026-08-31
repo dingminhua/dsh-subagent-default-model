@@ -58,9 +58,11 @@ function makeCtx(overrides = {}) {
 		slots: {
 			inject() {}
 		},
-		conversationEvents: {
-			register(definition) {
-				registrations.push(definition);
+		uiConversation: {
+			events: {
+				register(definition) {
+					registrations.push(definition);
+				}
 			}
 		},
 		...overrides.ctx
@@ -183,9 +185,9 @@ test("buildViewNode returns null when no state has been started", () => {
 	assert.equal(definition.buildViewNode({ state: undefined }), null);
 });
 
-test("applying the client never registers the trajectory definition when conversationEvents is unavailable", () => {
+test("applying the client never registers the trajectory definition when uiConversation is unavailable", () => {
 	const { ctx } = makeCtx();
-	delete ctx.conversationEvents;
+	delete ctx.uiConversation;
 	const { apply } = capturedModule.factory(factoryRequire);
 	assert.doesNotThrow(() => apply(ctx));
 });

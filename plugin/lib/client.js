@@ -408,7 +408,7 @@ window.__ModuleLoader__.load({
     }
 
     // ── apply: inject settings row ───────────────────────────────────────
-    var inject = ["sessions", "connection", "slots", "locale", "settingsScope", "remote", "conversationEvents"];
+    var inject = ["sessions", "connection", "slots", "locale", "settingsScope", "remote", "uiConversation"];
 
     function apply(ctx) {
       var api = ctx.connection.api;
@@ -422,7 +422,7 @@ window.__ModuleLoader__.load({
       // the provider or model changes — failover switches trigger it with zero
       // host changes. Register a trajectory definition that renders that frame
       // as a compact "Current provider/model" row inside the subagent's trajectory view.
-      if (ctx.conversationEvents && typeof ctx.conversationEvents.register === "function") {
+      if (ctx.uiConversation && ctx.uiConversation.events && typeof ctx.uiConversation.events.register === "function") {
         var trajectoryT = ctx.locale.bind(SUBAGENT_ROW_LOCALE);
         var modelContextDefinition = {
           kind: "trajectory-subagent-model",
@@ -456,7 +456,7 @@ window.__ModuleLoader__.load({
             };
           }
         };
-        ctx.conversationEvents.register(modelContextDefinition);
+        ctx.uiConversation.events.register(modelContextDefinition);
 
         // ── chat: surface the subagent model in the conversation view ──
         // agent-loop writes a `request/header` frame with a `reason` the first
@@ -509,7 +509,7 @@ window.__ModuleLoader__.load({
             };
           }
         };
-        ctx.conversationEvents.register(chatModelDefinition);
+        ctx.uiConversation.events.register(chatModelDefinition);
       }
 
       var subagentScope = ctx.settingsScope.bind({ namespace: SUBAGENT_MODEL_SETTINGS_NS });
