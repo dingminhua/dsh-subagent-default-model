@@ -177,16 +177,16 @@ CI 绿是**前置条件，不是结论**。CI 只校验形式（manifest、仓�
   // ✅ 显式 || 分支带上预发布标签
   "peerDependencies": { "@deepseek-ai/dsh-tools": ">=0.0.1-rc.1 <0.2.0 || 0.1.0-*" }
   ```
-- [ ] **配置市场截图**（AppStore 风格卡片图）：在注册表 `data/screenshots.json` 里加一条，key 用**与条目 url 一致的地址**，value 是 raw 图片 URL 数组：
+- [ ] **配置市场截图**（AppStore 风格卡片图）：**注册表的新约定是「作者自持」**——在插件仓库内、`package.json` 旁放 `screenshots.json`（monorepo 就放在子包目录里），探测脚本自动从 `https://raw.githubusercontent.com/<repo>/HEAD/<子目录>/screenshots.json` 读取，无需向注册表提 PR。三种合法形状（数组 / `{"screenshots": [...]}` / 单 key map）：
   ```json
-  {
-    "https://github.com/owner/repo/tree/main/plugin": [
-      "https://raw.githubusercontent.com/owner/repo/main/assets/pic_01.png",
-      "https://raw.githubusercontent.com/owner/repo/main/assets/pic_02.png"
-    ]
-  }
+  // 形状一：路径数组。相对路径解析到插件目录内，禁止 .. 越界；
+  //       图片在插件目录外时用绝对 raw URL（host 限 GitHub 托管白名单）
+  [
+    "https://raw.githubusercontent.com/owner/repo/main/assets/pic_01.png",
+    "https://raw.githubusercontent.com/owner/repo/main/assets/pic_02.png"
+  ]
   ```
-  没配截图的市场会回退到 README 自动提取；配了作者精选截图则展示效果最好。
+  没配截图的市场会回退到 README 自动提取；配了作者精选截图则展示效果最好。旧版注册表 `data/screenshots.json` 只是遗留 fallback，作者声明后会被自动清理，别往那里提 PR。
 
 ---
 
@@ -212,9 +212,11 @@ CI 绿是**前置条件，不是结论**。CI 只校验形式（manifest、仓�
   ```
 - 市场数据源已生效：`awesome-dsh-plugin.com/plugins.json` 含该条目（npm 映射、install 命令、stars/downloads）
 
-**待办 / 教训**：
-- ⚠️ **截图配置尚未同步**到 `data/screenshots.json`（本地草稿已备好 pic_01/pic_02 两张图）—— 见 §7 的截图最佳实践，属可补的增强项
+**截图配置（已落实 ✅）**：
+- 注册表已改用「作者自持截图」**新约定**（`scripts/probe-screenshots.mjs`）：作者在插件仓库内、`package.json` 旁放 `screenshots.json`，探测脚本自动读取 `https://raw.githubusercontent.com/<repo>/HEAD/<子目录>/screenshots.json`，**无需（也不应）再向注册表 `data/screenshots.json` 提 PR**——那是遗留 fallback，作者声明后会被 `prune-legacy-screenshots.mjs` 自动清理。
+- 本插件落实方式：在仓库 `plugin/screenshots.json` 声明两张图（绝对 raw URL，host 在 `raw.githubusercontent.com` 白名单内），已推送 main；探测脚本对两张图做 ranged GET 返回 206（live），声明即刻生效。图片在仓库根 `assets/` 时因相对路径禁止 `..` 越出插件目录，须用绝对 raw URL。
 - 教训：**初次准备的 yml 用仓库根格式，合并时维护者/提交者改成了子包格式**。提前确认插件是否在子目录、用对格式，能减少一轮往返。
+- 教训：**截图声明先查注册表现行约定再动手**——早先以为要往注册表 `data/screenshots.json` 加 key，实际新约定是作者自持文件，方向错了会白费一轮 PR。
 
 **PR 描述模板**（本次实战可用）：
 ```markdown
