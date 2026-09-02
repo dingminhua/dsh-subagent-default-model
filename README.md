@@ -16,7 +16,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-subagent-default-model"><img src="https://img.shields.io/npm/v/dsh-subagent-default-model?style=flat-square&label=npm&color=cb3837" alt="npm version"></a>
-  <a href="https://www.npmjs.com/package/dsh-subagent-default-model"><img src="https://img.shields.io/npm/dw/dsh-subagent-default-model?style=flat-square&label=downloads&color=cb3837" alt="npm downloads"></a>
+  <a href="https://www.npmjs.com/package/dsh-subagent-default-model"><img src="https://img.shields.io/npm/d18m/dsh-subagent-default-model?style=flat-square&label=downloads&color=cb3837" alt="npm downloads"></a>
   <a href="https://github.com/dingminhua/dsh-subagent-default-model/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/dingminhua/dsh-subagent-default-model/ci.yml?branch=main&style=flat-square&label=tests" alt="test status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/dingminhua/dsh-subagent-default-model?style=flat-square" alt="MIT license"></a>
   <a href="https://github.com/dingminhua/dsh-subagent-default-model/stargazers"><img src="https://img.shields.io/github/stars/dingminhua/dsh-subagent-default-model?style=flat-square" alt="GitHub stars"></a>
