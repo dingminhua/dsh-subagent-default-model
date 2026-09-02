@@ -7,7 +7,7 @@
 <p align="center"><b>为 DeepSeek Harness 子代理选择默认模型，并支持多模型轮换。</b></p>
 
 <p align="center">
-  <a href="plugin/README.en.md">English</a> ·
+  <a href="README.en.md">English</a> ·
   <a href="#安装">安装</a> ·
   <a href="#配置">配置</a> ·
   <a href="plugin/CHANGELOG.md">更新日志</a> ·
