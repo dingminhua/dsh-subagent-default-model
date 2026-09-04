@@ -90,7 +90,10 @@ ctx.slots.inject("settings.plugin.item", function() {
 旧版 DSH 的 `dsh-host-apiproxy` 对 settings 做 `WEB_SETTINGS_NAMESPACES` 白名单过滤，默认不会暴露自定义插件的 settings，需要手动修改 `dsh-host-apiproxy/lib/index.js` 添加 namespace。
 
 ### 当前状态（已验证，DSH 0.1.1-rc.2）：
-`dsh-host-apiproxy` 已**移除白名单机制**，`settings.describe` 直接返回全部已注册 namespace（源码见 `settings: { describe() { ... namespaces: settings.describe({ redactSecrets: true }).map(namespaceView) } }`）。**无需任何 patch**，插件 `installSettingsSection` 注册的 `subagent-default-model` 段对 Web 客户端天然可读写。
+`dsh-host-apiproxy` 已**移除白名单机制**，`settings.describe` 直接返回全部已注册 namespace（源码见 `settings: { describe() { ... namespaces: settings.describe({ redactSecrets: true }).map(namespaceView) } }`）。**无需任何 patch**，插件注册的 `subagent-default-model` 段对 Web 客户端天然可读写。
+
+### 设置段注册方式（1.2.1 起，跨代双路径）：
+DSH 0.1.2-alpha.2 起 `@deepseek-ai/dsh-settings` 移除了独立的 `installSettingsSection` / `settingsNamespace` 导出，改为 `ctx.settings` 服务缝（`settings.installSection`）。插件 1.2.1 按模块导出有无自动选择：旧导出在场（≤0.1.1-rc.2 宿主、DSH Desktop 过渡补丁版）走旧助手；缺席（纯净 npm cohort ≥0.1.2-alpha.2，含 0.1.2-rc.1）直接 `ctx.inject(["settings"], …)` 调 `settings.installSection`，消费者 ctx 保持 section owner。两条路径注册的段同样出现在 `settings.describe` 里。
 
 ## 7. 安装流程（已通过审核）
 

@@ -1,5 +1,5 @@
 import z from "@deepseek-ai/schemastery";
-import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+import * as dshSettings from "@deepseek-ai/dsh-settings";
 
 /**
  * dsh-subagent-default-model — default model(s) for subagent delegations.
@@ -43,7 +43,40 @@ export const name = "dsh-subagent-default-model";
 // independently; `apply()` attaches the service wrapper through `ctx.inject()`.
 
 /** Settings namespace: default model route for subagent runs without an explicit `agentOptions`. */
-const SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE = settingsNamespace("subagent-default-model");
+const SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE = "subagent-default-model";
+
+/**
+ * Pick the settings-section installer for the installed DSH generation.
+ *
+ * DSH 0.1.2-alpha.2 removed the standalone `installSettingsSection` /
+ * `settingsNamespace` exports from `@deepseek-ai/dsh-settings` in favor of
+ * the `ctx.settings` service seam (`settings.installSection`), and that seam
+ * does not exist on older hosts (`settings.register` there, reachable only
+ * through the legacy helper). Decide by export presence: a module that still
+ * ships the helper (pre-alpha.2 hosts, and DSH Desktop's transitional
+ * compatibility patch, where the helper merely delegates to the seam) uses
+ * it; otherwise wire the official seam directly. Both paths register the
+ * section only once the settings service mounts — the legacy helper itself
+ * wraps `ctx.inject(["settings"], …)` — so neither ever blocks the plugin
+ * root on service waves.
+ *
+ * Exported for unit tests only; not part of the plugin contract.
+ *
+ * @param module - the resolved `@deepseek-ai/dsh-settings` module namespace.
+ * @returns an `(ctx, ns, schema, entry, hooks)` installer for that generation.
+ */
+export function settingsSectionInstaller(module) {
+	if (typeof module?.installSettingsSection === "function") {
+		return (ctx, ns, schema, entry, hooks) => module.installSettingsSection(ctx, ns, schema, entry, hooks);
+	}
+	return (ctx, ns, schema, entry, hooks) => {
+		ctx.inject(["settings"], (settingsCtx) => {
+			settingsCtx.settings.installSection(ctx, ns, schema, entry, hooks);
+		});
+	};
+}
+
+const INSTALL_SETTINGS_SECTION = settingsSectionInstaller(dshSettings);
 /** One model entry: a bare model id (uses the section `provider`) or an explicit `{provider, model}` pair. */
 const MODEL_ENTRY = z.union([
 	z.string(),
@@ -293,7 +326,7 @@ export function apply(ctx) {
 	// DSH 0.1.2 can mount that service later or in a different service wave; a
 	// root-level hard inject would otherwise keep this whole plugin waiting and
 	// hide its settings card even though the Client half is already registered.
-	installSettingsSection(ctx, SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA, {}, {
+	INSTALL_SETTINGS_SECTION(ctx, SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA, {}, {
 		setSource: (current) => {
 			state.settingsSource = current;
 		},

@@ -254,6 +254,26 @@ test("chat match only claims request/header frames", () => {
 	assert.equal(definition.match({ type: "assistant/message", seq: 44 }), null);
 });
 
+test("chat match skips request/header frames that merely start a new series", () => {
+	const definition = chatDefinition();
+	// DSH 0.1.2 appends reason:"series" when a follow-up turn starts a new
+	// request series with an unchanged config — no route change to surface.
+	assert.equal(
+		definition.match({
+			type: "request/header",
+			seq: 50,
+			data: { reason: "series", header: { config: { provider: "mock-local", model: "deepseek-v4-flash" } } }
+		}),
+		null
+	);
+	// The informational reasons still claim their frames.
+	deepEqual(definition.match({ type: "request/header", seq: 51, data: { reason: "initial" } }), { id: "51", role: "start" });
+	deepEqual(definition.match({ type: "request/header", seq: 52, data: { reason: "change" } }), { id: "52", role: "start" });
+	deepEqual(definition.match({ type: "request/header", seq: 53, data: { reason: "resume" } }), { id: "53", role: "start" });
+	// A frame without a data payload (older DSH builds) keeps claiming.
+	deepEqual(definition.match({ type: "request/header", seq: 54 }), { id: "54", role: "start" });
+});
+
 test("chat start labels the initial request with the route (zh)", () => {
 	const definition = chatDefinition();
 	const event = {

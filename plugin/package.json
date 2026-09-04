@@ -1,6 +1,6 @@
 {
   "name": "dsh-subagent-default-model",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Configure default model routes for DeepSeek Harness subagents, with single-model, round-robin, random, and per-route reasoning-effort options.",
   "keywords": [
     "deepseek-harness",
@@ -98,7 +98,7 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-settings": "0.1.0-rc.6"
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-settings": "0.1.2-rc.1"
   }
 }
