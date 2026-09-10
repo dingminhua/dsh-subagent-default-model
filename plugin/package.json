@@ -1,6 +1,6 @@
 {
   "name": "dsh-subagent-default-model",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Configure default model routes for DeepSeek Harness subagents, with single-model, round-robin, random, and per-route reasoning-effort options.",
   "keywords": [
     "deepseek-harness",
@@ -68,14 +68,14 @@
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-settings": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0",
-    "@deepseek-ai/dsh-subagent": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0",
-    "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0"
+    "@deepseek-ai/dsh-settings": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0",
+    "@deepseek-ai/dsh-subagent": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0",
+    "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0",
+    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-client-connection": {
@@ -99,6 +99,6 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-settings": "0.1.2-rc.1"
+    "@deepseek-ai/dsh-settings": "^0.1.5-rc.1"
   }
 }
