@@ -87,7 +87,19 @@ npm view dsh-subagent-default-model version        # 应显示 X.Y.Z
 npm view dsh-subagent-default-model dist-tags.latest   # 应为 X.Y.Z
 ```
 
-> 注意：刚发布后 registry 读缓存可能有短暂延迟，可能出现 `version` 返回旧版、`versions` 却含新版的情况。稍等重查即可。
+> **注意：刚发布后 registry 读缓存可能有短暂延迟**，可能出现 `version` 返回旧版、`versions` 却含新版的情况。稍等重查即可。
+>
+> ⚠️ **不要用单次查询的结果判定「发布失败」**。判定「未发布」必须同时满足以下三条，缺一不可：
+>
+> 1. `npm view <pkg> versions` **不含**目标版本；
+> 2. 直连 registry（绕开 npm 本地缓存）也不含目标版本：
+>    ```bash
+>    curl -s "https://registry.npmjs.org/<pkg>" -H 'Cache-Control: no-cache' \
+>      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['dist-tags'], '1.2.3' in d['versions'])"
+>    ```
+> 3. 且**已等待数分钟**后复查仍是同样结果。
+>
+> 只凭一条 `npm view ... version` 输出旧版就重做版本号，是本项目**实际踩过的坑**（见下文 E409 条目）：发布其实早已成功，误判后多打了一个版本、多推了一个 tag，事后还需 revert 回滚。
 
 ## 完整示例（以 0.3.1 为准）
 
@@ -117,9 +129,40 @@ cd .. && npm view dsh-subagent-default-model version  # → 0.3.1
 
 账号开启了 2FA。按上文第 6 步在浏览器确认即可。**不要在 npm auth 页面之外绕过 2FA**。
 
+> ⚠️ **不要在确认 2FA 之前放弃或重复执行**。EOTP 中断的那次 publish 可能在服务端留下一个 **staged 版本占位**：版本号被占住，但该版本尚未进入 registry（查询返回 404 / `ResourceNotFound`）。此时任何后续 publish 都会报 E409（见下条），而 registry 上又查不到该版本，状态看起来自相矛盾。
+>
+> 若确实中断了，**先回到浏览器完成那次的认证**；无法完成时再到 <https://www.npmjs.com/settings/> 的 packages 页面确认是否存在待处理的 staged 版本。
+
+### `npm publish` 报 E409 `Cannot publish over previously staged version "X.Y.Z"`
+
+**这通常不是坏事，而是「该版本其实已经发布成功」的信号。** 完整报错形如：
+
+```text
+npm error code E409
+npm error 409 Conflict - PUT https://registry.npmjs.org/<pkg>
+npm error Cannot publish over previously staged version "X.Y.Z".
+```
+
+含义：registry 已存在该版本号（无论是前一次成功发布后转为正式版本，还是仅留下 staged 占位），因此不允许再次写入同一个版本。
+
+**正确处理顺序**（务必先查、再决定，不要急着改版本号）：
+
+```bash
+# 1. 直连 registry 绕开缓存，确认该版本到底存不存在
+curl -s "https://registry.npmjs.org/dsh-subagent-default-model" -H 'Cache-Control: no-cache' \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['dist-tags']); print('1.2.3' in d['versions'])"
+
+# 2. 若确认存在 → 发布已成功，什么都不用做，结束
+# 3. 若确认不存在且等待数分钟后仍不存在 → 才是真的卡在 staged，再考虑顺延版本号
+```
+
+**真实教训（1.2.3 → 1.2.4 的反复）**：发布 1.2.3 时先遇 EOTP（2FA 未确认），随后在浏览器完成认证发布成功；但验证时赶上 registry 缓存，`npm view ... version` 读到的仍是 `1.2.2`，遂误判为「未发布」，进而把版本顺延到 1.2.4、推了新 tag。事后发现 1.2.3 其实早已是 `latest`，只能 revert 回滚，并删除多余的 `v1.2.4` tag、重建 `v1.2.3` tag。**E409 出现时，第一反应应是「可能已成功」并去核实，而不是「失败了，换个版本号」。**
+
 ### 发布后 `npm view ... version` 还是旧版本
 
 registry 缓存延迟。等几秒后重查 `npm view ... versions`，若含新版本且 `dist-tags.latest` 正确即为成功。
+
+> 复核时优先用 `versions`（数组，能看到是否含目标版本）或直连 registry 的 `curl`，**不要只看 `version` 单值**——它最容易读到缓存里的旧版，是本项目误判过一次的根源。判定标准见上文第 7 步。
 
 ### 想用 token 自动发布（不每次点 2FA）
 
