@@ -186,7 +186,8 @@ function isSubagentAgent(agent) {
  * Pick the next pool index for one failed subagent request.
  *
  * - round-robin: the next entry after the currently-served model, wrapping
- *   around the list (the "queue").
+ *   around the list (the "queue"), skipping entries this run already tried so a
+ *   single bad candidate is not re-selected while an untried one remains.
  * - random: any entry, without checking whether it was used before — a random
  *   pick may repeat the failing model, which is fine by design (simplest).
  */
@@ -195,13 +196,27 @@ function nextFailoverIndex(view, agent, current) {
 	if (strategy === "random") {
 		return Math.floor(Math.random() * entries.length);
 	}
-	if (current !== void 0) return (current.index + 1) % entries.length;
+	const tried = current?.tried;
+	if (current !== void 0) {
+		// Advance from the last pick, taking the first entry this run has not used.
+		for (let step = 1; step <= entries.length; step += 1) {
+			const candidate = (current.index + step) % entries.length;
+			if (tried === void 0 || !tried.has(candidate)) return candidate;
+		}
+		return (current.index + 1) % entries.length;
+	}
 	// First failure: locate the served route in the pool and move to the next.
 	const served = agent.session?.requestContext?.();
 	const found = served === void 0 ? -1 : entries.findIndex((entry) =>
 		entry.provider === served.provider && entry.model === served.model
 	);
-	return found < 0 ? 0 : (found + 1) % entries.length;
+	if (found < 0) return 0;
+	// Start after the served entry, preferring one this run has not used.
+	for (let step = 1; step <= entries.length; step += 1) {
+		const candidate = (found + step) % entries.length;
+		if (tried === void 0 || !tried.has(candidate)) return candidate;
+	}
+	return (found + 1) % entries.length;
 }
 
 /**
@@ -231,8 +246,13 @@ function installFailover(ctx, state) {
 		// `entries.length - 1` switches, then let the real error surface.
 		if (current !== void 0 && current.count >= view.entries.length - 1) return next(); // pool exhausted
 		const index = nextFailoverIndex(view, agent, current);
+		// Remember every pool entry this run has already been switched to, so a
+		// candidate that fails again is not selected a second time.
+		const tried = new Set(current?.tried ?? []);
+		tried.add(index);
 		pending.set(agent.id, {
 			index,
+			tried,
 			count: (current?.count ?? 0) + 1
 		});
 		ctx.logger.warn(
@@ -251,8 +271,21 @@ function installFailover(ctx, state) {
 	});
 
 	// On the rebuilt request for that subagent: swap the seed route for the
-	// pending pool entry. Inherited reasoningEffort is dropped on a provider
-	// switch (the fallback provider may not support it).
+	// pending pool entry, carrying the target's OWN request controls.
+	//
+	// The inherited `reasoningEffort` is dropped because it belongs to the route
+	// that just failed. The failure this fixes: without re-applying the target's
+	// declared effort, the fallback is dispatched with the previous route's
+	// thinking mode, and a provider whose thinking level must agree with the
+	// effort rejects it with e.g. "invalid thinking type, only be disabled when
+	// reasoning effort is none ...". That error is NOT retryable, so the
+	// failover burns every remaining candidate on a request that can never
+	// succeed — the subagent dies even though a healthy model was available.
+	//
+	// When the target declares no effort, sending the key as `undefined` is the
+	// correct dispatch: the adapter then resolves the model's own
+	// `defaultEffort` (or omits the reasoning option entirely), instead of
+	// inheriting a level the target may not support.
 	const disposeRequest = ctx.on("agent/request", async (payload, next) => {
 		const view = failoverView(state);
 		if (view === void 0) return next();
@@ -265,7 +298,9 @@ function installFailover(ctx, state) {
 		const seed = await next();
 		if (seed === void 0 || seed === null) return seed;
 		const { reasoningEffort: _inherited, ...rest } = seed;
-		return { ...rest, provider: target.provider, model: target.model };
+		const switched = { ...rest, provider: target.provider, model: target.model };
+		if (target.reasoningEffort !== void 0) switched.reasoningEffort = target.reasoningEffort;
+		return switched;
 	});
 
 	// Drop per-agent state once the subagent is disposed.

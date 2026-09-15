@@ -302,7 +302,84 @@ test("drops inherited reasoning effort when switching models", async () => {
 			model: "deepseek-v4-pro",
 			reasoningEffort: "high"
 		});
+		// Neither entry in SECTION_WITH_MODELS declares its own effort, so the
+		// inherited level must be dropped rather than carried onto the fallback.
 		assert.deepEqual(config, { provider: "deepseek-official", model: "deepseek-v4-flash" });
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("applies the target entry's own reasoning effort when switching models", async () => {
+	// Regression: the fallback used to be dispatched with the inherited effort
+	// dropped and nothing put back, so a target whose config declares an effort
+	// was called with the previous route's thinking mode. Providers that require
+	// the thinking level to agree with the effort answered 400 "invalid thinking
+	// type, only be disabled when reasoning effort is none ..." — and because
+	// that code is not a trigger, the whole pool was burned on a request that
+	// could never succeed even though a healthy model was configured.
+	const harness = await createHarness({
+		"subagent-default-model": {
+			provider: "workbuddy",
+			model: "hy3",
+			models: [
+				"hy3",
+				{ provider: "zzztoken", model: "deepseek-v4-pro", reasoningEffort: "max" }
+			],
+			strategy: "round-robin",
+			failoverEnabled: true
+		}
+	});
+	try {
+		const agent = makeAgent("sub-effort-applied", { provider: "workbuddy", model: "hy3" });
+		await dispatchRequestError(harness.root, agent, { provider: "workbuddy" });
+		const config = await dispatchRequest(harness.root, agent, {
+			provider: "workbuddy",
+			model: "hy3",
+			reasoningEffort: "high"
+		});
+		assert.deepEqual(config, {
+			provider: "zzztoken",
+			model: "deepseek-v4-pro",
+			reasoningEffort: "max"
+		});
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("does not re-select a pool entry this run already switched to", async () => {
+	// A three-entry pool so a second switch is actually allowed (a two-entry
+	// pool exhausts after one switch by design). The second pick must land on
+	// the entry that was never tried, not back on the one that just failed.
+	const harness = await createHarness({
+		"subagent-default-model": {
+			provider: "workbuddy",
+			model: "hy3",
+			models: [
+				"hy3",
+				{ provider: "zzztoken", model: "deepseek-v4-pro", reasoningEffort: "max" },
+				{ provider: "zzztoken-glm", model: "glm-5.3-flash" }
+			],
+			strategy: "round-robin",
+			failoverEnabled: true
+		}
+	});
+	try {
+		const agent = makeAgent("sub-dedup", { provider: "workbuddy", model: "hy3" });
+		await dispatchRequestError(harness.root, agent, { provider: "workbuddy" });
+		const first = await dispatchRequest(harness.root, agent, {
+			provider: "workbuddy",
+			model: "hy3",
+			reasoningEffort: "high"
+		});
+		assert.equal(first.model, "deepseek-v4-pro");
+		// The fallback fails too: the next pick must avoid deepseek-v4-pro.
+		const action = await dispatchRequestError(harness.root, agent, { provider: "zzztoken" });
+		assert.deepEqual(action, { kind: "retry" });
+		const second = await dispatchRequest(harness.root, agent, first);
+		assert.equal(second.provider, "zzztoken-glm");
+		assert.equal(second.model, "glm-5.3-flash");
 	} finally {
 		await disposeHarness(harness);
 	}
