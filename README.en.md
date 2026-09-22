@@ -105,6 +105,15 @@ subagent-default-model:
   strategy: round-robin # round-robin | random
 ```
 
+### Reasoning-effort precheck (instant warning in the settings panel)
+
+While you pick a provider / model / reasoning effort, the panel validates the configured `reasoningEffort` against what the target model actually declares, and shows a red warning inside that route row and next to the save buttons, naming the missing tier.
+
+- **Why it exists**: when the configured effort is not accepted by the target model, the host rejects the request inside `prepareRequest()` — **before** the system prompt is assembled and before any context injection, and **before** the failover error dispatch. The subagent therefore issues nothing at all: the UI shows no context, the parent receives only `failed before it finished / It left no closing message`, and the real code (`UNSUPPORTED_REASONING_EFFORT`) exists only in the session log.
+- **Saving is never blocked**: a provider directory can lag (a model's capability declaration may appear after the plugin config, or be temporarily missing in a time window). The warning informs; it does not trap you in a transient state.
+- **Unknown is not unsupported**: a provider or model that is not yet in the catalog produces **no warning**. Treating "absent from the directory" as "unsupported" would turn a directory delay into a false alarm.
+- The warning clears on its own once the directory refreshes; no need to reopen the panel.
+
 ### Connection-failure failover (enabled by default)
 
 When a subagent loop hits a connection-class failure, the plugin automatically switches to another model in the `models` list and retries by `strategy` — **subagents only; the main agent loop is never affected**.
@@ -135,7 +144,7 @@ subagent-default-model:
 | `models` | array | `[]` | List of string or `{ provider, model, reasoningEffort? }` entries. |
 | `strategy` | string | `round-robin` | Multi-model distribution strategy. |
 | `failoverEnabled` | boolean | `true` | Switch model by queue/strategy inside `models` on connection failure (subagents only). |
-| `reasoningEffort` | string | — | Optional per-route reasoning effort. |
+| `reasoningEffort` | string | — | Optional per-route reasoning effort. The panel warns (without blocking the save) when the target model does not declare it. |
 
 ## Marketplace
 

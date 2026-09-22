@@ -105,6 +105,15 @@ subagent-default-model:
   strategy: round-robin # round-robin | random
 ```
 
+### 推理强度预检（设置面板即时警告）
+
+设置面板会在你选择 provider / model / 推理强度时**即时校验**所配 `reasoningEffort` 是否被目标模型声明，不匹配时在该路由行内与保存区显示红字警告，指明具体缺失的档位。
+
+- **为何需要**：所配 effort 不被目标模型接受时，宿主在 `prepareRequest()` 阶段就拒绝本次请求——**早于** system prompt 组装与上下文注入，也**早于** failover 的错误派发。表现为子代理「什么都发不出去」：界面上看不到任何上下文，父会话只收到一句 `failed before it finished / It left no closing message`，真实错误码（`UNSUPPORTED_REASONING_EFFORT`）只落在会话日志里。
+- **不阻止保存**：供应商目录可能尚未刷新（模型的能力声明会晚于插件配置出现，也可能在时间窗口内暂时缺失）。警告只提示，不卡住保存——否则会把用户困在一个暂时性状态里。
+- **未知不等于不支持**：provider 或 model 尚未出现在目录里时**不报警告**。把「目录里没有」当作「不支持」会把一次目录延迟变成误报。
+- 警告随目录刷新自动消失，无需重开面板。
+
 ### 子代理连接失败自动切换（默认开启）
 
 当子代理（subagent）自身的循环遇到连接类失败时，插件会自动在 `models` 列表内切换模型并按 `strategy` 规则重试——**仅对 subagent 生效，主代理循环不受影响**。
@@ -135,7 +144,7 @@ subagent-default-model:
 | `models` | array | `[]` | 字符串或 `{ provider, model, reasoningEffort? }` 条目列表。 |
 | `strategy` | string | `round-robin` | 多模型分配策略。 |
 | `failoverEnabled` | boolean | `true` | 连接失败时在 `models` 列表内按队列与策略切换模型（仅 subagent）。 |
-| `reasoningEffort` | string | — | 可选的逐路由推理强度。 |
+| `reasoningEffort` | string | — | 可选的逐路由推理强度。设置面板会校验它是否被目标模型声明，不匹配时给出警告（不阻止保存）。 |
 
 ## 市场收录与展示
 
