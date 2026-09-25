@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0.2 (2026-09-25)
+
+### Fixed
+
+- **对话流里的「当前/切换/恢复模型」上下文行不可见（P0）：0.1.7 宿主把内置 `context` kind 行从可见对话流里过滤掉了**。`lib/client.js` 的 `chatModelDefinition` 原本写成 `kind: "context"`，复用宿主内置注入行。但 `dsh-client-ui-chat` 的可见性规则 `isVisibleChatNode()` 硬排除 `node.kind === "context"`（注释明写「Exclude system prompts, ordinary Context …」），且分类逻辑对插件注入消息直接归为 `context`。结果：轨迹里能看到那一行，但**对话流主视图里永远不出现**——用户可感的正是「切换/恢复模型提示消失」。
+  已把节点 `kind` 改为**自有值** `chat-subagent-model-notice`（`CHAT_MODEL_NODE_KIND`）。该可见性黑名单只列 `system-prompt` / `context` / `permission` 三项，自定义 `kind` 默认可见；`source.kind`（消息来源标识，仍是 `plugin:dsh-subagent-default-model`）与节点 `kind` 是两件事，保持不动。
+  注意：光改 `kind` **不够**。宿主按 `entryKey = node.kind` 在 `conversation.chat.node` 这个 **keyed 槽位**运行时分派渲染器；没有占用者的 `kind` 会落到 `ChatNodeSeat` 传入的 `fallback`——一个 `JsonBlock`（标签「unknown surface」+ 节点数据原样 JSON）。也就是说，不配渲染器的话，不可见会变成**对话流里出现一行原始 JSON**，比不可见更糟。
+  故同步新增自有渲染器 `SubagentModelNoticeRow`（经 `registerSubagentModelNotice()` 注册到 `conversation.chat.node`，`key: CHAT_MODEL_NODE_KIND`，并声明 `locale:` 以收到字典）：折叠态只显示行头（圆点 + 「上下文注入 · dsh-subagent-default-model」+ summary），点开才渲染 `<pre>` 完整内容；新增 `.dsm-notice-*` 样式与 zh/en 的 `row.noticeLabel`；`trajectory` 侧不受此影响（该黑名单只在 ui-chat）。
+  旧注释曾写「复用内置注入行（ContextMessageNodeView）」——其复用目标在 0.1.7 已不存在，已一并勘正。
+
+### Testing
+
+- 新增 3 个契约用例（`plugin/test/client-trajectory.test.mjs`）：① `buildViewNode` 产出的 `kind` 必须是自有值、绝不能是宿主的 `"context"`，且 `source.kind` 保持 `plugin:dsh-subagent-default-model`；② `conversation.chat.node` 槽位恰好注册一个渲染器、`key` 必须等于节点 `kind`、组件必须是函数；③ 渲染器表现——折叠态只显示 summary、不挂载 `<pre>`，点击 toggle 后展开出完整文本且 `aria-expanded` 跟随，并对缺 `content`/`summary` 的节点容错不抛错（此时标签退化为字典 key）。
+- 因 `slotRegistrations` 不再只含两张设置卡（又多了聊天渲染器），把原先按位置索引 `slotRegistrations[0]` 的断言改为 `cardRegistrations()` 按槽位名（`plugins.`）过滤，避免断言错认贡献。
+- 均**变异验证**过：把 `kind` 改回 `"context"`、或把渲染器注册删掉，上面三条立刻变红，还原即全绿。全量 **90 项通过**。
+
 ## 2.0.1 (2026-09-25)
 
 ### Fixed
