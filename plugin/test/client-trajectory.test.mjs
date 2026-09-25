@@ -26,6 +26,13 @@ const sandbox = {
 };
 vm.runInNewContext(clientSource, sandbox, { filename: "client.js" });
 
+// The chat row's own node kind. Duplicated (not imported) on purpose: the value
+// is asserted, so reading it back out of the bundle would make the assertion
+// tautological. It must stay in lockstep with `CHAT_MODEL_NODE_KIND` in
+// lib/client.js — and must NOT be the host's `"context"` kind, which
+// `isVisibleChatNode()` filters out of the visible Chat rows.
+const CHAT_NODE_KIND = "chat-subagent-model-notice";
+
 function factoryRequire(id) {
 	if (id === "react") return {};
 	if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Toast: function Toast() {} };
@@ -124,6 +131,18 @@ function makeCtx(overrides = {}) {
 	return { ctx, registrations, slotRegistrations, dictionaries, remoteSession, configForms, fakeScope, effectDisposers };
 }
 
+/**
+ * The settings-card placements among all slot registrations.
+ *
+ * `slotRegistrations` is a flat log, and the plugin now registers MORE than the
+ * two config cards: the chat notice renderer claims `conversation.chat.node`.
+ * Positional indexing (`slotRegistrations[0]`) therefore no longer identifies the
+ * card — select by slot name so the assertion states which contribution it means.
+ */
+function cardRegistrations(slotRegistrations) {
+	return slotRegistrations.filter((entry) => entry.name.startsWith("plugins."));
+}
+
 function trajectoryDefinition() {
 	const { ctx, registrations } = makeCtx();
 	const { apply } = capturedModule.factory(factoryRequire);
@@ -154,14 +173,15 @@ test("client registers the subagent-default-model settings card and loads the mo
 	assert.deepEqual(Array.from(inject), ["slots", "locale", "uiConversation"]);
 	apply(ctx);
 	// Two placements (bundle + row config), matching the workbuddy card pattern.
-	assert.equal(slotRegistrations.length, 2);
+	const cards = cardRegistrations(slotRegistrations);
+	assert.equal(cards.length, 2);
 	assert.deepEqual(
-		slotRegistrations.map((entry) => entry.name),
+		cards.map((entry) => entry.name),
 		["plugins.bundle.config", "plugins.row.config"]
 	);
-	assert.equal(slotRegistrations[0].value.options.key, "dsh-subagent-default-model");
-	assert.equal(slotRegistrations[1].value.options.key, "dsh-subagent-default-model#dsh-subagent-default-model");
-	const props = slotRegistrations[0].value.options.inject();
+	assert.equal(cards[0].value.options.key, "dsh-subagent-default-model");
+	assert.equal(cards[1].value.options.key, "dsh-subagent-default-model#dsh-subagent-default-model");
+	const props = cards[0].value.options.inject();
 	const groups = await props.loadCatalog();
 	assert.equal(groups.length, 1);
 	assert.equal(groups[0].id, "mock");
@@ -292,6 +312,8 @@ test("client locales include the chat model labels (zh/en)", () => {
 	assert.equal(dictionaries.en["row.chatModelInitial"], "Current provider/model");
 	assert.equal(dictionaries.en["row.chatModelChange"], "Switched to");
 	assert.equal(dictionaries.en["row.chatModelResume"], "Resumed on");
+	assert.ok(dictionaries.zh["row.noticeLabel"], "zh missing row.noticeLabel");
+	assert.ok(dictionaries.en["row.noticeLabel"], "en missing row.noticeLabel");
 });
 
 test("chat match only claims request/header frames", () => {
@@ -334,7 +356,7 @@ test("chat start labels the initial request with the route (zh)", () => {
 		}
 	};
 	const state = definition.start(undefined, { event });
-	assert.equal(state.kind, "context");
+	assert.equal(state.kind, CHAT_NODE_KIND);
 	assert.equal(state.seq, 9);
 	assert.equal(state.form, "notice");
 	assert.equal(state.source.kind, "plugin:dsh-subagent-default-model");
@@ -381,7 +403,7 @@ test("chat start labels a resumed session with the route", () => {
 test("chat update is a passthrough and buildViewNode emits a chat context node", () => {
 	const definition = chatDefinition();
 	const state = {
-		kind: "context",
+		kind: CHAT_NODE_KIND,
 		seq: 9,
 		time: 3000,
 		content: [{ type: "text", text: "当前供应商/模型：mock-local/deepseek-v4-flash" }],
@@ -399,16 +421,144 @@ test("chat update is a passthrough and buildViewNode emits a chat context node",
 		state
 	});
 	assert.equal(node.target, "chat");
-	assert.equal(node.kind, "context");
+	assert.equal(node.kind, CHAT_NODE_KIND);
 	assert.equal(node.anchorSeq, 9);
 	assert.equal(node.visibility, "visible");
-	assert.equal(node.data.kind, "context");
+	assert.equal(node.data.kind, CHAT_NODE_KIND);
 	assert.equal(node.data.content[0].text, "当前供应商/模型：mock-local/deepseek-v4-flash");
 });
 
 test("chat buildViewNode returns null when no state has been started", () => {
 	const definition = chatDefinition();
 	assert.equal(definition.buildViewNode({ state: undefined }), null);
+});
+
+test("chat row does NOT reuse the host context kind (which is filtered out of the Chat flow)", () => {
+	// Regression guard for a real defect: the chat definition originally emitted
+	// `kind: "context"` to "reuse the built-in injection row". The host
+	// `dsh-client-ui-chat` classifies any non-user source as `context` and then
+	// `isVisibleChatNode()` excludes `kind === "context"` (unless it carries a
+	// tool-addition/removal block). The row therefore reached Trajectory only and
+	// never appeared in the conversation flow — the mechanism looked complete
+	// while being invisible in practice. A self-owned kind is not on that
+	// blacklist, so it stays visible.
+	const definition = chatDefinition();
+	assert.notEqual(definition.kind, "context");
+	const state = definition.start(undefined, {
+		event: {
+			type: "request/header",
+			seq: 9,
+			time: 3000,
+			data: { reason: "initial", header: { config: { provider: "p", model: "m" } } }
+		}
+	});
+	assert.notEqual(state.kind, "context", "state kind must match the node kind the host dispatches on");
+	assert.equal(state.kind, CHAT_NODE_KIND);
+
+	// The message SOURCE stays a distinct thing from the node kind: it identifies
+	// which plugin injected the message and must not be renamed alongside it.
+	assert.equal(state.source.kind, "plugin:dsh-subagent-default-model");
+
+	const node = definition.buildViewNode({
+		key: "k",
+		kind: definition.kind,
+		id: "9",
+		start: { location: { kind: "unresolved" } },
+		state
+	});
+	assert.notEqual(node.kind, "context");
+	assert.equal(node.kind, CHAT_NODE_KIND);
+	assert.equal(node.data.kind, CHAT_NODE_KIND);
+	// Host contract: `buildViewNode` must echo the definition's own target and
+	// the context key, or the Conversation layer rejects the node.
+	assert.equal(node.target, definition.target);
+	assert.equal(node.key, "k");
+});
+
+test("chat row registers a renderer for its own node kind", () => {
+	// Dispatch is runtime string matching on `entryKey = node.kind`. The slot is
+	// `keyed`, and `ChatNodeSeat` passes a `fallback` (a JsonBlock labeled
+	// "unknown surface"), so changing the kind without registering a renderer
+	// would trade "filtered out" for "a raw JSON dump in the conversation flow".
+	const { ctx, slotRegistrations } = makeCtx();
+	capturedModule.factory(factoryRequire).apply(ctx);
+	const notice = slotRegistrations.filter((entry) => entry.name === "conversation.chat.node");
+	assert.equal(notice.length, 1, "exactly one chat node renderer registration expected");
+	assert.equal(notice[0].value.options.key, CHAT_NODE_KIND, "renderer key must equal the node kind");
+	assert.equal(typeof notice[0].value.component, "function", "the renderer must be a component");
+});
+
+test("chat renderer shows the summary collapsed and the full text when open", () => {
+	// Load the module with a React double so the row component's `useState` works
+	// without a real renderer (same technique as the settings-card render tests).
+	const react = makeReactDouble();
+	const reactRequire = (id) => {
+		if (id === "react") return react;
+		if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Toast: function Toast() {} };
+		throw new Error(`unexpected require: ${id}`);
+	};
+	const { ctx, slotRegistrations, dictionaries } = makeCtx();
+	capturedModule.factory(reactRequire).apply(ctx);
+	const Row = slotRegistrations
+		.filter((entry) => entry.name === "conversation.chat.node")[0].value.component;
+
+	// The registration declares `locale:`, so the host injects `t`. Supply the
+	// REAL dictionary through that seat: asserting against a hardcoded string
+	// would pass even if the component ignored the locale seat entirely.
+	const t = (key) => (dictionaries.zh ?? {})[key] ?? key;
+	assert.equal(dictionaries.zh["row.noticeLabel"], "上下文注入 · dsh-subagent-default-model");
+	const full = "当前供应商/模型：mock-local/deepseek-v4-flash";
+	const node = {
+		kind: CHAT_NODE_KIND,
+		data: {
+			content: [{ type: "text", text: full }],
+			source: { kind: "plugin:dsh-subagent-default-model", summary: full }
+		}
+	};
+
+	// Collapsed (initial state): the summary is the always-visible line, and the
+	// full body is NOT mounted (collapsed means no <pre> at all, not hidden CSS).
+	react.beginPass();
+	const collapsedTree = expand(Row({ node, t }));
+	assert.match(treeText(collapsedTree), /上下文注入/);
+	assert.match(treeText(collapsedTree), /mock-local\/deepseek-v4-flash/);
+	assert.equal(collect(collapsedTree, (n) => n.type === "pre").length, 0, "collapsed row must not mount the body");
+
+	// Drive the real toggle: click the button the row rendered, then re-render.
+	const toggle = collect(collapsedTree, (n) => n.type === "button")[0];
+	assert.ok(toggle, "the row must expose a toggle button");
+	toggle.props.onClick();
+
+	react.beginPass();
+	const expandedTree = expand(Row({ node, t }));
+	const pre = collect(expandedTree, (n) => n.type === "pre");
+	assert.equal(pre.length, 1, "the expandable body must render once after expanding");
+	assert.equal(pre[0].text, full);
+	// aria-expanded must track the same state the body does.
+	const expandedToggle = collect(expandedTree, (n) => n.type === "button")[0];
+	assert.equal(expandedToggle.props["aria-expanded"], true);
+});
+
+test("chat renderer tolerates a node without content or summary", () => {
+	// The row must not throw on a partially-populated node: `buildViewNode`
+	// returns null only when NO state was started, so a node whose data lacks
+	// `content` can still reach the renderer.
+	const react = makeReactDouble();
+	const reactRequire = (id) => {
+		if (id === "react") return react;
+		if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Toast: function Toast() {} };
+		throw new Error(`unexpected require: ${id}`);
+	};
+	const { ctx, slotRegistrations } = makeCtx();
+	capturedModule.factory(reactRequire).apply(ctx);
+	const Row = slotRegistrations
+		.filter((entry) => entry.name === "conversation.chat.node")[0].value.component;
+
+	react.beginPass();
+	// No `t` seat supplied at all: the component must fall back to the key
+	// instead of throwing, since a partially-populated node can still arrive.
+	const tree = expand(Row({ node: { kind: CHAT_NODE_KIND, data: {} } }));
+	assert.match(treeText(tree), /row\.noticeLabel/);
 });
 
 // ── effort capability check (option A) ─────────────────────────────────────
@@ -588,7 +738,7 @@ async function renderSettingsCard({ groups, value }) {
 		settingsValue: value
 	});
 	capturedModule.factory(reactRequire).apply(ctx);
-	const card = slotRegistrations[0].value.component;
+	const card = cardRegistrations(slotRegistrations)[0].value.component;
 	// Same interpolation contract the locale runtime provides.
 	const t = (key, params) => {
 		const template = dictionaries.zh?.[key] ?? key;
@@ -727,16 +877,17 @@ test("cards bind to the namespace the host actually serves when the mirror is la
 	apply(ctx);
 
 	// At apply time the mirror had nothing: no binding yet, no cards yet.
+	const cardsOf = (regs) => regs.filter((d) => d.name.startsWith("plugins."));
 	assert.deepEqual(bound, [], "must not bind a namespace while the mirror is still empty");
-	assert.equal(slotRegs.length, 0, "cards must wait for a served namespace instead of registering against a guess");
+	assert.equal(cardsOf(slotRegs).length, 0, "cards must wait for a served namespace instead of registering against a guess");
 
 	// The async mirror load lands: the host now serves include:<entry id>.
 	assert.ok(typeof servedCallback === "function", "apply must subscribe through whileServed");
 	servedCallback();
 
 	assert.deepEqual(bound, ["include:dsh-subagent-default-model"], "the bind must use the served namespace, not the declared id");
-	assert.equal(slotRegs.length, 2, "both placements register once the namespace is served");
-	assert.deepEqual(slotRegs.map((d) => d.name), ["plugins.bundle.config", "plugins.row.config"]);
+	assert.equal(cardsOf(slotRegs).length, 2, "both placements register once the namespace is served");
+	assert.deepEqual(cardsOf(slotRegs).map((d) => d.name), ["plugins.bundle.config", "plugins.row.config"]);
 });
 
 test("binds to the include:-prefixed namespace the Desktop host actually serves", async () => {
