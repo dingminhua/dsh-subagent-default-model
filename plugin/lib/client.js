@@ -126,20 +126,33 @@ window.__ModuleLoader__.load({
      * while the mirror is not ready.
      *
      * @param {object} forms - the `configForms` client service.
+     * @param {Set<string>} [servedNamespaces] - authoritative served-namespace set
+     *   handed over by `configForms.whileServed(...)`. When present it is preferred
+     *   over the mirror snapshot, because it is the very set that decided the
+     *   registration was due — the mirror may still be mid-fold.
      * @returns {string} the namespace to pass to `forms.get()`.
      */
-    function subagentEntryIdOf(forms) {
-      try {
-        var view = forms.describe().getSnapshot().view;
-        var namespaces = (view && view.namespaces) || [];
-        var served = namespaces.find(function (entry) {
-          return entry.ns === SUBAGENT_MODEL_SETTINGS_NS;
-        }) ?? namespaces.find(function (entry) {
-          return entry.ns === "include:" + SUBAGENT_MODEL_SETTINGS_NS;
-        }) ?? namespaces.find(function (entry) {
-          return /subagent-default-model/i.test((entry && entry.ns) || "");
+    function subagentEntryIdOf(forms, servedNamespaces) {
+      var pick = function (names) {
+        return names.find(function (ns) {
+          return ns === SUBAGENT_MODEL_SETTINGS_NS;
+        }) ?? names.find(function (ns) {
+          return ns === "include:" + SUBAGENT_MODEL_SETTINGS_NS;
+        }) ?? names.find(function (ns) {
+          return /subagent-default-model/i.test(ns || "");
         });
-        if (served !== undefined && typeof served.ns === "string" && served.ns !== "") return served.ns;
+      };
+      try {
+        if (servedNamespaces && typeof servedNamespaces.has === "function") {
+          var fromServed = pick(Array.from(servedNamespaces));
+          if (typeof fromServed === "string" && fromServed !== "") return fromServed;
+        }
+        var view = forms.describe().getSnapshot().view;
+        var namespaces = ((view && view.namespaces) || []).map(function (entry) {
+          return entry && entry.ns;
+        });
+        var served = pick(namespaces);
+        if (typeof served === "string" && served !== "") return served;
       } catch (_e) { /* mirror not ready: the declared id is still the right guess */ }
       return SUBAGENT_MODEL_SETTINGS_NS;
     }
@@ -734,30 +747,72 @@ window.__ModuleLoader__.load({
 
       // `configForms` is the 0.1.7 client settings surface; soft-inject it so the
       // card simply stays absent when the service is unavailable, instead of
-      // blocking the whole client plugin. The served namespace is probed (see
-      // `subagentEntryIdOf`) rather than assumed — see that function.
+      // blocking the whole client plugin.
+      //
+      // Register through `whileServed`, NOT a one-shot `forms.get(...)`.
+      // The describe mirror loads ASYNCHRONOUSLY (`mirror.ensure()`), so a probe
+      // run during `apply` can execute before `view` exists. `subagentEntryIdOf`
+      // then sees zero namespaces and falls back to the declared entry id
+      // (`dsh-subagent-default-model`) while the Desktop host actually serves
+      // `include:dsh-subagent-default-model`. The mismatch makes the host's
+      // `ConfigFormController.derive()` park the form at `status: 'unavailable'`
+      // — silently, with no error — and `derive()` only re-runs on a mirror
+      // change. Because the scope was already captured, the card stayed
+      // unavailable FOREVER and its Save button was permanently disabled
+      // (`saveDisabled` includes `snap.status !== 'ready'`).
+      //
+      // `whileServed` re-invokes the registration each time one of the watched
+      // namespaces enters the mirror, and hands it the served set — so the
+      // namespace is resolved from the authoritative directory at the moment it
+      // actually exists. It also disposes the contribution when the namespace
+      // goes away. Every official consumer registers this way.
       ctx.inject(["configForms"], function (formsCtx) {
         var forms = formsCtx.configForms;
-        subagentScope = forms.get(subagentEntryIdOf(forms));
 
-        var registerCard = function (slotName, key) {
-          try {
-            ctx.slots.inject(slotName, function () {
-              return ctx.slots.register({
-                name: slotName,
-                key: key,
-                locale: SUBAGENT_ROW_LOCALE,
-                inject: subagentRowInjected
-              }, SubagentModelCard);
-            });
-          } catch (error) {
-            console.error('[dsh-subagent-default-model] settings card slot "' + slotName + '" failed to register (host provider unaffected):', error);
-          }
+        var registerCards = function (namespace) {
+          subagentScope = forms.get(namespace);
+          var disposers = [];
+          var registerCard = function (slotName, key) {
+            try {
+              disposers.push(ctx.slots.inject(slotName, function () {
+                return ctx.slots.register({
+                  name: slotName,
+                  key: key,
+                  locale: SUBAGENT_ROW_LOCALE,
+                  inject: subagentRowInjected
+                }, SubagentModelCard);
+              }));
+            } catch (error) {
+              console.error('[dsh-subagent-default-model] settings card slot "' + slotName + '" failed to register (host provider unaffected):', error);
+            }
+          };
+          // 0.1.7 placement: register under Plugins config surfaces (the old
+          // `settings.plugin.item` slot was removed in 0.1.7).
+          registerCard("plugins.bundle.config", "dsh-subagent-default-model");
+          registerCard("plugins.row.config", "dsh-subagent-default-model#dsh-subagent-default-model");
+          return function () {
+            while (disposers.length) {
+              var off = disposers.pop();
+              if (typeof off === "function") off();
+            }
+            subagentScope = null;
+          };
         };
-        // 0.1.7 placement: register under Plugins config surfaces (the old
-        // `settings.plugin.item` slot was removed in 0.1.7).
-        registerCard("plugins.bundle.config", "dsh-subagent-default-model");
-        registerCard("plugins.row.config", "dsh-subagent-default-model#dsh-subagent-default-model");
+
+        // `whileServed` is the 0.1.7 contract. Fall back to a direct registration
+        // only if a host somehow lacks it, so the card still appears.
+        if (typeof forms.whileServed === "function") {
+          ctx.effect(function () {
+            return forms.whileServed(
+              [SUBAGENT_MODEL_SETTINGS_NS, "include:" + SUBAGENT_MODEL_SETTINGS_NS],
+              function (served) {
+                return registerCards(subagentEntryIdOf(forms, served));
+              }
+            );
+          }, "dsh-subagent-default-model: settings cards follow the served namespace");
+        } else {
+          registerCards(subagentEntryIdOf(forms));
+        }
       });
     }
 

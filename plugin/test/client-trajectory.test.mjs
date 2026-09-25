@@ -660,20 +660,83 @@ test("panel render stays clean for an unknown model (lagging catalog is not a wa
 test("resolves the served settings namespace instead of assuming the bare id", async () => {
 	// 0.1.7 的 configForms.get() 对宿主 served-namespace 目录做**精确匹配**，而
 	// Desktop 宿主以 `include:<包名>` 挂载社区 bundle（真机核对：host/Config 的
-	// listConfigs 以 include:dsh-ldvh 寻址）。硬编码声明 id 会让设置卡绑定到
-	// 无人服务的命名空间——status: unavailable，静默失效、不报错。
-	assert.ok(clientSource.includes("function subagentEntryIdOf(forms)"), "must probe the served namespace from the configForms mirror");
+	// listConfigs 以 include:dsh-subagent-default-model 寻址）。硬编码声明 id 会让
+	// 设置卡绑定到无人服务的命名空间——status: unavailable，静默失效、不报错。
+	//
+	// 关键：解析必须发生在**命名空间真的被服务时**，而不是 apply 时探测一次。
+	// mirror 是异步加载的（mirror.ensure()），apply 期探测可能落空并回落到声明 id，
+	// 而回落后**永不重探** —— 表现就是保存按钮永久禁用（saveDisabled 含
+	// snap.status !== 'ready'）。官方范式是 configForms.whileServed(...)，它在
+	// 命名空间进入 mirror 时重新调用注册函数，并把 served 集合交给它。
+	assert.ok(clientSource.includes("function subagentEntryIdOf(forms, servedNamespaces)"), "resolver must accept the served-namespace set from whileServed");
 	assert.ok(clientSource.includes("forms.describe().getSnapshot().view"), "probe reads the served-namespace directory from the mirror");
-	assert.ok(clientSource.includes("entry.ns === SUBAGENT_MODEL_SETTINGS_NS"), "probe matches the declared entry id exactly first");
-	assert.ok(clientSource.includes('entry.ns === "include:" + SUBAGENT_MODEL_SETTINGS_NS'), "probe then accepts the include:-prefixed form");
-	assert.ok(clientSource.includes("/subagent-default-model/i.test((entry && entry.ns) || \"\")"), "probe finally falls back to a package-name substring match");
+	assert.ok(clientSource.includes("servedNamespaces.has"), "the whileServed set is consulted first (mirror may still be mid-fold)");
+	assert.ok(clientSource.includes("SUBAGENT_MODEL_SETTINGS_NS"), "probe matches the declared entry id exactly first");
+	assert.ok(clientSource.includes('"include:" + SUBAGENT_MODEL_SETTINGS_NS'), "probe then accepts the include:-prefixed form");
+	assert.ok(clientSource.includes("/subagent-default-model/i.test(ns || \"\")"), "probe finally falls back to a package-name substring match");
 	// The constant must be the Loader entry id, NOT the pre-0.1.7 settings.yaml
 	// section name: on 0.1.7 the namespace IS the entry id, and the legacy name
 	// belongs to the removed standalone-settings model.
 	assert.ok(clientSource.includes('var SUBAGENT_MODEL_SETTINGS_NS = "dsh-subagent-default-model"'), "the fallback constant must be the Loader entry id (cordis.patch.yml insert.id)");
 	assert.ok(!clientSource.includes('SUBAGENT_MODEL_SETTINGS_NS = "subagent-default-model"'), "must not fall back to the legacy 0.1.6 section name");
 	assert.ok(!clientSource.includes("configForms.get(SUBAGENT_MODEL_SETTINGS_NS)"), "must not call get() with the bare declared id — bind the probed ns instead");
-	assert.ok(clientSource.includes("forms.get(subagentEntryIdOf(forms))"), "the bind site must go through the resolver");
+	// The bind site must re-run per served-set change, not capture once at apply.
+	assert.ok(clientSource.includes("forms.whileServed("), "the cards must follow whileServed, not a one-shot get() during apply");
+	assert.ok(clientSource.includes("registerCards(subagentEntryIdOf(forms, served))"), "each whileServed pass binds the namespace resolved from the served set");
+});
+
+test("cards bind to the namespace the host actually serves when the mirror is late", async () => {
+	// Behavioural guard for the permanent-Save-disable regression.
+	//
+	// Timeline: apply() runs while the mirror is EMPTY (the async load has not
+	// landed), so the resolver cannot see `include:...` yet. A one-shot probe
+	// would capture the bare declared id and park the form at `unavailable`
+	// forever. `whileServed` instead re-registers when the namespace appears.
+	const bound = [];
+	const slotRegs = [];
+	let servedCallback = null;
+	const forms = {
+		describe: () => ({ getSnapshot: () => ({ view: { namespaces: [] } }) }), // mirror still empty
+		get: (ns) => {
+			bound.push(ns);
+			return {
+				getSnapshot: () => ({ status: ns === "include:dsh-subagent-default-model" ? "ready" : "unavailable", writable: true, value: {} }),
+				subscribe: () => () => {}, set: async () => true,
+			};
+		},
+		whileServed: (namespaces, register) => {
+			// The host calls `register(served)` once a watched ns enters the mirror.
+			servedCallback = () => register(new Set(["include:dsh-subagent-default-model"]));
+			return () => { servedCallback = null; };
+		},
+	};
+	const services = {
+		uiConversation: { events: { register: () => () => {} } },
+		configForms: forms,
+	};
+	const ctx = {
+		get: (n) => services[n],
+		inject: (deps, cb) => { const miss = deps.filter((d) => services[d] === undefined); if (miss.length) return () => {}; const d = Object.create(null); for (const k of deps) d[k] = services[k]; return cb(d); },
+		effect: (cb) => { const off = cb(); return () => {}; },
+		on: () => () => {}, emit: () => {},
+		locale: { register: () => () => {}, bind: () => (k) => k },
+		slots: { inject: (s, cb) => cb(), register: (def) => { slotRegs.push(def); return () => {}; } },
+		uiConversation: services.uiConversation,
+	};
+	const { apply } = capturedModule.factory(factoryRequire);
+	apply(ctx);
+
+	// At apply time the mirror had nothing: no binding yet, no cards yet.
+	assert.deepEqual(bound, [], "must not bind a namespace while the mirror is still empty");
+	assert.equal(slotRegs.length, 0, "cards must wait for a served namespace instead of registering against a guess");
+
+	// The async mirror load lands: the host now serves include:<entry id>.
+	assert.ok(typeof servedCallback === "function", "apply must subscribe through whileServed");
+	servedCallback();
+
+	assert.deepEqual(bound, ["include:dsh-subagent-default-model"], "the bind must use the served namespace, not the declared id");
+	assert.equal(slotRegs.length, 2, "both placements register once the namespace is served");
+	assert.deepEqual(slotRegs.map((d) => d.name), ["plugins.bundle.config", "plugins.row.config"]);
 });
 
 test("binds to the include:-prefixed namespace the Desktop host actually serves", async () => {

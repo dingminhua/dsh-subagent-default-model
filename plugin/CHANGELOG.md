@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0.1 (2026-09-25)
+
+### Fixed
+
+- **设置卡的「保存」按钮永久灰着、点不动（P0）：命名空间在 `apply` 期只探测一次，落空后永不重探**。`lib/client.js` 原本写作 `subagentScope = forms.get(subagentEntryIdOf(forms))` —— 一次性的 `get()`。但 `configForms` 的 describe mirror 是**异步加载**的（`mirror.ensure()`），`apply` 跑的时候 `view` 往往还不存在；此时 `subagentEntryIdOf` 看不到任何命名空间，只能回落到**声明条目 id** `dsh-subagent-default-model`，而桌面宿主实际服务的是 **`include:dsh-subagent-default-model`**。
+  绑定错命名空间后，宿主的 `ConfigFormController.derive()` 找不到对应 `view`，把表单停在 `status: 'unavailable'`（**静默，不报错**），而 `derive()` 只在 mirror 变化时重跑——**而作用域早已被捕获，于是永远停在 unavailable**。卡片的 `saveDisabled` 含 `snap.status !== "ready"`，因此保存按钮**永久禁用**；同时因 `value` 为 undefined，卡片还会退化成「尚未指定默认模型」的空态。
+  已改为 0.1.7 的官方范式 **`configForms.whileServed([...], (served) => …)`**：命名空间**进入 mirror 时**才注册贡献，并把宿主实际服务的命名空间集合交给回调，据此解析并绑定；命名空间消失时自动卸载贡献。`subagentEntryIdOf(forms, servedNamespaces)` 现优先使用该集合（它正是判定「该注册了」的依据，mirror 可能仍在折叠中），mirror 快照退居其次。
+  这是 `remote.session` 那条的**同类第三次**：**「取一次就捕获」在异步就绪的服务上必然出错**。
+  诊断与验证（不依赖 Electron）：以宿主 `derive()` 的真实语义构造两类作用域，渲染同一张卡片并触发改动 —— 正确绑定（`ready`）→ `Save disabled = false`（可保存）；错误绑定（`unavailable`）→ `Save disabled = true`（永久禁用）。修复前用一次性 `get()` 恰是后者。
+
+### Testing
+
+- 新增 1 个 **行为级**用例 `cards bind to the namespace the host actually serves when the mirror is late`：mirror 为空时 `apply` 必须**不**绑定任何命名空间、**不**注册卡片；待宿主服务的命名空间出现后，绑定必须落在 `include:<条目 id>` 上并注册两个放置点。
+- 改写 `resolves the served settings namespace instead of assuming the bare id`，使其断言 `whileServed` 契约（含 `servedNamespaces.has` 优先与逐次绑定），而不再固定旧的一次性 `get()` 形状。
+- 两者均**变异验证**过：把实现改回「`apply` 期一次性探测」后立刻变红，还原即全绿。全量 **86 项通过**。
+
 ## 2.0.0 (2026-09-25)
 
 ### Breaking
