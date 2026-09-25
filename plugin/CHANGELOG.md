@@ -1,5 +1,74 @@
 # Changelog
 
+## 2.0.0 (2026-09-25)
+
+### Breaking
+
+- **宿主最低版本提升至 `@deepseek-ai/dsh >= 0.1.7-rc.1`**（peer 区间收窄为 `>=0.1.7-rc.1 <0.2.0`，全部 8 个 `@deepseek-ai/*` peer 一致）。0.1.7 线删除了本插件此前依赖的三处契约：`@deepseek-ai/dsh-settings` 的 `installSettingsSection` / `settingsNamespace` 命名导出、客户端 `settingsScope` 服务与 `settings.plugin.item` 槽位。依据同族插件 `dsh-ldvh` 的同源调研。
+
+### Changed
+
+- **设置接入迁移到 0.1.7「插件 Config 即设置」模型**：`lib/index.js` 导出 `Config`（字段逐个 `.volatile()`），移除对 `@deepseek-ai/dsh-settings` 的**命名导入**——该导入在 0.1.7 上会导致模块链接期失败、整个宿主插件无法装载，且因 peer 区间「覆盖了该版本」而不会被版本检查拦下（**范围覆盖 ≠ 符号仍存在**）。写入改走 profile patch（经宿主 `configEditor`）。
+- **客户端设置面迁移**：硬注入 `settingsScope`（0.1.7 已删除，会让整个客户端插件永不 apply）改为仅硬注入 `slots` / `locale`，`configForms` 改软注入；设置卡从已删除的 `settings.plugin.item` 迁到 `plugins.bundle.config` 与 `plugins.row.config` 双注册。
+- **设置卡对齐同族范式**：`view: 'page'` 默认展开、`view: 'summary'` 只渲染一行描述，展开/收起按钮补 `aria-label`。
+- **`dsh-client-ui-primitives` 图标族适配**：尺寸数字后缀（`…Outline14`）→ 粗细语义后缀（`…OutlineRegular` / `…Medium`），改为按名探测取第一个可用者并在渲染点兜底——把宿主改名造成的渲染期**硬崩溃**降级为视觉降级。
+
+### Fixed
+
+- **宿主整体装载失败（P0）：依赖树指向已被删除的 `/Applications/DSH Desktop.app`**。`plugin/node_modules/@deepseek-ai/` 下的 `schemastery` / `cordis` / `dsh-settings` 三个条目是**指向旧应用包的符号链接**；应用换成 `DSH NEXT.app` 后这些链接全部悬空，`lib/index.js` 第一行的 `import z from "@deepseek-ai/schemastery"` 直接 `ERR_MODULE_NOT_FOUND`。宿主表现为 `dsh-subagent-default-model (dsh-subagent-default-model): failed to import`，插件**一行都没跑**——而 `npm test` 仍全绿。已删除悬空链接并以 `npm install` 重建为真实目录。判据：`find node_modules -maxdepth 3 -type l ! -exec test -e {} \; -print` 必须为空。
+- **devDependency 精确锁定致 `npm install` ERESOLVE**：`@deepseek-ai/dsh-settings` 写死 `0.1.7-rc.1`，而它自身 peer 依赖 `@deepseek-ai/dsh-brand@0.1.7-rc.1`，该包只发布了 `0.1.7-rc.2`，于是干净安装直接失败。这正是本仓 CHANGELOG **1.2.2 已经记过的那条教训**（「此处必须用范围而非精确锁定」）——被 0.1.7 适配时的版本推进重新踩了一次。已改为 `^0.1.7-rc.1`。
+- **旧 `settings.yaml` 配置不会随 0.1.7 迁移过来**：0.1.6 及更早，本插件把配置注册为 `~/.dsh/settings.yaml` 的 `subagent-default-model` 段。0.1.7 起该文件在启动时被**一次性导入并改名**为 `settings.yaml.imported`（改名先于首次写入，所以部分导入永不重试），导入按段名**直接当条目 id** 使用，而本插件的条目 id 是 `dsh-subagent-default-model`——于是该段导入失败，宿主日志留 `section subagent-default-model … was not imported into entry subagent-default-model`，`profile/cordis.patch.yml` 里始终没有本插件的 `config:`。**本机实测命中**：旧值仍在 `.imported` 文件中，需手工搬进 profile patch。README / DEVELOPMENT.md 已改为描述 0.1.7 的真实存储位置并写明该陷阱（原文档仍在教用户编辑 `~/.dsh/settings.yaml`）。
+- **设置保存必然失败（P0）**：`Config` 未声明 `reasoningEffort`，而设置卡的保存路径每次都写入该键。宿主 `@deepseek-ai/dsh-settings` 的 `write()` 对每个写入路径执行 `Config field "…" is not volatile` 门禁，因此**任何一次保存都被拒绝**——不只是改推理强度，而是整张设置卡存不进去，且界面只显示笼统的「保存失败」。已把 `reasoningEffort` 补为声明字段并标记 volatile；`getSection()` 同步读回该键，否则单模型形态配置的推理强度会被静默忽略。
+- **设置卡可能绑定到无人服务的命名空间**：0.1.7 的 `configForms.get()` 对宿主 served-namespace 目录做**精确匹配**，而桌面宿主以 `include:<包名>` 挂载 Loader 条目。绑定错误时 `status: unavailable`、**静默失效不报错**（同 `dsh-ldvh` abb35db、`dsh-connect-workbuddy` 2.0.16 修掉的同一类坑）。现抽为具名 `subagentEntryIdOf(forms)`，按「声明条目 id → `include:<条目 id>` → 包名子串」的顺序匹配，仅在 mirror 未就绪时回落到声明 id。已用真机命名空间 `include:dsh-subagent-default-model` 做端到端绑定验证。
+- **回落常量取的是已退役的 0.1.6 段名**：`SUBAGENT_MODEL_SETTINGS_NS` 原为 `"subagent-default-model"`，那是 0.1.6 及更早 `settings.yaml` 独立设置模型里的段名；0.1.7 起命名空间**就是 Loader 条目 id** `"dsh-subagent-default-model"`。mirror 未就绪时按旧名回落会绑定到无人服务的命名空间。已改为条目 id；`lib/index.js` 中被遗留的同名常量（仅声明、从未使用）一并删除——宿主而非插件拥有「条目 id ↔ 命名空间」的映射，插件不该保留第二份。
+- **图标回退分支无样式**：`IconChevronDown` 探测全缺失时渲染 `.dsm-plugin-card-caret` 字形，但该类**只有使用点、没有 CSS 规则**。已补规则，并加守卫用例禁止「渲染了却无规则」的类再次出现。
+- **设置卡的 Provider / Model 下拉永远为空（P0）：`remote.session` 是异步挂载的服务，插件却在 `apply` 时只取一次**。`lib/client.js` 原写法 `var sessionRemote = ctx.get("remote.session")` 把叶服务**捕获**进变量；而该服务由网关的**异步** `remote.$mount()` 注册（`packages/api/gateway/src/client/index.ts`：`remoteServiceKey(ns)` → `remote.<ns>`，挂载点在 `async $mount` 内）。`apply` 跑的时候网关通常还没挂完 → 捕获到 `undefined` → `loadCatalog` 从此恒返回空数组，**而且因为值是捕获的，之后挂载完成也永远不会重取**。表现就是设置卡能打开、两个下拉却没有任何可选项。
+  已改为**每次调用时懒探测**（先 `ctx.get("remote.session")`，再退回 `ctx.get("remote")?.session`），晚到的挂载即可被拾取；网关始终缺失时仍降级为空下拉且不抛错。官方同功能卡片（`ui-settings-subagent`）是把 `'remote','remote.session'` 写进 `inject` 让 Cordis 等待；本插件保持软注入（网关缺失不该扣下整张卡），因此改用重探测达到同样效果。
+- **同族坑：`ctx.get()` 不按点号拆分**。Cordis 的 `get(name)` 是整串查表（`this.ctx[symbols.isolate][name]`），`"remote.session"` 之所以成立，是因为网关真的以这个字面量注册了服务（`remote.${namespace}`），不是 `remote` 的嵌套属性访问。所以「带点的服务名」能否解析，只能以**是否有人注册过该整串**为准——按「父对象.子属性」去推断会得到错误结论。
+- **Plugins 详情页整块没有配置区（P0）：读取未在 `inject` 声明的服务会抛错，把 `apply` 后半段整段打断**。`lib/client.js` 用 `if (ctx.uiConversation && ctx.uiConversation.events && …)` 这种「守卫写法」读 `ctx.uiConversation`，而它**没有**出现在 `inject` 里。Cordis 对未声明的服务**不返回 `undefined`**，而是抛 `cannot get property "uiConversation" without inject`（Cordis `lib/index.js` 的 service accessor；已用真实 `new Context()` 复现）。因此那个 `&&` 守卫**完全无效**——求值 `ctx.uiConversation` 本身就是抛错点。
+  致命之处在于位置：该读取位于 `apply()` **中段**，它一抛，**其后**的 `ctx.inject(["configForms"], …)` 整块——也就是注册设置卡的那段——再也不会执行。于是详情页连配置区外壳都不出现（宿主只在 `ledger.bundles.has(包名)` 时才渲染该区块），且宿主日志只留一行、没有栈。
+  已把 `uiConversation` 加进 `inject`（与官方全部 7 个消费者一致：ui-chat / ui-plan / ui-deliverables / ui-open-in-app / ui-settings-account / ui-settings-models / ui-model-selection）。`configForms` 仍走软注入——它本身是可选的，且 `ctx.inject` 正是「等它就绪而不抛错」的 API。
+- **同族坑：`ctx.<service>` 的读取必须声明，`ctx.get()` 才是无声明探测**。前者抛错、后者返回 `undefined`。凡「想可选地用一个服务」只能走 `ctx.get` / `ctx.inject`；写成 `if (ctx.foo && …)` 不但拦不住，还会把 `apply` 打断在最坏的位置。
+- **「当前供应商/模型」上下文行不再出现（P0）：0.1.7 适配时把 `uiConversation` 从 `inject` 里误删，导致每次 `apply` 都在读它时抛错**。对照本仓 HEAD 可见演进：适配前是 `["slots","locale","settingsScope","remote","remote.session","uiConversation"]`，适配后只剩 `["slots","locale"]` —— `uiConversation` **不在 0.1.7 的删除清单里**（被删的是 `settingsScope`），属误伤。而本轮 §「未声明服务读取会抛错」已证明：读未声明的服务是**抛错**而非返回 undefined，于是 `apply` 在第 610 行中断，其后两个 `events.register` 与设置卡注册全部不执行——用户可感的正是**「切换模型/当前模型的上下文提示消失」**。已把 `uiConversation` 加回 `inject`。
+- **同族坑：`ConversationEventRegistry.register` 对重复 `kind` 抛错，必须包进 `ctx.effect`**。我们把两个 conversation 定义**裸调**注册且丢弃 disposer（`conversation Definition "<kind>" is already registered`）。Cordis 在替换 fiber 时会再次执行 `apply`，第二次注册即抛错——修复 `inject` 后它仍会中断 `apply` 后半段（含设置卡）。官方全部消费者（`ui-plan`、`ui-deliverables` …）都写作 `ctx.effect(() => ctx.uiConversation.events.register(def), '…')`，让 Cordis 在重挂前先释放。已按该范式包裹两处。
+  注意：**多定义 `match` 同一事件是设计允许的**——`assembler.dispatchInput` 会遍历**所有**定义并逐个 `accept`，不是「先到先得」。因此本插件的 `request/header` 定义与官方 `ui-trajectory` 的同名匹配**不冲突**，可见性问题与匹配竞争无关。
+- **客户端半边整体不激活（P0）：`apply` 重复执行时命中宿主 locale 重名抛错**。`lib/client.js` 的 `apply` 在函数最开头无条件调用 `ctx.locale.register("settings.subagentModel", …)`，且**丢弃返回值**。宿主 `@deepseek-ai/dsh-client-locale` 对「命名空间已有该语言」是**抛错**（`locale namespace "…" already has locale "…"`），而 Cordis 在 fiber 被替换时会再次执行 `apply`——于是第二次 apply 在注册设置卡**之前**就抛错。宿主表现为 `web boot: 1 entry did not activate` / `dsh-subagent-default-model: failed`，客户端半边**全部贡献**（设置卡、轨迹行、对话行）都不注册，且宿主日志只留一行，没有栈。
+  已按同族 `dsh-ldvh` / `dsh-sub-cli` 的范式把登记包进 `ctx.effect(...)` 并**接住两个 disposer**：Cordis 在重挂前会先释放上一次登记，重入即从干净命名空间开始。
+  复现与验证方式（不依赖 Electron）：以真实 `locale` 语义（重名抛错）+ Cordis 语义（effect 在重挂前释放）构造 stub，连跑三次 `apply` —— 修复前 `#1:OK #2:THREW #3:THREW`，修复后 `#1:OK #2:OK #3:OK`。
+  **这一条是被「测试全绿」掩盖的第三个 P0**：原测试的 `locale.register` stub 只做字典合并、从不抛错，所以永远测不出只对第一次 apply 成立的登记。
+
+### Notes
+
+- **`npm test` 全绿不能证明宿主能装载**：测试与宿主走的是两条不同的模块解析路径（测试从 `plugin/` 解析，宿主从 profile 经软链解析）。本轮三个 P0 里有**三个**在测试全绿的情况下依然让插件完全不可用。宿主编译期的唯一判据是**真正 import 一次**：`cd ~/.dsh/profiles/<profile> && node --input-type=module -e 'import("<包名>")'`。
+- **stub 比被测代码宽松时，测试会给假绿灯**：`locale` 那条 P0 的根因就是 stub 省略了宿主唯一的失败路径（重名抛错）。写 stub 时应**先读宿主实现**再决定放行什么——本次是照 `dsh-client-locale/lib/client.js` 的重名抛错逐字建模后，才复现出来。
+- **客户端半边是否真的激活，要按 `failed` / `pending` 区分**：两者都表现为「插件在 Web 上不见了」，但机制相反——`pending (waiting for service: …)` 是硬注入了一个不存在的服务（apply 因为等不到服务而从未运行）；`<id>: failed` 是 apply **跑了但抛错**。查证入口是 `~/Library/Logs/DeepSeek Harness/crash-*-web-boot.log`，它同时给出判据行与 renderer console。
+- **改完 `node_modules` 后，已在运行的宿主进程不会重新 import**：它把失败状态留在内存里，`plugin_manager` 反复 enable/disable 都返回同一个 `failed to import`，且不再写新日志。验证修复必须**重启应用**，而不是重试开关。
+
+
+### Docs
+
+- **安装入口改写**：`dsh plugin --profile desktop add <path>` 在新版桌面壳上会被拒绝（`profile "desktop" is managed exclusively by the Electron application`）。DEVELOPMENT.md 改为走 DSH Desktop 内插件管理 / `plugin_manager` 的 `install_bundle`（target = 插件包绝对路径），并补上三条安装后核对（bundle 列表、软链、`listConfigs` 条目 id）。
+- README（中/英，根与包内）配置示例从 `~/.dsh/settings.yaml` 段改为 profile patch 的 `config:` 块，并写明旧文件的一次性导入与段名不匹配陷阱。
+
+
+### Testing
+
+- `plugin/test/client-trajectory.test.mjs` 新增 5 个契约用例：服务命名空间必须经 `subagentEntryIdOf` 解析且不得裸调 `get(声明id)`、`include:` 前缀命名空间下必须绑定到宿主实际服务的那一个、回落常量必须是 Loader 条目 id 而非遗留段名、`page` 形态默认展开 / `summary` 形态只渲染一行、全部渲染类都必须有 CSS 规则；另加匹配优先级用例（宿主同时服务 `include:<条目id>` 与遗留段名时，精确匹配必须胜出）。
+- 新增 `plugin/test/dependency-integrity.test.mjs`（3 项）——把本轮两个 P0 变成测试能拦住的回归：① 依赖软链不得悬空（`lstatSync` 是链接但 `existsSync` 为假即失败）；② 声明的 runtime dependency 必须在 `node_modules` 里存在；③ devDependency 不得是精确预发布锁定（`^\d.*-` 即失败）。两条守卫都用**变异验证**过：重新造一个悬空链接、把 `dsh-settings` 改回 `0.1.7-rc.1`，各自都被对应用例抓住。
+- 全量 **85 项通过**（原 63 项 + 设置/图标契约 5 项 + 依赖完整性 3 项 + `apply` 重入契约 3 项 + 模型目录契约 3 项 + 服务声明契约 2 项 + 会话行注册契约 2 项 + 其余 4 项）；`node integration.mjs`（8 项）与 `node prove.mjs`（1 项）同样通过。
+- 新增 2 个 **会话行注册契约**用例（`plugin/test/client-trajectory.test.mjs`），针对「上下文提示消失」：① 用一个**重复 `kind` 即抛错**的注册表 stub 模拟宿主语义，断言三次 `apply`（中间执行 fiber teardown）都能把两个定义重新登记上去——修复前第二次即抛 `already registered`；② 静态守卫，要求两处 `ctx.uiConversation.events.register` 都必须写成 `ctx.effect(function () { return ctx.uiConversation.events.register(…) })`。
+  同样用**变异验证**过：把两处改回裸调后，上述 2 条立刻变红，改回即全绿。
+- 新增 2 个 **服务声明契约**用例（`plugin/test/client-trajectory.test.mjs`），其中一个用**真实 Cordis**（`new Context()` + `root.plugin({ inject })`）跑 `apply`，断言它必须**正常完成**而不是在未声明服务的读取处抛错——这正是「详情页没有配置区」的根因所在。另一个是静态守卫：把客户端源码去掉注释后，凡 `ctx.<service>` 形式的**属性读取**都必须出现在 `inject` 里。
+  同样用**变异验证**过：把 `uiConversation` 从 `inject` 拿掉后，上述 3 条（含真实 Cordis 那条）立刻变红，加回即全绿。
+- **跨 realm 断言注意**：客户端工厂由 `new Function` 执行，其数组带的是另一个 realm 的 `Array.prototype`，对两个「内容相同但来源不同」的数组用 `assert.deepEqual` 会误报失败（`actual: []` / `expected: []` 却判不等）。相关用例改用 `assert.equal(arr.length, …)` 比较。
+- 新增 3 个 **模型目录契约**用例（`plugin/test/client-trajectory.test.mjs`）：① `remote.session` 在 `apply` **之后**才挂载时，`loadCatalog` 必须重探测并取到目录；② 网关**始终缺失**时降级为空数组且不抛错；③ 守卫 `apply` 不得把 `remote.session` 捕获进变量（防止这个 bug 以任何形式复发）。
+  同样用**变异验证**过：把 `loadCatalog` 改回「`apply` 时一次性捕获叶服务」的原始写法后，①③ 立刻变红，改回修复版即全绿。
+- **跨 realm 断言注意**：客户端工厂由 `new Function` 执行，其数组带的是另一个 realm 的 `Array.prototype`，对两个「内容相同但来源不同」的数组用 `assert.deepEqual` 会误报失败（`actual: []` / `expected: []` 却判不等）。这两条用例改用 `assert.equal(arr.length, 0)` 比较。
+- 新增 3 个 **`apply` 重入契约**用例（`plugin/test/client-trajectory.test.mjs`）：① 以真实 `locale` 语义（重名抛错）连跑三次 `apply`，每次先释放上一 fiber 的登记，三次都必须干净登记；② 显式记录边界——宿主若**不**先释放就重挂，仍会抛 `already has locale`（所以登记必须留在 `ctx.effect` 内）；③ 断言 locale 登记确实被 `ctx.effect` 包住（否则 Cordis 无从释放）。
+  这 3 项同时用**变异验证**过：把 `lib/client.js` 改回「无条件登记、丢返回值」的原始写法后，①③ 立刻变红，改回修复版即全绿。
+- P0 已用**宿主门禁的独立复现**验证：对适配前的 5 字段 `Config` 跑宿主 `isVolatilePath`，`reasoningEffort` 判定为 `not volatile` → 写入抛错；补上该字段后 6 个写入路径全部通过。
+- 宿主接缝已逐项在**运行时目录**核对（不是只搜源码）：`agent/request-error`（waterfall）、`agent/request`（waterfall）、`agent/disposed`（emit）三者均存在；已删除的 `agent/session-start` 未被本插件引用；`subagents` 服务的 `start` / `startContinuable` 签名与包装点一致。
+
 ## 1.3.0 (2026-09-22)
 
 ### Features

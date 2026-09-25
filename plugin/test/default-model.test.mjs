@@ -1,25 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Context } from "@deepseek-ai/cordis";
-import { SettingsProvider } from "@deepseek-ai/dsh-settings";
 import * as defaultModelPlugin from "../lib/index.js";
 
-class MemorySettings extends SettingsProvider {
-	constructor(ctx, document) {
-		super(ctx, "settings");
-		this.document = document;
-	}
+// DSH 0.1.7 settings model: the plugin's `Config` IS the settings section, so
+// the harness passes config straight to `apply(ctx, config)` — there is no
+// `SettingsProvider` to publish and no settings service to mount. A config
+// update is a fresh apply (the host re-mounts the Loader row on a config write);
+// `undefined` means "no section configured", i.e. inherit the parent route.
 
-	async load() {
-		return this.document;
-	}
-
-	get writable() {
-		return false;
-	}
-}
-
-async function createHarness(document = {}, { continuable = true } = {}) {
+/**
+ * Mount the plugin with `config`.
+ *
+ * @param config - the resolved plugin Config (or undefined for "no section").
+ * @param options.continuable - drop `startContinuable` to model a host that
+ *   only exposes `start`.
+ */
+async function createHarness(config = undefined, { continuable = true } = {}) {
 	const root = new Context();
 	const calls = [];
 	const subagents = {
@@ -37,13 +34,11 @@ async function createHarness(document = {}, { continuable = true } = {}) {
 	const originalStartContinuable = subagents.startContinuable;
 	root.provide("subagents", subagents);
 
-	const settings = new MemorySettings(root, document);
-	await settings.load().then((loaded) => settings.publish(loaded));
 	await root[Symbol.for("cordis.init")]?.();
-	const fiber = root.registry.plugin(defaultModelPlugin);
+	const fiber = root.registry.plugin(defaultModelPlugin, config);
 	await fiber;
 
-	return { root, settings, subagents, originalStart, originalStartContinuable, calls, fiber };
+	return { root, config, subagents, originalStart, originalStartContinuable, calls, fiber };
 }
 
 async function disposeHarness(harness) {
@@ -51,11 +46,10 @@ async function disposeHarness(harness) {
 	await harness.root.fiber.dispose();
 }
 
+/** The section values as the host resolves them for the plugin's Config. */
 const defaultSection = {
-	"subagent-default-model": {
-		provider: "deepseek-official",
-		model: "deepseek-v4-pro"
-	}
+	provider: "deepseek-official",
+	model: "deepseek-v4-pro"
 };
 
 test("injects a configured single model", async () => {
@@ -98,13 +92,11 @@ test("preserves explicit agent options", async () => {
 	}
 });
 
-test("round-robins model entries and observes settings updates", async () => {
+test("round-robins model entries", async () => {
 	const harness = await createHarness({
-		"subagent-default-model": {
-			provider: "deepseek-official",
-			models: ["deepseek-v4-pro", "deepseek-v4-flash"],
-			strategy: "round-robin"
-		}
+		provider: "deepseek-official",
+		models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+		strategy: "round-robin"
 	});
 	try {
 		await harness.subagents.start("one", {});
@@ -114,20 +106,38 @@ test("round-robins model entries and observes settings updates", async () => {
 			harness.calls.map((call) => call.request.agentOptions.model),
 			["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-pro"]
 		);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
 
-		harness.settings.publish({
-			"subagent-default-model": {
-				provider: "deepseek-official",
-				model: "deepseek-v4-reasoner"
-			}
-		});
-		await harness.subagents.start("updated", {});
-		assert.deepEqual(harness.calls[3].request.agentOptions, {
+test("a config change takes effect on remount (the 0.1.7 write path)", async () => {
+	// On 0.1.7 the host writes a Config change back to the profile patch and
+	// re-mounts the row, so a new apply carries the new values. Model that by
+	// disposing the first fiber and mounting a second with the new config.
+	const first = await createHarness({
+		provider: "deepseek-official",
+		model: "deepseek-v4-pro"
+	});
+	try {
+		await first.subagents.start("one", {});
+		assert.equal(first.calls[0].request.agentOptions.model, "deepseek-v4-pro");
+	} finally {
+		await disposeHarness(first);
+	}
+
+	const second = await createHarness({
+		provider: "deepseek-official",
+		model: "deepseek-v4-reasoner"
+	});
+	try {
+		await second.subagents.start("updated", {});
+		assert.deepEqual(second.calls[0].request.agentOptions, {
 			provider: "deepseek-official",
 			model: "deepseek-v4-reasoner"
 		});
 	} finally {
-		await disposeHarness(harness);
+		await disposeHarness(second);
 	}
 });
 
@@ -170,7 +180,9 @@ test("disposal restores services and allows a clean remount", async () => {
 		await harness.subagents.start("after-dispose", { prompt: "hello" });
 		assert.equal(harness.calls[0].request.agentOptions, undefined);
 
-		const remounted = harness.root.registry.plugin(defaultModelPlugin);
+		// A remount carries the resolved Config explicitly on 0.1.7 (the host
+		// re-mounts the Loader row with the current config after a write).
+		const remounted = harness.root.registry.plugin(defaultModelPlugin, harness.config);
 		await remounted;
 		await harness.subagents.start("after-remount", { prompt: "hello" });
 		assert.deepEqual(harness.calls[1].request.agentOptions, {

@@ -2,7 +2,7 @@
 
 English | [中文](README.md)
 
-Pick the default model for subagent delegations in [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness), configurable via `~/.dsh/settings.yaml`.
+Pick the default model for subagent delegations in [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness), configured through the plugin's own settings card (its Cordis `Config`), stored in the profile's `cordis.patch.yml`.
 
 When a subagent is created without an explicit `model`, this plugin injects the configured default — so every `subagent`, `subagent_fork`, and any tool that omits `agentOptions` routes through it. Explicit per-call overrides always win; an absent or incomplete settings section keeps the historical behavior (children inherit the parent route).
 
@@ -82,33 +82,36 @@ Notes:
 
 ## Configuration
 
-Add to `~/.dsh/settings.yaml`:
+Use the Web settings card (**Settings → Plugins → dsh-subagent-default-model**).
+
+You can also edit the profile patch `~/.dsh/profiles/<profile>/cordis.patch.yml` directly: since DSH 0.1.7 that is where settings live, keyed by this plugin's Loader entry id `dsh-subagent-default-model`:
 
 ```yaml
-# Single model
-subagent-default-model:
-  provider: deepseek-official
-  model: deepseek-v4-pro
+- id: dsh-subagent-default-model
+  name: dsh-subagent-default-model
+  config:
+    # Single model
+    provider: deepseek-official
+    model: deepseek-v4-pro
 
-# Or multiple models
-subagent-default-model:
-  provider: deepseek-official
-  models:
-    - deepseek-v4-pro
-    - deepseek-v4-flash
-  strategy: round-robin  # round-robin | random
+    # Or multiple models
+    provider: deepseek-official
+    models:
+      - deepseek-v4-pro
+      - deepseek-v4-flash
+    strategy: round-robin  # round-robin | random
 
-# With reasoning strength
-subagent-default-model:
-  provider: deepseek-official
-  models:
-    - model: deepseek-v4-reasoner
-      reasoningEffort: high
-    - provider: other-provider
-      model: gpt-5.6
-      reasoningEffort: max
-  strategy: round-robin  # round-robin | random
+    # Or with per-route reasoning strength
+    provider: deepseek-official
+    models:
+      - model: deepseek-v4-reasoner
+        reasoningEffort: high
+      - provider: other-provider
+        model: gpt-5.6
+        reasoningEffort: max
 ```
+
+> **Upgrading from 0.1.6 or earlier**: the old configuration lived in the `subagent-default-model` section of `~/.dsh/settings.yaml`. 0.1.7 imports that file **once** and renames it to `settings.yaml.imported`, never reading it again. The import uses each section name verbatim as an entry id, while this plugin's entry id is `dsh-subagent-default-model` — so the old section is **not** imported (the host logs `section subagent-default-model … was not imported into entry subagent-default-model`) and the old values survive only in the renamed file. Move them into the `config:` block above by hand.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |

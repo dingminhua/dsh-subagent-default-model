@@ -1,20 +1,13 @@
 // Regression guard for the `@deepseek-ai/*` peer range contract.
 //
-// Why this exists: semver excludes a prerelease version from a comparator set
-// unless some comparator in that set carries a prerelease with the SAME
-// [major, minor, patch] tuple. The original range
-//
-//   ^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0
-//
-// therefore admitted 0.1.2-rc.1 but NOT 0.1.5-rc.1 — the exact kernel version
-// DSH Desktop 2.0.9 bundles. Consumers installing this plugin against that
-// runtime got an ERESOLVE "overriding peer dependency" warning. The 0.1.5
-// tuple needs its own prerelease-bearing comparator, which is what the
-// `>=0.1.5-alpha.1 <0.2.0` clause supplies.
-//
-// The test parses the real published range from package.json, so it fails if
-// anyone narrows, drops, or "simplifies" a clause without re-checking the
-// prerelease semantics.
+// This plugin targets DSH 0.1.7-rc.1 and later ONLY. The 0.1.7 line removed the
+// `settingsScope` client service and the `settings.plugin.item` slot, deleted
+// `SettingsProvider` / `installSettingsSection` from `@deepseek-ai/dsh-settings`,
+// deleted the `agent/session-start` event, and made the plugin's own `Config`
+// the settings surface (see docs/dsh-0.1.5-rc2-to-0.1.7-rc1-research.md). 0.1.6
+// and older hosts are no longer supported, so every peer range is pinned to
+// `>=0.1.7-rc.1 <0.2.0`. The test parses the real published range from
+// package.json so it fails if anyone widens or drops the 0.1.7 floor.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -22,8 +15,6 @@ import test from "node:test";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const PEERS = Object.keys(pkg.peerDependencies ?? {});
-
-// ── minimal semver prerelease-aware comparison ──────────────────────────────
 
 /** Parse `1.2.3-alpha.4` into `{ parts:[1,2,3], pre:["alpha",4] }`. */
 function parse(version) {
@@ -74,7 +65,8 @@ function hasPrereleaseComparator(comparators) {
 /**
  * A prerelease version satisfies a set only if some comparator in the set
  * carries the same [major,minor,patch] tuple AND itself has a prerelease.
- * This mirrors node-semver's rule and is the crux of the original bug.
+ * This mirrors node-semver; without it `<0.2.0` would wrongly admit `0.2.0-rc.1`
+ * and the 0.1.7 floor check would be meaningless.
  */
 function sameTupleCarrier(comparators, version) {
 	const v = parse(version);
@@ -91,9 +83,7 @@ function satisfies(range, version) {
 	return groups.some((group) => {
 		const comparators = group.split(/\s+/).filter(Boolean).map((token) => {
 			const m = /^(>=|<=|>|<|=|\^|~)?(.*)$/.exec(token);
-			const op = m[1] ?? "";
-			const ver = m[2];
-			return { op, version: ver };
+			return { op: m[1] ?? "", version: m[2] };
 		});
 		if (hasPrereleaseComparator(comparators) && v.pre.length > 0 && !sameTupleCarrier(comparators, version)) {
 			return false;
@@ -109,7 +99,6 @@ function satisfies(range, version) {
 				case "=":
 				case "": return cmp === 0;
 				case "^": {
-					// Caret on a 0.x line: >= version, < next minor (with prerelease floor).
 					const upper = [cp.parts[0], cp.parts[1] + 1, 0].join(".");
 					return cmp >= 0 && compare(version, upper) < 0;
 				}
@@ -125,53 +114,61 @@ function satisfies(range, version) {
 
 // ── tests ───────────────────────────────────────────────────────────────────
 
-test("every declared @deepseek-ai peer uses the tuple-complete range", () => {
+test("every declared @deepseek-ai peer pins the 0.1.7-rc.1 floor", () => {
 	assert.ok(PEERS.length > 0, "expected at least one declared peer");
 	for (const peer of PEERS) {
 		const range = pkg.peerDependencies[peer];
 		assert.match(
 			range,
-			/>=\s*0\.1\.5-alpha\.1\s*<\s*0\.2\.0/,
-			`${peer} must carry the 0.1.5 prerelease comparator (semver tuple rule)`
+			/>=\s*0\.1\.7-rc\.1\s*<\s*0\.2\.0/,
+			`${peer} must pin >=0.1.7-rc.1 <0.2.0 (0.1.7-only support)`
 		);
 	}
 });
 
-test("the range admits every kernel version this plugin supports", () => {
+test("the range admits the 0.1.7-rc.1 floor and later releases on the line", () => {
 	const range = pkg.peerDependencies["@deepseek-ai/dsh-settings"];
 	const supported = [
-		"0.1.0-rc.6",   // oldest supported line
-		"0.1.1-rc.2",
-		"0.1.2-alpha.1",
-		"0.1.2-rc.1",   // previous pinned devDependency baseline
-		"0.1.5-alpha.1",
-		"0.1.5-alpha.2",
-		"0.1.5-rc.1",   // kernel bundled by DSH Desktop 2.0.9 — the regression
-		"0.1.5-rc.2"    // current npm `next` channel
+		"0.1.7-rc.1", // the aligned baseline
+		"0.1.7-rc.2",
+		"0.1.7",      // stable on the 0.1.7 line
+		"0.1.8",      // later release on the same 0.1.x line
+		"0.1.9"
 	];
 	for (const version of supported) {
 		assert.equal(satisfies(range, version), true, `expected ${version} to satisfy the peer range`);
 	}
 });
 
-test("the range still excludes the next major line", () => {
+test("later-line prereleases are excluded by the semver prerelease-tuple rule", () => {
+	// `>=0.1.7-rc.1 <0.2.0` carries a prerelease ONLY on the 0.1.7 tuple, so a
+	// prerelease of a DIFFERENT tuple (0.1.8-rc.1) has no carrier and is
+	// rejected — verified against node-semver. This is expected, not a bug.
+	const range = pkg.peerDependencies["@deepseek-ai/dsh-settings"];
+	for (const version of ["0.1.8-rc.1", "0.1.9-alpha.1", "0.2.0-rc.1"]) {
+		assert.equal(satisfies(range, version), false, `expected ${version} to be excluded (no tuple carrier)`);
+	}
+});
+
+test("pre-floor 0.1.7 prereleases are excluded (alpha < rc.1)", () => {
+	// The pin is `>=0.1.7-rc.1`, so earlier prereleases of the SAME tuple are
+	// below the floor and correctly rejected — support starts at rc.1 exactly.
+	const range = pkg.peerDependencies["@deepseek-ai/dsh-settings"];
+	for (const version of ["0.1.7-alpha.1", "0.1.7-alpha.2", "0.1.7-beta.1"]) {
+		assert.equal(satisfies(range, version), false, `expected ${version} to be below the floor`);
+	}
+});
+
+test("the range excludes the next major line", () => {
 	const range = pkg.peerDependencies["@deepseek-ai/dsh-settings"];
 	for (const version of ["0.2.0", "0.2.0-rc.1", "1.0.0"]) {
 		assert.equal(satisfies(range, version), false, `expected ${version} to be excluded`);
 	}
 });
 
-test("the range excludes the 0.1.3/0.1.4 gap lines never published as stable", () => {
+test("the range excludes pre-0.1.7 hosts (removed APIs)", () => {
 	const range = pkg.peerDependencies["@deepseek-ai/dsh-settings"];
-	// 0.1.3-alpha.2 was published, but the family never targeted it; admitting it
-	// is not required. Assert the documented behaviour explicitly so a future
-	// widening is a conscious decision rather than an accident.
-	assert.equal(satisfies(range, "0.1.3-alpha.2"), false);
-});
-
-test("the regression: 0.1.5-rc.1 is admitted (the original range rejected it)", () => {
-	const original = "^0.1.0-rc.6 || ^0.1.1-rc.2 || >=0.1.2-alpha.1 <0.2.0";
-	assert.equal(satisfies(original, "0.1.5-rc.1"), false, "original range must reproduce the bug");
-	const current = pkg.peerDependencies["@deepseek-ai/dsh-settings"];
-	assert.equal(satisfies(current, "0.1.5-rc.1"), true, "fixed range must admit the bundled kernel");
+	for (const version of ["0.1.5-rc.1", "0.1.5-rc.2", "0.1.6-alpha.1", "0.1.6", "0.1.2-alpha.1"]) {
+		assert.equal(satisfies(range, version), false, `expected ${version} (pre-0.1.7) to be excluded`);
+	}
 });

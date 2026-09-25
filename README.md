@@ -81,28 +81,32 @@ npm install dsh-subagent-default-model
 
 ## 配置
 
-可以在 Web 设置卡片中配置，也可以编辑 `~/.dsh/settings.yaml`。
+可以在 Web 设置卡片中配置（**设置 → 插件 → dsh-subagent-default-model**），也可以编辑 profile 的 patch 文件 `~/.dsh/profiles/<profile>/cordis.patch.yml`——DSH 0.1.7 起设置就存在那里，段名是本插件的 Loader 条目 id `dsh-subagent-default-model`（不再使用 `~/.dsh/settings.yaml`，详见 [plugin/README.md](plugin/README.md#配置)）。
 
 ### 固定一个默认模型
 
 ```yaml
-subagent-default-model:
-  provider: deepseek-official
-  model: deepseek-v4-pro
+- id: dsh-subagent-default-model
+  name: dsh-subagent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-pro
 ```
 
 ### 多模型轮换
 
 ```yaml
-subagent-default-model:
-  provider: deepseek-official
-  models:
-    - deepseek-v4-pro
-    - deepseek-v4-flash
-    - provider: other-provider
-      model: another-model
-      reasoningEffort: high
-  strategy: round-robin # round-robin | random
+- id: dsh-subagent-default-model
+  name: dsh-subagent-default-model
+  config:
+    provider: deepseek-official
+    models:
+      - deepseek-v4-pro
+      - deepseek-v4-flash
+      - provider: other-provider
+        model: another-model
+        reasoningEffort: high
+    strategy: round-robin # round-robin | random
 ```
 
 ### 推理强度预检（设置面板即时警告）
@@ -129,12 +133,14 @@ subagent-default-model:
 - 该行为由 `failoverEnabled` 开关控制，默认 `true`：
 
 ```yaml
-subagent-default-model:
-  provider: deepseek-official
-  models:
-    - deepseek-v4-pro
-    - deepseek-v4-flash
-  failoverEnabled: true # 连接失败时按队列与策略切换模型
+- id: dsh-subagent-default-model
+  name: dsh-subagent-default-model
+  config:
+    provider: deepseek-official
+    models:
+      - deepseek-v4-pro
+      - deepseek-v4-flash
+    failoverEnabled: true # 连接失败时按队列与策略切换模型
 ```
 
 | 字段 | 类型 | 默认值 | 说明 |
@@ -178,7 +184,7 @@ node prove.mjs
 dsh plugin --profile desktop remove dsh-subagent-default-model
 ```
 
-重启 DSH 后 bundle 不再加载。`~/.dsh/settings.yaml` 中遗留的配置不会再生效，可按需手工删除。
+重启 DSH 后 bundle 不再加载。profile patch 中遗留的配置不会再生效，可按需手工删除。
 
 ## 许可证
 

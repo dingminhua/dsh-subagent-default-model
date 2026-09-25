@@ -2,7 +2,7 @@
 
 [English](README.en.md) | 中文
 
-为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 中的子代理（subagent）派发选择默认模型，可通过 `~/.dsh/settings.yaml` 配置。
+为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 中的子代理（subagent）派发选择默认模型，可通过插件自己的设置卡片（其 Cordis `Config`）配置，存在 profile 的 `cordis.patch.yml`。
 
 当创建子代理时未显式指定 `model`，本插件注入配置的默认模型 —— 因此所有 `subagent`、`subagent_fork` 以及任何省略 `agentOptions` 的工具调用都会经过它。显式传参的覆盖始终生效；配置段缺失或不完整时保持原有行为（子代理继承父会话路由）。
 
@@ -82,31 +82,38 @@ npm install dsh-subagent-default-model
 
 ## 配置
 
-在 `~/.dsh/settings.yaml` 中添加：
+优先用 Web 设置卡片（**设置 → 插件 → dsh-subagent-default-model**）。
+
+也可以直接编辑 profile 的 patch 文件 `~/.dsh/profiles/<profile>/cordis.patch.yml`：DSH 0.1.7 起设置就存在这里，段名是本插件的 Loader 条目 id `dsh-subagent-default-model`：
 
 ```yaml
-# 单模型
-subagent-default-model:
-  provider: deepseek-official
-  model: deepseek-v4-pro
+- id: dsh-subagent-default-model
+  name: dsh-subagent-default-model
+  config:
+    # 单模型
+    provider: deepseek-official
+    model: deepseek-v4-pro
 
-# 或多模型
-subagent-default-model:
-  provider: deepseek-official
-  models:
-    - deepseek-v4-pro
-    - deepseek-v4-flash
-  strategy: round-robin  # round-robin | random
+    # 或多模型
+    provider: deepseek-official
+    models:
+      - deepseek-v4-pro
+      - deepseek-v4-flash
+    strategy: round-robin  # round-robin | random
 
-# 带推理强度
-subagent-default-model:
-  provider: deepseek-official
-  models:
-    - model: deepseek-v4-reasoner
-      reasoningEffort: high
-    - provider: other-provider
-      model: gpt-5.6
-      reasoningEffort: max
+    # 带推理强度
+    provider: deepseek-official
+    models:
+      - model: deepseek-v4-reasoner
+        reasoningEffort: high
+      - provider: other-provider
+        model: gpt-5.6
+        reasoningEffort: max
+
+    failoverEnabled: true
+```
+
+> **从 0.1.6 及更早版本升级**：旧版把配置写在 `~/.dsh/settings.yaml` 的 `subagent-default-model` 段。0.1.7 会在启动时把该文件**一次性导入并改名**为 `settings.yaml.imported`，改名后不再回读。导入按段名直接当条目 id 用，而本插件的条目 id 是 `dsh-subagent-default-model`，因此旧段**不会被导入**（宿主日志留一条 `section subagent-default-model … was not imported into entry subagent-default-model`），旧值只留在改名后的文件里——需要手工搬到上面的 `config:` 里。
   strategy: round-robin  # round-robin | random
 ```
 

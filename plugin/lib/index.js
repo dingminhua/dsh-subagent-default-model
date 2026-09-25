@@ -1,22 +1,25 @@
 import z from "@deepseek-ai/schemastery";
-import * as dshSettings from "@deepseek-ai/dsh-settings";
 
 /**
  * dsh-subagent-default-model — default model(s) for subagent delegations.
  *
- * Host-plane plugin. It registers the shared `subagent-default-model` settings
- * section (`~/.dsh/settings.yaml`) and wraps the host `ctx.subagents` service
+ * Host-plane plugin. It declares its configurable surface as the plugin's own
+ * Cordis `Config` (DSH 0.1.7+ "settings model": a plugin's `Config` IS the
+ * settings section). The host projects this `Config` into a settings form keyed
+ * by the Loader entry id (`dsh-subagent-default-model`) and writes changes back
+ * to the profile patch; volatile fields hot-reload without re-mounting the
+ * plugin. This plugin then wraps the host `ctx.subagents` service
  * (`start` / `startContinuable`), so any delegation whose request carries no
  * explicit `agentOptions` (the stock `subagent` / `subagent_fork` tools and
  * every other tool that omits model/provider) creates the child with a
  * configured default model. Explicit per-call overrides (e.g.
- * `subagent_with_model`) always win; an absent or incomplete settings section
- * keeps the historical behavior: children inherit the parent session route.
+ * `subagent_with_model`) always win; an absent or incomplete section keeps the
+ * historical behavior: children inherit the parent session route.
  *
  * Multiple models are supported: the `models` list is picked from on every
  * delegation either round-robin (default) or at random (`strategy`), so a
  * batch of parallel subagents spreads across the configured models. The
- * selection is re-evaluated on every call (settings hot-reload + live picker
+ * selection is re-evaluated on every call (live Config reference + live picker
  * state), so configuration changes apply to the very next delegation.
  *
  * The wrap lives on the service, not on any tool, so it covers every
@@ -38,45 +41,33 @@ import * as dshSettings from "@deepseek-ai/dsh-settings";
  */
 
 export const name = "dsh-subagent-default-model";
-// Do not hard-inject `subagents` at the plugin root: DSH 0.1.2 may mount that
-// service after this row. The settings section must become available
-// independently; `apply()` attaches the service wrapper through `ctx.inject()`.
-
-/** Settings namespace: default model route for subagent runs without an explicit `agentOptions`. */
-const SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE = "subagent-default-model";
+// Do not hard-inject `subagents` at the plugin root: DSH may mount that
+// service after this row. The settings surface is the declared `Config` (the
+// host projects it independently of any service wave); `apply()` attaches the
+// service wrapper through `ctx.inject()`.
+//
+// There is deliberately no settings-namespace constant here: on 0.1.7 the
+// namespace IS this Loader entry id (`dsh-subagent-default-model`), and the
+// host — not this plugin — owns that mapping. The client resolves the served
+// namespace from the configForms mirror instead of guessing it.
 
 /**
- * Pick the settings-section installer for the installed DSH generation.
+ * Mark a schema's field as volatile on the DSH lines that support it.
  *
- * DSH 0.1.2-alpha.2 removed the standalone `installSettingsSection` /
- * `settingsNamespace` exports from `@deepseek-ai/dsh-settings` in favor of
- * the `ctx.settings` service seam (`settings.installSection`), and that seam
- * does not exist on older hosts (`settings.register` there, reachable only
- * through the legacy helper). Decide by export presence: a module that still
- * ships the helper (pre-alpha.2 hosts, and DSH Desktop's transitional
- * compatibility patch, where the helper merely delegates to the seam) uses
- * it; otherwise wire the official seam directly. Both paths register the
- * section only once the settings service mounts — the legacy helper itself
- * wraps `ctx.inject(["settings"], …)` — so neither ever blocks the plugin
- * root on service waves.
+ * `volatile()` exists from schemastery 3.18.4 (the DSH 0.1.7 line, which is the
+ * only line whose settings write gate reads the marker). On a host without the
+ * method the schema stays byte-identical to the unmarked original (identity
+ * no-op), so the plugin still loads — the field simply loses hot-reload
+ * semantics rather than breaking the whole plugin at module-eval time.
  *
- * Exported for unit tests only; not part of the plugin contract.
- *
- * @param module - the resolved `@deepseek-ai/dsh-settings` module namespace.
- * @returns an `(ctx, ns, schema, entry, hooks)` installer for that generation.
+ * @template T
+ * @param {object} schema - a schemastery field.
+ * @returns {object} the field, marked volatile when supported.
  */
-export function settingsSectionInstaller(module) {
-	if (typeof module?.installSettingsSection === "function") {
-		return (ctx, ns, schema, entry, hooks) => module.installSettingsSection(ctx, ns, schema, entry, hooks);
-	}
-	return (ctx, ns, schema, entry, hooks) => {
-		ctx.inject(["settings"], (settingsCtx) => {
-			settingsCtx.settings.installSection(ctx, ns, schema, entry, hooks);
-		});
-	};
+export function volatileField(schema) {
+	return typeof schema?.volatile === "function" ? schema.volatile() : schema;
 }
 
-const INSTALL_SETTINGS_SECTION = settingsSectionInstaller(dshSettings);
 /** One model entry: a bare model id (uses the section `provider`) or an explicit `{provider, model}` pair. */
 const MODEL_ENTRY = z.union([
 	z.string(),
@@ -88,12 +79,22 @@ const MODEL_ENTRY = z.union([
 ]);
 /** Schema of the `subagent-default-model` settings section; an absent section keeps inheriting the parent route. */
 const SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA = z.object({
-	provider: z.string(),
-	model: z.string(),
-	models: z.array(MODEL_ENTRY).default([]),
-	strategy: z.union([z.const("round-robin"), z.const("random")]).default("round-robin"),
-	failoverEnabled: z.boolean().default(true)
+	provider: volatileField(z.string().description("Default provider for subagent runs without an explicit agentOptions")),
+	model: volatileField(z.string().description("Default model id; the single-model form, backward compatible")),
+	models: volatileField(z.array(MODEL_ENTRY).default([]).description("Multi-model list; picked per strategy on every delegation")),
+	strategy: volatileField(z.union([z.const("round-robin"), z.const("random")]).default("round-robin").description("How to pick from `models`")),
+	failoverEnabled: volatileField(z.boolean().default(true).description("Retry a subagent request on another pool model after a connection failure")),
+	// Must be DECLARED and volatile: the settings write gate rejects every path
+	// that is not a declared volatile field (`@deepseek-ai/dsh-settings`
+	// `write()` throws `Config field "…" is not volatile`). The client card
+	// writes this key as part of EVERY save, so omitting it made every save
+	// fail — not just the reasoning-effort field. It also carries the
+	// single-model form's effort, which `defaultModel()` reads back.
+	reasoningEffort: volatileField(z.string().description("Reasoning effort for the single-model form (`model`)"))
 }).default({});
+
+/** The plugin's Cordis Config — on DSH 0.1.7+ this IS the settings section. */
+export const Config = SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA;
 
 /** State retained on the raw host service while this plugin fiber is active. */
 const WRAPPED = Symbol.for("dsh-subagent-default-model.wrapped");
@@ -128,7 +129,7 @@ function resolveEntry(section, entry) {
 
 /** Pick the next default model from the live settings section, or undefined to inherit the parent route. */
 function defaultModel(state) {
-	const section = state.settingsSource?.();
+	const section = state.getSection?.();
 	if (section === void 0 || section === null) return void 0;
 
 	// Multi-model list wins; pick per strategy.
@@ -166,7 +167,7 @@ function applyDefaultModel(state, request) {
 
 /** Read the live failover view: the `models` list as the switch pool and the strategy. */
 function failoverView(state) {
-	const section = state.settingsSource?.();
+	const section = state.getSection?.();
 	if (section === void 0 || section === null) return void 0;
 	if (section.failoverEnabled === false) return void 0;
 	const entries = Array.isArray(section.models)
@@ -351,22 +352,39 @@ function installSubagentWrapper(ctx, state) {
 	});
 }
 
-export function apply(ctx) {
+export function apply(ctx, config) {
 	const state = {
-		settingsSource: void 0,
-		rrCursor: 0
+		rrCursor: 0,
+		/**
+		 * Resolve the live settings section. On DSH 0.1.7+ `config` is the
+		 * plugin's resolved `Config`; volatile fields arrive as `{ get() }`
+		 * live references (cosmokit Volatile), so unwrap each before reading.
+		 * An absent/missing config falls back to the schema default (empty
+		 * section) — children then inherit the parent route as before.
+		 *
+		 * @returns {object|undefined} the current section values.
+		 */
+		getSection: () => {
+			const raw = config === void 0 || config === null ? void 0 : config;
+			if (raw === void 0) return void 0;
+			const unwrap = (value) => (value !== null && typeof value === "object" && typeof value.get === "function" ? value.get() : value);
+			const section = {
+				provider: unwrap(raw.provider),
+				model: unwrap(raw.model),
+				models: unwrap(raw.models),
+				strategy: unwrap(raw.strategy),
+				failoverEnabled: unwrap(raw.failoverEnabled),
+				// Read back too: the single-model form stores its effort here, so
+				// dropping the key silently ignored the configured effort.
+				reasoningEffort: unwrap(raw.reasoningEffort)
+			};
+			// Drop any field that resolved to undefined so downstream defaults apply.
+			for (const key of Object.keys(section)) {
+				if (section[key] === void 0) delete section[key];
+			}
+			return section;
+		}
 	};
-
-	// Register settings independently from the `subagents` service lifecycle.
-	// DSH 0.1.2 can mount that service later or in a different service wave; a
-	// root-level hard inject would otherwise keep this whole plugin waiting and
-	// hide its settings card even though the Client half is already registered.
-	INSTALL_SETTINGS_SECTION(ctx, SUBAGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE, SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA, {}, {
-		setSource: (current) => {
-			state.settingsSource = current;
-		},
-		onChange: () => {}
-	});
 
 	// Subagent-only failover hooks the agent loop, not the subagents service,
 	// so it is installed unconditionally: listeners no-op when the `failover`
@@ -380,7 +398,6 @@ export function apply(ctx) {
 	});
 
 	ctx.effect(() => () => {
-		state.settingsSource = void 0;
 		state.rrCursor = 0;
 	});
 }

@@ -8,13 +8,22 @@ window.__ModuleLoader__.load({
     var React = require("react");
     var primitives = require("@deepseek-ai/dsh-client-ui-primitives");
     var Toast = primitives.Toast;
+    // ── 图标族适配（DSH 0.1.7 起重命名）──────────────────────────────────
+    // 旧命名以尺寸为后缀（IconChevronDownOutline14），新命名改为粗细语义后缀
+    // （IconChevronDownOutlineRegular / …Medium）。按名探测取第一个可用的，
+    // 全缺失时由使用点渲染自绘字形——把 undefined 直接交给 React.createElement
+    // 会在渲染期抛错。
+    var IconChevronDown = primitives.IconChevronDownOutlineRegular
+      || primitives.IconChevronDownOutlineMedium
+      || primitives.IconChevronDownOutline14
+      || null;
 
     // ── GitHub 页面（「鼓励一下」链接目标） ──────────────────────────────
     var DSM_GITHUB_URL = "https://github.com/dingminhua/dsh-subagent-default-model";
 
     // ── plugin icon (LD brand logo, 64px) ────────────────────────────────
     var DSM_ICON = "data:image/png;base64,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";
-    var SETTINGS_CSS = ".dsm-model-settings{display:flex;flex-direction:column;gap:14px;margin:0;padding:0}.dsm-model-settings-list{display:flex;flex-direction:column;gap:10px}.dsm-model-settings-route{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;padding:10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:10px;background:var(--dsw-alias-bg-layer-3,#202126)}.dsm-model-settings-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-select{width:100%;max-width:220px;height:32px;padding:0 28px 0 10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font:inherit;font-size:13px;line-height:1.5}.dsm-model-settings-select:focus{outline:2px solid var(--dsw-alias-state-business-primary,#5686fe);outline-offset:1px}.dsm-model-settings-select:disabled{color:var(--dsw-alias-label-tertiary,#999);cursor:default}.dsm-model-settings-remove{height:32px;min-width:32px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer;font-size:16px;line-height:1}.dsm-model-settings-remove:hover{color:var(--dsw-alias-state-error-primary,#ef4444);background:var(--dsw-alias-interactive-bg-hover-danger,rgba(242,90,90,.15))}.dsm-model-settings-options{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.dsm-model-settings-strategy{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-strategy .dsm-model-settings-select{max-width:150px}.dsm-model-settings-failover{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-failover input[type=checkbox]{cursor:pointer}.dsm-failover-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999);white-space:nowrap}.dsm-model-settings-footer{border-top:1px solid var(--dsw-alias-border-l2,#36373b);display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 0 4px}.dsm-model-settings-footer-left{display:flex;align-items:center;gap:10px;flex:1;min-width:0}.dsm-model-settings-footer-status{flex:1;min-width:0;color:var(--dsw-alias-label-secondary,#b8b8b8);font-size:12px;line-height:1.5}.dsm-model-settings-footer-error{flex:1;min-width:0;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:1.5}.dsm-btn{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dsm-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px}.dsm-btn:disabled{opacity:.4;cursor:default}.dsm-btn-outline{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent;font-weight:500}.dsm-btn-outline:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:rgba(255,255,255,.04)}.dsm-btn-primary{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dsm-btn-primary:hover:not(:disabled){opacity:.9}.dsm-model-settings-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-plugin-card{border:1px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-3,#202126);border-radius:12px;list-style:none;transition:border-color .16s,background .16s}.dsm-plugin-card:hover{border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-open{background:var(--dsw-alias-bg-layer-2,#25262b);border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.dsm-plugin-card-header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:-2px}.dsm-plugin-card-head{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.dsm-plugin-card-title{color:var(--dsw-alias-label-primary,#e6e6e6);font-size:15px;font-weight:600;line-height:1.4}.dsm-plugin-card-description{color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5}.dsm-plugin-card-chevron{color:var(--dsw-alias-label-tertiary,#999);flex:none;display:inline-flex;transition:transform .16s}.dsm-plugin-card-chevron-open{transform:rotate(180deg)}.dsm-plugin-card-body{border-top:1px solid var(--dsw-alias-border-l2,#36373b);margin:0 16px;padding:0 0 8px}.dsm-plugin-card-body .dsm-model-settings{margin:0;padding:12px 0 0;background:transparent;border:0;border-radius:0}.dsm-plugin-card-body .dsm-model-settings-head{display:none}.dsm-plugin-card-icon{width:32px;height:32px;flex:none;border-radius:7px}.dsm-model-settings-cheer{display:inline-flex;align-items:center;gap:4px;flex:none;text-decoration:underline;text-underline-offset:2px;color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5;transition:color .16s}.dsm-model-settings-cheer-star{font-size:12px;line-height:1;display:inline-flex}.dsm-model-settings-cheer:hover{color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-model-settings-cheer:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:2px}.dsm-model-settings-warn{grid-column:1/-1;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-model-settings-warn-list{display:flex;flex-direction:column;gap:4px;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}";
+    var SETTINGS_CSS = ".dsm-model-settings{display:flex;flex-direction:column;gap:14px;margin:0;padding:0}.dsm-model-settings-list{display:flex;flex-direction:column;gap:10px}.dsm-model-settings-route{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;padding:10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:10px;background:var(--dsw-alias-bg-layer-3,#202126)}.dsm-model-settings-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-select{width:100%;max-width:220px;height:32px;padding:0 28px 0 10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font:inherit;font-size:13px;line-height:1.5}.dsm-model-settings-select:focus{outline:2px solid var(--dsw-alias-state-business-primary,#5686fe);outline-offset:1px}.dsm-model-settings-select:disabled{color:var(--dsw-alias-label-tertiary,#999);cursor:default}.dsm-model-settings-remove{height:32px;min-width:32px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer;font-size:16px;line-height:1}.dsm-model-settings-remove:hover{color:var(--dsw-alias-state-error-primary,#ef4444);background:var(--dsw-alias-interactive-bg-hover-danger,rgba(242,90,90,.15))}.dsm-model-settings-options{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.dsm-model-settings-strategy{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-strategy .dsm-model-settings-select{max-width:150px}.dsm-model-settings-failover{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-failover input[type=checkbox]{cursor:pointer}.dsm-failover-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999);white-space:nowrap}.dsm-model-settings-footer{border-top:1px solid var(--dsw-alias-border-l2,#36373b);display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 0 4px}.dsm-model-settings-footer-left{display:flex;align-items:center;gap:10px;flex:1;min-width:0}.dsm-model-settings-footer-status{flex:1;min-width:0;color:var(--dsw-alias-label-secondary,#b8b8b8);font-size:12px;line-height:1.5}.dsm-model-settings-footer-error{flex:1;min-width:0;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:1.5}.dsm-btn{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dsm-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px}.dsm-btn:disabled{opacity:.4;cursor:default}.dsm-btn-outline{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent;font-weight:500}.dsm-btn-outline:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:rgba(255,255,255,.04)}.dsm-btn-primary{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dsm-btn-primary:hover:not(:disabled){opacity:.9}.dsm-model-settings-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-plugin-card{border:1px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-3,#202126);border-radius:12px;list-style:none;transition:border-color .16s,background .16s}.dsm-plugin-card:hover{border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-open{background:var(--dsw-alias-bg-layer-2,#25262b);border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.dsm-plugin-card-header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:-2px}.dsm-plugin-card-head{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.dsm-plugin-card-title{color:var(--dsw-alias-label-primary,#e6e6e6);font-size:15px;font-weight:600;line-height:1.4}.dsm-plugin-card-description{color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5}.dsm-plugin-card-chevron{color:var(--dsw-alias-label-tertiary,#999);flex:none;display:inline-flex;transition:transform .16s}.dsm-plugin-card-chevron-open{transform:rotate(180deg)}.dsm-plugin-card-caret{color:inherit;font-size:12px;line-height:1;display:inline-flex}.dsm-plugin-card-body{border-top:1px solid var(--dsw-alias-border-l2,#36373b);margin:0 16px;padding:0 0 8px}.dsm-plugin-card-body .dsm-model-settings{margin:0;padding:12px 0 0;background:transparent;border:0;border-radius:0}.dsm-plugin-card-body .dsm-model-settings-head{display:none}.dsm-plugin-card-icon{width:32px;height:32px;flex:none;border-radius:7px}.dsm-model-settings-cheer{display:inline-flex;align-items:center;gap:4px;flex:none;text-decoration:underline;text-underline-offset:2px;color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5;transition:color .16s}.dsm-model-settings-cheer-star{font-size:12px;line-height:1;display:inline-flex}.dsm-model-settings-cheer:hover{color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-model-settings-cheer:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:2px}.dsm-model-settings-warn{grid-column:1/-1;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-model-settings-warn-list{display:flex;flex-direction:column;gap:4px;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}";
 
     if (typeof document !== "undefined") {
       var cssId = "dsh-subagent-default-model/client.css";
@@ -44,6 +53,8 @@ window.__ModuleLoader__.load({
       "row.empty": "尚未指定默认模型，子代理将继承父会话路由。",
       "row.effortDefault": "Default",
       "row.discard": "放弃修改",
+      "row.expand": "展开",
+      "row.collapse": "收起",
       "row.cheer": "鼓励一下",
       "row.save": "保存",
       "row.saving": "保存中…",
@@ -75,6 +86,8 @@ window.__ModuleLoader__.load({
       "row.effortDefault": "Default",
       "row.empty": "No default model is selected; subagents inherit the parent route.",
       "row.discard": "Discard",
+      "row.expand": "Expand",
+      "row.collapse": "Collapse",
       "row.cheer": "Star on GitHub",
       "row.save": "Save",
       "row.saving": "Saving…",
@@ -93,7 +106,43 @@ window.__ModuleLoader__.load({
     };
 
     // ── helpers ──────────────────────────────────────────────────────────
-    var SUBAGENT_MODEL_SETTINGS_NS = "subagent-default-model";
+    // This plugin's DECLARED Loader entry id = `cordis.patch.yml` `insert.id`.
+    // It is the 0.1.7 settings namespace (the plugin's own `Config` is the
+    // settings section), and only the fallback here: the Desktop host mounts
+    // community bundles as `include:<name>` and `configForms.get()` matches the
+    // served-namespace directory EXACTLY. Binding a namespace nothing serves
+    // fails silently (`status: unavailable`, no error), so the card would simply
+    // never show its values. The real id is resolved by `subagentEntryIdOf()`.
+    var SUBAGENT_MODEL_SETTINGS_NS = "dsh-subagent-default-model";
+
+    /**
+     * Resolve the settings namespace the host actually serves for this plugin.
+     *
+     * Match order: the declared entry id exactly, then a `include:`-prefixed
+     * form of it, then the host-served namespace carrying the package name.
+     * The legacy section name (`subagent-default-model`, pre-0.1.7
+     * `settings.yaml` keying) is deliberately accepted last, so it can only win
+     * when it is genuinely the served namespace. Falls back to the declared id
+     * while the mirror is not ready.
+     *
+     * @param {object} forms - the `configForms` client service.
+     * @returns {string} the namespace to pass to `forms.get()`.
+     */
+    function subagentEntryIdOf(forms) {
+      try {
+        var view = forms.describe().getSnapshot().view;
+        var namespaces = (view && view.namespaces) || [];
+        var served = namespaces.find(function (entry) {
+          return entry.ns === SUBAGENT_MODEL_SETTINGS_NS;
+        }) ?? namespaces.find(function (entry) {
+          return entry.ns === "include:" + SUBAGENT_MODEL_SETTINGS_NS;
+        }) ?? namespaces.find(function (entry) {
+          return /subagent-default-model/i.test((entry && entry.ns) || "");
+        });
+        if (served !== undefined && typeof served.ns === "string" && served.ns !== "") return served.ns;
+      } catch (_e) { /* mirror not ready: the declared id is still the right guess */ }
+      return SUBAGENT_MODEL_SETTINGS_NS;
+    }
 
     function normalizeDefaultModels(value) {
       var result = [];
@@ -444,7 +493,13 @@ window.__ModuleLoader__.load({
 
     // ── SubagentModelCard: collapsible card shell (default collapsed) ─────
     function SubagentModelCard(props) {
-      var openState = React.useState(false);
+      // Family pattern (dsh-ldvh / dsh-connect-workbuddy / dsh-sub-cli): on the
+      // Plugins page a card is asked for `view: 'summary'` (a one-line glance)
+      // or `view: 'page'` (the form itself). Only the page form should default
+      // to open — collapsing a summary keeps the list scannable, while an
+      // unopened page form hides the settings the user came for.
+      if (props.view === "summary") return props.t("row.desc");
+      var openState = React.useState(props.view === "page");
       var open = openState[0];
       var setOpen = openState[1];
       var t = props.t;
@@ -455,7 +510,7 @@ window.__ModuleLoader__.load({
           type: "button",
           className: "dsm-plugin-card-header",
           "aria-expanded": open,
-          "aria-label": title,
+          "aria-label": t(open ? "row.collapse" : "row.expand") + ": " + title,
           onClick: function () { setOpen(!open); }
         },
           React.createElement("img", { className: "dsm-plugin-card-icon", src: DSM_ICON, alt: "" }),
@@ -463,7 +518,7 @@ window.__ModuleLoader__.load({
             React.createElement("span", { className: "dsm-plugin-card-title" }, title),
             React.createElement("span", { className: "dsm-plugin-card-description" }, description)
           ),
-          React.createElement("span", { className: "dsm-plugin-card-chevron" + (open ? " dsm-plugin-card-chevron-open" : "") }, React.createElement(primitives.IconChevronDownOutline14, { size: 14 }))
+          React.createElement("span", { className: "dsm-plugin-card-chevron" + (open ? " dsm-plugin-card-chevron-open" : "") }, IconChevronDown ? React.createElement(IconChevronDown, { size: 14 }) : React.createElement("span", { className: "dsm-plugin-card-caret" }, "▾"))
         ),
         React.createElement("div", { className: "dsm-plugin-card-body", hidden: !open },
           React.createElement(SubagentModelRow, props)
@@ -472,14 +527,52 @@ window.__ModuleLoader__.load({
     }
 
     // ── apply: inject settings row ───────────────────────────────────────
-    var inject = ["slots", "locale", "settingsScope", "remote", "remote.session", "uiConversation"];
+    // `settingsScope` service was REMOVED in DSH 0.1.7 (settings moved to
+    // `configForms` + the plugin's own `Config`). Hard-injecting it would keep
+    // this whole client plugin from ever applying.
+    //
+    // `uiConversation` MUST be declared here, not merely read behind a guard:
+    // Cordis does not return `undefined` for an undeclared service — reading
+    // `ctx.uiConversation` THROWS `cannot get property "uiConversation" without
+    // inject`. Because that read sits in the middle of `apply()`, the throw
+    // aborted everything AFTER it — including the `ctx.inject(["configForms"])`
+    // block that registers the settings card, so the Plugins page showed no
+    // configuration section at all. A `if (ctx.foo && …)` guard cannot protect
+    // this: evaluating `ctx.foo` is itself the failure.
+    //
+    // All seven official consumers (ui-chat / ui-plan / ui-deliverables / …)
+    // declare it for exactly this reason. Declaring it is safe: the renderer
+    // mounts this plugin only once every dependency is available, and
+    // `uiConversation` ships in the same client bundle set as `slots`/`locale`,
+    // so it cannot be selectively absent while those are present.
+    //
+    // `configForms` stays soft (via `ctx.inject`) — unlike `uiConversation` it
+    // is optional by design, and `ctx.inject` is the API that waits for it
+    // without throwing.
+    var inject = ["slots", "locale", "uiConversation"];
 
     function apply(ctx) {
-      // The old `connection.api.llm.models()` seat no longer exists. Resolve
-      // the current model-catalog remote defensively so a missing/changed seat
-      // degrades to an empty selector instead of crashing the Plugins tab.
-      var sessionRemote = typeof ctx.get === "function" ? ctx.get("remote.session") : undefined;
+      // The old `connection.api.llm.models()` seat no longer exists. The current
+      // model catalog lives on the `remote.session` namespaced service.
+      //
+      // `remote.session` is mounted ASYNCHRONOUSLY by `remote.$mount()`
+      // (`packages/api/gateway/src/client/index.ts`: `remoteServiceKey(ns)` →
+      // `remote.<ns>`, mounted from an async `$mount`). Reading it ONCE during
+      // `apply` therefore usually captures `undefined` when the gateway has not
+      // finished mounting yet — and because the value was captured, the catalog
+      // stayed empty for the lifetime of the page. That is what left the
+      // Provider/Model dropdowns permanently blank.
+      //
+      // Resolve it lazily on EVERY call instead, so a late mount is picked up.
+      // `remote` is held as the lookup root rather than the leaf so the leaf is
+      // re-read per call. The official sibling card declares
+      // `inject: ['…','remote','remote.session',…]` to have Cordis wait for it;
+      // we stay soft-injected (a missing gateway must not withhold the card)
+      // and re-probe instead.
+      var remoteRoot = typeof ctx.get === "function" ? ctx.get("remote") : undefined;
       var loadCatalog = function () {
+        var sessionRemote = ctx.get ? ctx.get("remote.session") : undefined;
+        if (!sessionRemote) sessionRemote = remoteRoot && remoteRoot.session;
         if (!sessionRemote || typeof sessionRemote.modelCatalog !== "function") return Promise.resolve([]);
         return sessionRemote.modelCatalog().then(function (response) {
           if (!response || !response.ok) return [];
@@ -487,9 +580,27 @@ window.__ModuleLoader__.load({
         }).catch(function () { return []; });
       };
 
-      // Register locale for this component
-      ctx.locale.register(SUBAGENT_ROW_LOCALE, "zh", SUBAGENT_ROW_ZH);
-      ctx.locale.register(SUBAGENT_ROW_LOCALE, "en", SUBAGENT_ROW_EN);
+      // Register locale for this component.
+      //
+      // The host `locale` service THROWS when a namespace already holds a locale
+      // (`dsh-client-locale`: `locale namespace "…" already has locale "…"`), and
+      // Cordis keeps a fiber's registrations alive while `apply` re-runs for its
+      // replacement. Registering unconditionally therefore makes the SECOND
+      // apply() of this plugin throw at the top of the function — before either
+      // card is registered — so the client half never activates and web boot
+      // reports `dsh-subagent-default-model: failed`.
+      //
+      // `ctx.effect` ties the registration to the current fiber: Cordis disposes
+      // it before running the replacement, so a re-apply starts from a clean
+      // namespace. Same pattern as `dsh-ldvh`/`dsh-sub-cli`.
+      ctx.effect(function () {
+        var offZh = ctx.locale.register(SUBAGENT_ROW_LOCALE, "zh", SUBAGENT_ROW_ZH);
+        var offEn = ctx.locale.register(SUBAGENT_ROW_LOCALE, "en", SUBAGENT_ROW_EN);
+        return function () {
+          if (typeof offZh === "function") offZh();
+          if (typeof offEn === "function") offEn();
+        };
+      }, "dsh-subagent-default-model: settings copy");
 
       // ── trajectory: surface the subagent model per request ──────────────
       // agent-loop appends a `request/context` frame (provider/model) whenever
@@ -513,7 +624,7 @@ window.__ModuleLoader__.load({
               seq: event.seq,
               time: event.time,
               content: [{ type: "text", text: label }],
-              source: { kind: "plugin", plugin: "dsh-subagent-default-model", form: "notice" }
+              source: { kind: "plugin:dsh-subagent-default-model", form: "notice" }
             };
           },
           update: function (context) { return context.state; },
@@ -530,7 +641,16 @@ window.__ModuleLoader__.load({
             };
           }
         };
-        ctx.uiConversation.events.register(modelContextDefinition);
+        // `ctx.effect` ties the registration to this fiber, so Cordis disposes it
+        // before re-running `apply` for a replacement fiber. Registering BARE is
+        // wrong here: `ConversationEventRegistry.register` throws
+        // `conversation Definition "<kind>" is already registered` on a duplicate
+        // kind, so the second apply would abort — taking the settings-card
+        // registration below it down with it. Every official consumer wraps this
+        // in `ctx.effect` (ui-plan, ui-deliverables, …).
+        ctx.effect(function () {
+          return ctx.uiConversation.events.register(modelContextDefinition);
+        }, "dsh-subagent-default-model: trajectory model row");
 
         // ── chat: surface the subagent model in the conversation view ──
         // agent-loop writes a `request/header` frame with a `reason` the first
@@ -569,7 +689,7 @@ window.__ModuleLoader__.load({
               // `summary` is the collapsed row's one-line account (notice form):
               // without it the row only shows the provenance label and hides the
               // model behind expansion.
-              source: { kind: "plugin", plugin: "dsh-subagent-default-model", form: "notice", summary: label },
+              source: { kind: "plugin:dsh-subagent-default-model", form: "notice", summary: label },
               provenance: { role: "inject", label: "dsh-subagent-default-model" },
               form: "notice"
             };
@@ -589,10 +709,19 @@ window.__ModuleLoader__.load({
             };
           }
         };
-        ctx.uiConversation.events.register(chatModelDefinition);
+        ctx.effect(function () {
+          return ctx.uiConversation.events.register(chatModelDefinition);
+        }, "dsh-subagent-default-model: chat model row");
       }
 
-      var subagentScope = ctx.settingsScope.bind({ namespace: SUBAGENT_MODEL_SETTINGS_NS });
+      // Resolve the settings scope for this plugin. On DSH 0.1.7+ the settings
+      // surface is the plugin's own Loader entry id (`dsh-subagent-default-model`),
+      // served by the `configForms` client service (replacing the removed
+      // `settingsScope.bind({namespace})`). The namespace the Host actually
+      // serves is host-chosen (Desktop mounts it as `include:dsh-subagent-default-model`),
+      // so probe the mirror directory and fall back to the declared id rather
+      // than guessing — a wrong guess binds to a namespace nothing serves.
+      var subagentScope = null;
       var subagentRowInjected = function () {
         return {
           settingsScope: subagentScope,
@@ -603,20 +732,33 @@ window.__ModuleLoader__.load({
         };
       };
 
-      ctx.slots.inject("settings.plugin.item", function () {
-        return ctx.slots.register({
-          name: "settings.plugin.item",
-          key: "subagent-default-model",
-          locale: SUBAGENT_ROW_LOCALE,
-          inject: subagentRowInjected
-        }, SubagentModelCard);
-      });
+      // `configForms` is the 0.1.7 client settings surface; soft-inject it so the
+      // card simply stays absent when the service is unavailable, instead of
+      // blocking the whole client plugin. The served namespace is probed (see
+      // `subagentEntryIdOf`) rather than assumed — see that function.
+      ctx.inject(["configForms"], function (formsCtx) {
+        var forms = formsCtx.configForms;
+        subagentScope = forms.get(subagentEntryIdOf(forms));
 
-      // The Plugins tab renders the intersection of registered cards and the
-      // Host settings namespace directory. Community Host plugins can finish
-      // registration after the core mirror's first read; force one fresh read
-      // after claiming our card so `subagent-default-model` becomes active.
-      ctx.settingsScope.describe().load();
+        var registerCard = function (slotName, key) {
+          try {
+            ctx.slots.inject(slotName, function () {
+              return ctx.slots.register({
+                name: slotName,
+                key: key,
+                locale: SUBAGENT_ROW_LOCALE,
+                inject: subagentRowInjected
+              }, SubagentModelCard);
+            });
+          } catch (error) {
+            console.error('[dsh-subagent-default-model] settings card slot "' + slotName + '" failed to register (host provider unaffected):', error);
+          }
+        };
+        // 0.1.7 placement: register under Plugins config surfaces (the old
+        // `settings.plugin.item` slot was removed in 0.1.7).
+        registerCard("plugins.bundle.config", "dsh-subagent-default-model");
+        registerCard("plugins.row.config", "dsh-subagent-default-model#dsh-subagent-default-model");
+      });
     }
 
     // `checkEffortSupport` is exported as a pure test seam (same convention as

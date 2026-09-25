@@ -81,28 +81,32 @@ After installing, updating, or removing the bundle, restart the corresponding DS
 
 ## Configuration
 
-Configure via the Web settings card or by editing `~/.dsh/settings.yaml`.
+Configure via the Web settings card (Settings → Plugins → dsh-subagent-default-model), or by editing the profile patch `~/.dsh/profiles/<profile>/cordis.patch.yml` — since DSH 0.1.7 that is where settings live, keyed by this plugin's Loader entry id `dsh-subagent-default-model` (the old `~/.dsh/settings.yaml` is no longer used; see [plugin/README.en.md](plugin/README.en.md#configuration)).
 
 ### Pin a default model
 
 ```yaml
-subagent-default-model:
-  provider: deepseek-official
-  model: deepseek-v4-pro
+- id: dsh-subagent-default-model
+  name: dsh-subagent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-pro
 ```
 
 ### Multi-model rotation
 
 ```yaml
-subagent-default-model:
-  provider: deepseek-official
-  models:
-    - deepseek-v4-pro
-    - deepseek-v4-flash
-    - provider: other-provider
-      model: another-model
-      reasoningEffort: high
-  strategy: round-robin # round-robin | random
+- id: dsh-subagent-default-model
+  name: dsh-subagent-default-model
+  config:
+    provider: deepseek-official
+    models:
+      - deepseek-v4-pro
+      - deepseek-v4-flash
+      - provider: other-provider
+        model: another-model
+        reasoningEffort: high
+    strategy: round-robin # round-robin | random
 ```
 
 ### Reasoning-effort precheck (instant warning in the settings panel)
@@ -129,12 +133,14 @@ When a subagent loop hits a connection-class failure, the plugin automatically s
 - This behavior is controlled by the `failoverEnabled` switch, default `true`:
 
 ```yaml
-subagent-default-model:
-  provider: deepseek-official
-  models:
-    - deepseek-v4-pro
-    - deepseek-v4-flash
-  failoverEnabled: true # switch model by queue/strategy on connection failure
+- id: dsh-subagent-default-model
+  name: dsh-subagent-default-model
+  config:
+    provider: deepseek-official
+    models:
+      - deepseek-v4-pro
+      - deepseek-v4-flash
+    failoverEnabled: true # switch model by queue/strategy on connection failure
 ```
 
 | Field | Type | Default | Description |
@@ -178,7 +184,7 @@ Full development notes live in [`DEVELOPMENT.md`](DEVELOPMENT.md); release steps
 dsh plugin --profile desktop remove dsh-subagent-default-model
 ```
 
-After restarting DSH the bundle is no longer loaded. Any leftover configuration in `~/.dsh/settings.yaml` no longer takes effect and can be removed manually.
+After restarting DSH the bundle is no longer loaded. Configuration left in the profile patch no longer takes effect and can be removed manually.
 
 ## License
 

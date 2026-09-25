@@ -1,25 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Context } from "@deepseek-ai/cordis";
-import { SettingsProvider } from "@deepseek-ai/dsh-settings";
 import * as defaultModelPlugin from "../lib/index.js";
 
-class MemorySettings extends SettingsProvider {
-	constructor(ctx, document) {
-		super(ctx, "settings");
-		this.document = document;
-	}
-
-	async load() {
-		return this.document;
-	}
-
-	get writable() {
-		return false;
-	}
-}
-
-async function createHarness(document = {}) {
+// DSH 0.1.7 settings model: the plugin's `Config` IS the settings section, so
+// the harness passes the section straight to `apply(ctx, config)`. The old
+// `SettingsProvider` / `settings.publish()` path no longer exists on 0.1.7.
+async function createHarness(config = undefined) {
 	const root = new Context();
 	const subagents = {
 		async start(name, request) {
@@ -31,13 +18,11 @@ async function createHarness(document = {}) {
 	};
 	root.provide("subagents", subagents);
 
-	const settings = new MemorySettings(root, document);
-	await settings.load().then((loaded) => settings.publish(loaded));
 	await root[Symbol.for("cordis.init")]?.();
-	const fiber = root.registry.plugin(defaultModelPlugin);
+	const fiber = root.registry.plugin(defaultModelPlugin, config);
 	await fiber;
 
-	return { root, settings, subagents, fiber };
+	return { root, config, subagents, fiber };
 }
 
 async function disposeHarness(harness) {
@@ -84,13 +69,11 @@ function dispatchRequest(ctx, agent, seed, { turn = 1, step = 1 } = {}) {
 // ── shared test fixtures ────────────────────────────────────────────────────
 
 const SECTION_WITH_MODELS = {
-	"subagent-default-model": {
 		provider: "deepseek-official",
 		model: "deepseek-v4-pro",
 		models: ["deepseek-v4-pro", "deepseek-v4-flash"],
 		strategy: "round-robin",
 		failoverEnabled: true
-	}
 };
 
 // ── subagent-only gate ──────────────────────────────────────────────────────
@@ -127,12 +110,10 @@ test("failover NEVER touches the main (root-origin) agent loop", async () => {
 
 test("failover is inert when failoverEnabled is false", async () => {
 	const harness = await createHarness({
-		"subagent-default-model": {
 			provider: "deepseek-official",
 			model: "deepseek-v4-pro",
 			models: ["deepseek-v4-pro", "deepseek-v4-flash"],
 			failoverEnabled: false
-		}
 	});
 	try {
 		const agent = makeAgent("sub-disabled");
@@ -144,12 +125,10 @@ test("failover is inert when failoverEnabled is false", async () => {
 
 test("failover is inert when the models list has fewer than 2 entries", async () => {
 	const harness = await createHarness({
-		"subagent-default-model": {
 			provider: "deepseek-official",
 			model: "deepseek-v4-pro",
 			models: ["deepseek-v4-pro"],
 			failoverEnabled: true
-		}
 	});
 	try {
 		const agent = makeAgent("sub-single");
@@ -161,12 +140,10 @@ test("failover is inert when the models list has fewer than 2 entries", async ()
 
 test("failover is inert when the models list is empty", async () => {
 	const harness = await createHarness({
-		"subagent-default-model": {
 			provider: "deepseek-official",
 			model: "deepseek-v4-pro",
 			models: [],
 			failoverEnabled: true
-		}
 	});
 	try {
 		const agent = makeAgent("sub-empty");
@@ -178,11 +155,9 @@ test("failover is inert when the models list is empty", async () => {
 
 test("failover is inert when the failoverEnabled field is absent (defaults to true but models empty)", async () => {
 	const harness = await createHarness({
-		"subagent-default-model": {
 			provider: "deepseek-official",
 			model: "deepseek-v4-pro",
 			models: []
-		}
 	});
 	try {
 		const agent = makeAgent("sub-no-failover");
@@ -243,13 +218,11 @@ test("round-robin: walks the pool and passes through when exhausted", async () =
 
 test("random strategy picks a model from the pool (no dedup check)", async () => {
 	const harness = await createHarness({
-		"subagent-default-model": {
 			provider: "deepseek-official",
 			model: "deepseek-v4-pro",
 			models: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-reasoner"],
 			strategy: "random",
 			failoverEnabled: true
-		}
 	});
 	try {
 		const agent = makeAgent("sub-random");
@@ -319,7 +292,6 @@ test("applies the target entry's own reasoning effort when switching models", as
 	// that code is not a trigger, the whole pool was burned on a request that
 	// could never succeed even though a healthy model was configured.
 	const harness = await createHarness({
-		"subagent-default-model": {
 			provider: "workbuddy",
 			model: "hy3",
 			models: [
@@ -328,7 +300,6 @@ test("applies the target entry's own reasoning effort when switching models", as
 			],
 			strategy: "round-robin",
 			failoverEnabled: true
-		}
 	});
 	try {
 		const agent = makeAgent("sub-effort-applied", { provider: "workbuddy", model: "hy3" });
@@ -353,7 +324,6 @@ test("does not re-select a pool entry this run already switched to", async () =>
 	// pool exhausts after one switch by design). The second pick must land on
 	// the entry that was never tried, not back on the one that just failed.
 	const harness = await createHarness({
-		"subagent-default-model": {
 			provider: "workbuddy",
 			model: "hy3",
 			models: [
@@ -363,7 +333,6 @@ test("does not re-select a pool entry this run already switched to", async () =>
 			],
 			strategy: "round-robin",
 			failoverEnabled: true
-		}
 	});
 	try {
 		const agent = makeAgent("sub-dedup", { provider: "workbuddy", model: "hy3" });
