@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.0.3 (2026-09-26)
+
+### Fixed
+
+- **Windows 全平台受支持（此前存在只在 Windows 上暴露的硬故障）**：`plugin/test/dependency-integrity.test.mjs` 用 `new URL("..", import.meta.url).pathname` 推导插件根目录。Windows 上文件 URL 形如 `file:///C:/...`，其 `pathname` 为 `/C:/Users/...`，经 `path.join` 折成 `\C:\Users\...`——一个不存在的路径，于是 `readFileSync` 在任何断言执行前抛 ENOENT，**整套测试在 Windows 检出上直接死掉**。该缺陷在 macOS/Linux 上不可见（两种写法结果一致），因此只有 Windows 才会暴露。已改为 `fileURLToPath(new URL("..", import.meta.url))`；后者同时也解析 `%20` 等转义，含空格路径（如 `C:\Users\My Project\...`）一并修好。
+  新增两条守卫：① 扫描 `lib/`、`scripts/`、`test/` 全部源码，禁止出现 `new URL(...).pathname` / `import.meta.url.pathname`（先剥离注释，避免守卫自身的说明文字自匹配）；② 断言本守卫文件自身确实使用 `fileURLToPath`。已**变异验证**：在 `test/` 放入一个使用 `.pathname` 的文件后该守卫立刻变红。
+- **两个开发脚本在 0.1.7 上启动即崩（与平台无关的既有回归）**：`scripts/simulate-retry.mjs` 与 `scripts/verify-mock-failover.mjs` 仍 `import { SettingsProvider } from "@deepseek-ai/dsh-settings"`，而该命名导出在 0.1.7 线已被删除（当前 0.1.7-rc.2 的导出只剩 `SettingsConflictError` / `SettingsForms` / `default` / `redactSecrets`）。两脚本因此抛 `SyntaxError: does not provide an export named 'SettingsProvider'`，一行断言都没跑到。已改用 0.1.7 的设置模型——把配置段**直接**传给 `apply(ctx, config)`（`root.registry.plugin(plugin, config)`），并把配置段由旧的 `{ "subagent-default-model": { … } }` 嵌套形态改为扁平形态。此改动与 2.0.0 起 `test/` 已采用的范式对齐，属测试脚手架未同步的遗漏。
+- **`simulate-retry.mjs` 的客户端桩停留在 0.1.6 契约**：修好导入后随即抛 `TypeError: ctx.effect is not a function`——桩里仍在提供已删除的 `settingsScope` 与 `conversationEvents` 服务，缺少 `ctx.effect` 与 `ctx.inject(["configForms"], …)`。已按 `test/client-trajectory.test.mjs` 的现行桩重写（`configForms` 的 `describe`/`get`、`uiConversation.events.register`）。该脚本现已恢复完整链路输出。
+- **`verify-mock-failover.mjs` 的成功路径解析错误**：mock 服务器对成功响应默认走 SSE 流式（DSH 默认请求流式），而脚本用 `res.json()` 解析，得到空对象，最后一条断言必然失败。已按 `content-type` 分流：`text/event-stream` 走 `data:` 帧聚合 `delta.content`，`application/json` 走 JSON 解析。
+
+### Changed
+
+- **`npm test` 改为不带 glob 的 `node --test`**（原为 `node --test test/*.test.mjs`）。glob 由 shell 展开：POSIX sh 会展开，Windows 的 cmd/PowerShell 会**原样传入**，于是同一命令在两个平台语义不同。改由 Node 测试运行器自行发现用例后，两平台行为一致（已验证发现结果与显式 glob 完全相同）。
+- **`integration.mjs` / `prove.mjs` 改用 `dirname(fileURLToPath(import.meta.url))`**（原为 `import.meta.dirname`）。后者需 Node ≥ 20.11 / 21.2；本次不提升任何运行门槛。
+- **CI 增加 `windows-latest` 与 `macos-latest` 矩阵**（原仅 `ubuntu-latest`）。单一 Linux 任务无法捕获平台路径类缺陷——`new URL(...).pathname` 与 `path.join` 在 POSIX 上一致、在 Windows 上分叉，正是本次修掉的故障类别。
+- **README（中/英，根目录 + `plugin/`）新增「平台支持」章节**：明确 Windows / macOS / Linux 三平台受支持，给出三平台配置路径对照表，并列明已检查并持续验证的平台面（依赖树跨平台、CRLF 安全、路径解析、测试发现）。根 README 以表格给出结论，`plugin/README` 给出逐条依据。
+- **`DEVELOPMENT.md` 新增「平台影响面」检查清单**：此后每次改动都须复盘八个面（路径解析、路径拼接、shell 依赖、测试发现、换行符、依赖树、进程/信号、大小写），并注明 CI 门禁为持续验证手段；同时勘正文档内 macOS 专属写法（`⌘Q` 补 Windows 退出方式、安装路径补 Windows 形态）。
+
+### Testing
+
+- 全量 **92 项通过**（原 90 项 + 2 项新增跨平台守卫）；`integration.mjs` 与 `prove.mjs` 均通过。
+- **CRLF 检出验证**：在整仓按 CRLF 重写的副本上跑全套测试，**92/92 通过**——证明按源码文本做断言的用例不依赖行尾（仓库未固定 `core.autocrlf`，Windows 检出即该形态）。
+- **脚本恢复验证**：`simulate-retry.mjs` 输出完整五段链路（失败 → 切换 → 帧追加 → 轨迹渲染 → 对话渲染）；`verify-mock-failover.mjs` 对真实 mock 服务器跑通「真实 429 → 插件切换 → 真实 200」全链路。
+- **平台守卫变异验证**：向 `test/` 放入使用 `.pathname` 的文件 → 守卫变红并指名该文件；移除后复绿。
+
 ## 2.0.2 (2026-09-25)
 
 ### Fixed

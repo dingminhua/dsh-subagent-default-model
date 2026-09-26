@@ -1,6 +1,6 @@
 {
   "name": "dsh-subagent-default-model",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "为 DeepSeek Harness 子代理配置默认模型路由：支持单模型、轮询、随机，以及按路由设置推理强度（reasoning effort）。",
   "keywords": [
     "deepseek-harness",
@@ -44,7 +44,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test",
     "mock": "node scripts/mock-llm-server.mjs",
     "simulate": "node scripts/simulate-retry.mjs"
   },
