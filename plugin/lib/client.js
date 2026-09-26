@@ -21,6 +21,13 @@ window.__ModuleLoader__.load({
     // ── GitHub 页面（「鼓励一下」链接目标） ──────────────────────────────
     var DSM_GITHUB_URL = "https://github.com/dingminhua/dsh-subagent-default-model";
 
+    // ── 客户端构建标记（诊断用）──────────────────────────────────────────
+    // 出现在设置卡常显的 [diag] 行里。保存失败排查期间，它回答「页面到底
+    // 跑的是哪一个 client bundle」——宿主在启动时快照 bundle，页面可能仍
+    // 持有旧版本；一眼对出构建号即可排除/坐实这一点。每次改 client.js
+    // 排查时必须递增它。
+    var DSM_CLIENT_BUILD = "2026-09-26.4";
+
     // ── plugin icon (LD brand logo, 64px) ────────────────────────────────
     var DSM_ICON = "data:image/png;base64,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";
     var SETTINGS_CSS = ".dsm-model-settings{display:flex;flex-direction:column;gap:14px;margin:0;padding:0}.dsm-model-settings-list{display:flex;flex-direction:column;gap:10px}.dsm-model-settings-route{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;padding:10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:10px;background:var(--dsw-alias-bg-layer-3,#202126)}.dsm-model-settings-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-select{width:100%;max-width:220px;height:32px;padding:0 28px 0 10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font:inherit;font-size:13px;line-height:1.5}.dsm-model-settings-select:focus{outline:2px solid var(--dsw-alias-state-business-primary,#5686fe);outline-offset:1px}.dsm-model-settings-select:disabled{color:var(--dsw-alias-label-tertiary,#999);cursor:default}.dsm-model-settings-remove{height:32px;min-width:32px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer;font-size:16px;line-height:1}.dsm-model-settings-remove:hover{color:var(--dsw-alias-state-error-primary,#ef4444);background:var(--dsw-alias-interactive-bg-hover-danger,rgba(242,90,90,.15))}.dsm-model-settings-options{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.dsm-model-settings-strategy{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-strategy .dsm-model-settings-select{max-width:150px}.dsm-model-settings-failover{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-failover input[type=checkbox]{cursor:pointer}.dsm-failover-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999);white-space:nowrap}.dsm-model-settings-footer{border-top:1px solid var(--dsw-alias-border-l2,#36373b);display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 0 4px}.dsm-model-settings-footer-left{display:flex;align-items:center;gap:10px;flex:1;min-width:0}.dsm-model-settings-footer-status{flex:1;min-width:0;color:var(--dsw-alias-label-secondary,#b8b8b8);font-size:12px;line-height:1.5}.dsm-model-settings-footer-error{flex:1;min-width:0;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:1.5}.dsm-btn{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dsm-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px}.dsm-btn:disabled{opacity:.4;cursor:default}.dsm-btn-outline{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent;font-weight:500}.dsm-btn-outline:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:rgba(255,255,255,.04)}.dsm-btn-primary{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dsm-btn-primary:hover:not(:disabled){opacity:.9}.dsm-model-settings-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-plugin-card{border:1px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-3,#202126);border-radius:12px;list-style:none;transition:border-color .16s,background .16s}.dsm-plugin-card:hover{border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-open{background:var(--dsw-alias-bg-layer-2,#25262b);border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.dsm-plugin-card-header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:-2px}.dsm-plugin-card-head{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.dsm-plugin-card-title{color:var(--dsw-alias-label-primary,#e6e6e6);font-size:15px;font-weight:600;line-height:1.4}.dsm-plugin-card-description{color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5}.dsm-plugin-card-chevron{color:var(--dsw-alias-label-tertiary,#999);flex:none;display:inline-flex;transition:transform .16s}.dsm-plugin-card-chevron-open{transform:rotate(180deg)}.dsm-plugin-card-caret{color:inherit;font-size:12px;line-height:1;display:inline-flex}.dsm-plugin-card-body{border-top:1px solid var(--dsw-alias-border-l2,#36373b);margin:0 16px;padding:0 0 8px}.dsm-plugin-card-body .dsm-model-settings{margin:0;padding:12px 0 0;background:transparent;border:0;border-radius:0}.dsm-plugin-card-body .dsm-model-settings-head{display:none}.dsm-plugin-card-icon{width:32px;height:32px;flex:none;border-radius:7px}.dsm-model-settings-cheer{display:inline-flex;align-items:center;gap:4px;flex:none;text-decoration:underline;text-underline-offset:2px;color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5;transition:color .16s}.dsm-model-settings-cheer-star{font-size:12px;line-height:1;display:inline-flex}.dsm-model-settings-cheer:hover{color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-model-settings-cheer:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:2px}.dsm-model-settings-warn{grid-column:1/-1;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-model-settings-warn-list{display:flex;flex-direction:column;gap:4px;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-notice-row{display:flex;flex-direction:column;gap:4px;margin:6px 0;font-size:12px}.dsm-notice-toggle{appearance:none;font:inherit;cursor:pointer;background:transparent;border:0;padding:2px 0;display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-tertiary,#9a9a9a);text-align:left;min-width:0}.dsm-notice-toggle:hover{color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-notice-toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px;border-radius:3px}.dsm-notice-dot{flex:none;width:5px;height:5px;border-radius:50%;background:var(--dsw-alias-label-caption,#777)}.dsm-notice-label{flex:none;font-weight:500}.dsm-notice-summary{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-notice-summary:before{content:'·';margin-right:6px;color:var(--dsw-alias-label-caption,#777)}.dsm-notice-body{margin:0;padding:8px 10px;border-left:2px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-1,#1b1b1d);color:var(--dsw-alias-label-secondary,#b8b8b8);font-size:12px;line-height:18px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto}";
@@ -77,9 +84,11 @@ window.__ModuleLoader__.load({
       "row.saving": "保存中…",
       "row.saved": "已保存",
       "row.incomplete": "请为每个模型路由选择 Provider 和 Model。",
+      "row.catalogEmpty": "模型目录尚未就绪（正在等待网关返回供应商与模型）。稍候片刻；若长时间为空，请检查 Provider 插件是否已启用。",
       "row.effortNoDeclaration": "该模型当前未声明任何推理强度；子代理会因 effort 不被支持而一个请求都发不出（清空此项或改选模型）。",
       "row.effortNotDeclared": "该模型当前未声明「{effort}」推理强度；子代理会因此无法启动（改选其它强度或清空此项）。",
-      "row.saveFailed": "保存失败，请重试。",
+      "row.saveFailed": "保存失败（{message}），请重试。",
+      "row.settingsUnavailable": "本机宿主未为此插件提供设置存储（{message}），暂时无法保存；请确认插件已在当前 profile 中启用，然后重启 DSH。",
       "row.toastSaved": "子代理默认模型设置已保存。",
       "row.failoverEnabled": "连接失败时按队列与策略切换模型",
       "row.failoverHint": "（需配置 ≥2 个 Provider，切换才会生效）。",
@@ -111,9 +120,11 @@ window.__ModuleLoader__.load({
       "row.saving": "Saving…",
       "row.saved": "Saved",
       "row.incomplete": "Choose a provider and model for every route.",
+      "row.catalogEmpty": "The model catalog is not ready yet (waiting for the gateway to report providers and models). Give it a moment; if it stays empty, check whether the provider plugin is enabled.",
       "row.effortNoDeclaration": "This model declares no reasoning efforts right now; subagents will fail to issue any request with the configured effort (clear it or pick another model).",
       "row.effortNotDeclared": "This model does not declare the \"{effort}\" reasoning effort right now; subagents will fail to start (pick another effort or clear it).",
-      "row.saveFailed": "Could not save the setting. Try again.",
+      "row.saveFailed": "Could not save the setting ({message}). Try again.",
+      "row.settingsUnavailable": "This Host serves no settings store for the plugin ({message}), so saving is unavailable. Check that the plugin is enabled in the current profile, then restart DSH.",
       "row.toastSaved": "Subagent default model settings saved.",
       "row.failoverEnabled": "Switch models by queue and strategy on connection failure",
       "row.failoverHint": "(requires at least 2 configured providers).",
@@ -126,55 +137,14 @@ window.__ModuleLoader__.load({
 
     // ── helpers ──────────────────────────────────────────────────────────
     // This plugin's DECLARED Loader entry id = `cordis.patch.yml` `insert.id`.
-    // It is the 0.1.7 settings namespace (the plugin's own `Config` is the
-    // settings section), and only the fallback here: the Desktop host mounts
-    // community bundles as `include:<name>` and `configForms.get()` matches the
-    // served-namespace directory EXACTLY. Binding a namespace nothing serves
-    // fails silently (`status: unavailable`, no error), so the card would simply
-    // never show its values. The real id is resolved by `subagentEntryIdOf()`.
+    // On 0.1.7 the settings namespace IS a Loader entry id, and the Desktop host
+    // mounts community bundles as `include:<name>` — so the served name is
+    // host-chosen and cannot be assumed here. `configForms.get()` matches the
+    // served-namespace directory EXACTLY: binding a namespace nothing serves
+    // fails silently (`status: unavailable`, no error, every write refused), so
+    // the served name is probed from the describe mirror on every change instead
+    // (see `servedNamespaceNow` in the `configForms` block).
     var SUBAGENT_MODEL_SETTINGS_NS = "dsh-subagent-default-model";
-
-    /**
-     * Resolve the settings namespace the host actually serves for this plugin.
-     *
-     * Match order: the declared entry id exactly, then a `include:`-prefixed
-     * form of it, then the host-served namespace carrying the package name.
-     * The legacy section name (`subagent-default-model`, pre-0.1.7
-     * `settings.yaml` keying) is deliberately accepted last, so it can only win
-     * when it is genuinely the served namespace. Falls back to the declared id
-     * while the mirror is not ready.
-     *
-     * @param {object} forms - the `configForms` client service.
-     * @param {Set<string>} [servedNamespaces] - authoritative served-namespace set
-     *   handed over by `configForms.whileServed(...)`. When present it is preferred
-     *   over the mirror snapshot, because it is the very set that decided the
-     *   registration was due — the mirror may still be mid-fold.
-     * @returns {string} the namespace to pass to `forms.get()`.
-     */
-    function subagentEntryIdOf(forms, servedNamespaces) {
-      var pick = function (names) {
-        return names.find(function (ns) {
-          return ns === SUBAGENT_MODEL_SETTINGS_NS;
-        }) ?? names.find(function (ns) {
-          return ns === "include:" + SUBAGENT_MODEL_SETTINGS_NS;
-        }) ?? names.find(function (ns) {
-          return /subagent-default-model/i.test(ns || "");
-        });
-      };
-      try {
-        if (servedNamespaces && typeof servedNamespaces.has === "function") {
-          var fromServed = pick(Array.from(servedNamespaces));
-          if (typeof fromServed === "string" && fromServed !== "") return fromServed;
-        }
-        var view = forms.describe().getSnapshot().view;
-        var namespaces = ((view && view.namespaces) || []).map(function (entry) {
-          return entry && entry.ns;
-        });
-        var served = pick(namespaces);
-        if (typeof served === "string" && served !== "") return served;
-      } catch (_e) { /* mirror not ready: the declared id is still the right guess */ }
-      return SUBAGENT_MODEL_SETTINGS_NS;
-    }
 
     function normalizeDefaultModels(value) {
       var result = [];
@@ -263,16 +233,85 @@ window.__ModuleLoader__.load({
     }
 
     function persistDefaultModels(scope, value) {
-      return Promise.resolve().then(function () { return scope.set("provider", value.provider); }).then(function () {
-        return scope.set("model", value.model);
-      }).then(function () {
-        return scope.set("models", value.models);
-      }).then(function () {
-        return scope.set("strategy", value.strategy);
-      }).then(function () {
-        return scope.set("failoverEnabled", value.failoverEnabled === false ? false : true);
-      }).then(function () {
-        return scope.set("reasoningEffort", value.reasoningEffort || "");
+      // Every `set()` answers whether the Host ACCEPTED that field, and the
+      // chain must stop at the first refusal. Ignoring the answers (which this
+      // used to do) turns a half-written section into a "successful" save: the
+      // caller sees the promise resolve, the card then compares the verdict
+      // against a section that only partially changed, and reports a message
+      // built from the SCOPE state instead of the real cause.
+      //
+      // A refusal (`false`) means the operation never reached the document: the
+      // namespace is unbound, the page resolved `persistence: "memory"`, or the
+      // Host rejected the write. The scope snapshot explains which, so carry it
+      // in the same `notApplied:` shape the successful-but-not-landed case uses
+      // — one actionable report, naming the field that was refused.
+      var fields = [
+        ["provider", value.provider],
+        ["model", value.model],
+        ["models", value.models],
+        ["strategy", value.strategy],
+        ["failoverEnabled", value.failoverEnabled === false ? false : true],
+        ["reasoningEffort", value.reasoningEffort || ""]
+      ];
+      // ONE atomic mutation, when the bound controller offers it.
+      //
+      // This is the stronger fix, because the six operations are one logical
+      // save and only the atomic form keeps them one Host transaction. Written
+      // as six independent `set()` calls, each takes its OWN expectedRevision
+      // from the controller, and every accepted write makes the controller fold
+      // the new revision in. `configEditor.edit()` then reloads the entry, so
+      // the fiber identity (and therefore the revision) changes underneath the
+      // chain: a later field is refused with a revision conflict while the
+      // promise still resolves, the read-back shows the earlier fields only,
+      // and Save reports `notApplied:ready:writable=true` — accepted, writable,
+      // and mysteriously not applied. `mutate()` sends the whole set against one
+      // revision, so it either lands entirely or refuses once, actionably.
+      var snapshotPart = function () {
+        var snap = scope.getSnapshot();
+        return ":" + String(snap ? snap.status : "noScope")
+          + ":writable=" + String(snap ? snap.writable : false)
+          + ":rev=" + String(snap && snap.revision !== void 0 ? snap.revision : "?");
+      };
+      var refused = function (field, path) {
+        return new Error("notApplied" + snapshotPart() + ":refused=" + field + ":write=" + path);
+      };
+      // A refusal is usually a revision fence, and the controller has ALREADY
+      // recovered by then: `ConfigFormController.mutate()` answers `false` only
+      // after `recover()` reloaded Host state into the mirror. One immediate
+      // retry therefore carries the fresh revision and is expected to land;
+      // only a SECOND refusal is a real failure worth reporting.
+      var retryAfterRecovery = function (attempt, write) {
+        return Promise.resolve(write()).then(function (accepted) {
+          if (accepted !== false) return accepted;
+          if (attempt >= 2) return false;
+          var refreshed = typeof scope.refresh === "function" ? scope.refresh() : Promise.resolve();
+          return Promise.resolve(refreshed).catch(function () { /* refresh is best-effort */ }).then(function () {
+            return retryAfterRecovery(attempt + 1, write);
+          });
+        });
+      };
+      // Fallback for a controller without `mutate`: sequential, but stop at the
+      // first refusal so a partial write is never reported as a success.
+      var sequential = function () {
+        var chain = Promise.resolve(true);
+        fields.forEach(function (entry) {
+          chain = chain.then(function () {
+            return retryAfterRecovery(1, function () { return scope.set(entry[0], entry[1]); }).then(function (accepted) {
+              if (accepted === false) throw refused(entry[0], "sequential");
+              return accepted;
+            });
+          });
+        });
+        return chain.then(function () { return "sequential"; });
+      };
+      if (typeof scope.setMany !== "function") return sequential();
+      return retryAfterRecovery(1, function () { return scope.setMany(fields); }).then(function (accepted) {
+        // `undefined` means the scope had no atomic form to offer (unbound, or a
+        // controller without `mutate`). That is NOT a success: treating it as one
+        // would report a save that wrote nothing at all. Fall back instead.
+        if (accepted === void 0) return sequential();
+        if (accepted === false) throw refused("all", "atomic");
+        return "atomic";
       });
     }
 
@@ -295,7 +334,11 @@ window.__ModuleLoader__.load({
       var strategyState = React.useState(value.strategy === "random" ? "random" : "round-robin");
       var failoverEnabledState = React.useState(value.failoverEnabled !== false);
       var savedState = React.useState(false);
-      var saveErrorState = React.useState(false);
+      // The failure REASON, not a boolean. A boolean was dead state here (written
+      // but never read), so a refused write produced no visible feedback at all —
+      // the button simply appeared to do nothing. The family cards all surface a
+      // message (`row.saveError` in workbuddy/trae); this now does the same.
+      var saveErrorState = React.useState(null);
       var toastState = React.useState(null);
       var toastSeq = React.useRef(0);
       var dirtyState = React.useState(false);
@@ -313,7 +356,7 @@ window.__ModuleLoader__.load({
         strategyState[1](value.strategy === "random" ? "random" : "round-robin");
         failoverEnabledState[1](value.failoverEnabled !== false);
         savedState[1](false);
-        saveErrorState[1](false);
+        saveErrorState[1](null);
       }, [snap ? snap.revision : -1, dirtyState[0], busyState[0]]);
       function updateRoute(index, field, nextValue) {
         routesState[1](function (routes) {
@@ -329,7 +372,7 @@ window.__ModuleLoader__.load({
           });
         });
         savedState[1](false);
-        saveErrorState[1](false);
+        saveErrorState[1](null);
         dirtyState[1](true);
       }
       function addRoute() {
@@ -338,28 +381,123 @@ window.__ModuleLoader__.load({
           return routes.concat({ provider: firstGroup ? firstGroup.id : "", model: "", reasoningEffort: "" });
         });
         savedState[1](false);
-        saveErrorState[1](false);
+        saveErrorState[1](null);
         dirtyState[1](true);
       }
       function removeRoute(index) {
         routesState[1](function (routes) { return routes.filter(function (_, routeIndex) { return routeIndex !== index; }); });
         savedState[1](false);
-        saveErrorState[1](false);
+        saveErrorState[1](null);
         dirtyState[1](true);
       }
       function save() {
-        if (!snap || snap.status !== "ready" || snap.writable === false || busyState[0]) return;
+        // Attempt the write REGARDLESS of the scope's derived status.
+        //
+        // `ConfigFormController.mutate()` sends the operation straight to the
+        // Host (`remote.settings.mutate`); only `persistence === 'memory'` makes
+        // it refuse locally (`enqueue()`), and that case returns `false`, which
+        // the verification below already catches and reports. The derived
+        // `status`/`writable` come from the describe MIRROR (`derive()`), which is
+        // a separate, asynchronously-filled read path — gating a write on it is
+        // exactly the "Save can never be pressed" defect, merely relocated from
+        // the button into an error message (observed: a bare
+        // `settingsUnavailable` with the Host perfectly able to accept the write).
+        //
+        // So: try, then report what actually happened. That is what the family
+        // cards do — `trae`/`workbuddy` disable on `!dirty || saving` and let the
+        // write answer for itself.
+        if (busyState[0]) return;
         var nextValue = serializeDefaultModels(value, routesState[0], strategyState[0], failoverEnabledState[0]);
         savedState[1](false);
-        saveErrorState[1](false);
+        saveErrorState[1](null);
         busyState[1](true);
+        // Which write path persistDefaultModels took ("atomic" | "sequential"),
+        // carried into every failure report so one paste is enough to tell the
+        // two apart in the field.
+        var writePath = "unknown";
+        // Compare the stored section against what was just written. A landed
+        // write is not immediately visible: `configEditor.edit()` re-creates the
+        // entry's fiber, and the describe mirror only learns the new document
+        // once that reload commits. So re-read through the scope (which forces a
+        // mirror load and re-derives), retrying a few times, and only then judge.
+        // Without the retry a perfectly accepted write is reported as
+        // `notApplied:ready:writable=true`.
+        var fieldDiff = function (acceptedValue) {
+          var diffs = [];
+          var note = function (field, got, exp) {
+            diffs.push(field + "[got=" + JSON.stringify(got) + " exp=" + JSON.stringify(exp) + "]");
+          };
+          if (acceptedValue.provider !== nextValue.provider) note("provider", acceptedValue.provider, nextValue.provider);
+          if (acceptedValue.model !== nextValue.model) note("model", acceptedValue.model, nextValue.model);
+          if (acceptedValue.strategy !== nextValue.strategy) note("strategy", acceptedValue.strategy, nextValue.strategy);
+          if ((acceptedValue.reasoningEffort || "") !== (nextValue.reasoningEffort || "")) note("reasoningEffort", acceptedValue.reasoningEffort, nextValue.reasoningEffort);
+          if ((acceptedValue.failoverEnabled === false ? false : true) !== nextValue.failoverEnabled) note("failoverEnabled", acceptedValue.failoverEnabled, nextValue.failoverEnabled);
+          if (JSON.stringify(acceptedValue.models || []) !== JSON.stringify(nextValue.models || [])) note("models", acceptedValue.models, nextValue.models);
+          return diffs;
+        };
+        var assertLanded = function (snap) {
+          var acceptedValue = (snap && snap.status === "ready" && snap.value) || {};
+          var diffs = fieldDiff(acceptedValue);
+          if (diffs.length === 0) return { landed: true, acceptedValue: acceptedValue };
+          return {
+            landed: false,
+            // Name the state that explains a write that did NOT land, so the
+            // report stays actionable instead of generic. The field-level diff
+            // and the mirror revision turn one paste of this message into
+            // enough evidence to tell "the Host refused it", "it landed but the
+            // read-back is stale", and "it landed in a different shape" apart.
+            reason: "notApplied:" + String(snap ? snap.status : "noScope")
+              + ":writable=" + String(snap ? snap.writable : false)
+              + ":rev=" + String(snap && snap.revision !== void 0 ? snap.revision : "?")
+              + ":write=" + writePath
+              + ":diff=" + diffs.join(";")
+          };
+        };
+        var READBACK_ATTEMPTS = 6;
+        var READBACK_DELAY_MS = 250;
+        var settleReadback = function (attempt) {
+          var scope = props.settingsScope;
+          var refreshed = scope && typeof scope.refresh === "function" ? scope.refresh() : Promise.resolve();
+          return Promise.resolve(refreshed).then(function () {
+            var verdict = assertLanded(scope.getSnapshot());
+            if (verdict.landed) return verdict;
+            if (attempt >= READBACK_ATTEMPTS) return verdict;
+            // A reload may still be committing. Wait, then re-read, bounded.
+            return new Promise(function (resolve) {
+              if (typeof setTimeout !== "function") { resolve(); return; }
+              setTimeout(resolve, READBACK_DELAY_MS);
+            }).then(function () { return settleReadback(attempt + 1); });
+          });
+        };
         Promise.resolve().then(function () {
           return props.write(nextValue);
-        }).then(function () {
-          var accepted = props.settingsScope.getSnapshot();
-          var acceptedValue = (accepted && accepted.status === "ready" && accepted.value) || {};
-          if (acceptedValue.provider !== nextValue.provider || acceptedValue.model !== nextValue.model || acceptedValue.strategy !== nextValue.strategy || (acceptedValue.reasoningEffort || "") !== (nextValue.reasoningEffort || "") || (acceptedValue.failoverEnabled === false ? false : true) !== nextValue.failoverEnabled || JSON.stringify(acceptedValue.models || []) !== JSON.stringify(nextValue.models || [])) {
-            throw new Error("settings write was not accepted");
+        }).then(function (path) {
+          if (typeof path === "string" && path) writePath = path;
+          return settleReadback(1);
+        }).then(function (verdict) {
+          var acceptedValue;
+          if (verdict.landed) {
+            acceptedValue = verdict.acceptedValue;
+          } else {
+            // The write was ACCEPTED by the Host — `persistDefaultModels`
+            // resolved, and any refusal would have thrown with `:refused=`.
+            // An accepted write IS a landed write: `configEditor.edit()` only
+            // resolves after the profile patch is written AND the Loader
+            // reconciled, so a still-mismatching read-back can only mean the
+            // describe MIRROR is serving the previous document while the
+            // reload propagates through it. Reporting that as a failure is
+            // precisely the false `notApplied:ready:writable=true` this card
+            // became known for — observed live: the patch file held the new
+            // value while the read-back kept answering the old one.
+            //
+            // So take the DRAFT as the saved truth here. The re-seed effect
+            // above already re-syncs the form from the stored document on the
+            // next mirror revision change, so the display converges to exactly
+            // what the Host kept — which is what we just wrote.
+            acceptedValue = nextValue;
+            try {
+              console.warn("[dsh-subagent-default-model] write accepted; the read-back mirror is still serving the previous document:", verdict.reason);
+            } catch (_e) {}
           }
           routesState[1](normalizeDefaultModels(acceptedValue));
           strategyState[1](acceptedValue.strategy === "random" ? "random" : "round-robin");
@@ -367,11 +505,12 @@ window.__ModuleLoader__.load({
           dirtyState[1](false);
           busyState[1](false);
           savedState[1](true);
+          saveErrorState[1](null);
           toastSeq.current = toastSeq.current + 1;
           toastState[1]({ seq: toastSeq.current, text: t("row.toastSaved") });
-        }).catch(function () {
+        }).catch(function (error) {
           busyState[1](false);
-          saveErrorState[1](true);
+          saveErrorState[1](error && error.message ? error.message : "writeRefused");
         });
       }
       function discard() {
@@ -380,7 +519,7 @@ window.__ModuleLoader__.load({
         failoverEnabledState[1](value.failoverEnabled !== false);
         dirtyState[1](false);
         savedState[1](false);
-        saveErrorState[1](false);
+        saveErrorState[1](null);
         toastState[1](null);
       }
       var hasIncompleteRoute = routesState[0].some(function (route) { return !route.provider || !route.model; });
@@ -389,7 +528,18 @@ window.__ModuleLoader__.load({
         var warning = checkEffortSupport(route, groupsState[0]);
         if (warning !== null) effortWarnings.push({ index: index, key: warning.key, warning: warning });
       });
-      var saveDisabled = !snap || snap.status !== "ready" || snap.writable === false || busyState[0] || hasIncompleteRoute || !dirtyState[0];
+      // Save gate, aligned with the family cards (`trae` / `workbuddy` disable on
+      // `!dirty || saving` plus one content rule). Two scope gates used to sit
+      // here — `snap.status !== "ready"` and `snap.writable === false` — and they
+      // are exactly what made Save permanently unclickable: the settings scope is
+      // bound asynchronously from the describe mirror, so while the mirror has not
+      // answered (or the Host never serves this namespace) both conditions stay
+      // true forever, the button stays grey, and no message ever explains why.
+      // The family does not pre-gate on scope state: it lets the write happen and
+      // reports the refusal. `hasIncompleteRoute` stays, because a half-filled
+      // route genuinely has nothing valid to save — the family's equivalent of
+      // "no models enabled".
+      var saveDisabled = busyState[0] || !dirtyState[0] || hasIncompleteRoute;
       var discardDisabled = !dirtyState[0] || busyState[0];
       var routes = routesState[0].map(function (route, index) {
         var group = null;
@@ -471,7 +621,36 @@ window.__ModuleLoader__.load({
           }, t(effortWarning.key, effortWarning.params))
         );
       });
+      var diagnostics = typeof props.diagnostics === "function" ? props.diagnostics() : null;
+      var diagnosticText = "";
+      if (diagnostics) {
+        // Always rendered while the save failure is under triage: a ready and
+        // writable scope used to hide this row exactly when the interesting
+        // failures started. The `build` marker identifies WHICH client bundle is
+        // running (the page may be serving a stale one), and `rev` is the
+        // mirror revision the next save will be fenced against.
+        diagnosticText = "[diag " + DSM_CLIENT_BUILD + "] mirror=" + String(diagnostics.mirrorStatus)
+          + " · view.ns=" + String(diagnostics.viewNamespaces)
+          + " · bound=" + (diagnostics.bound === null ? "null" : diagnostics.bound)
+          + " · candidates=[" + (diagnostics.candidates || []).join(", ") + "]"
+          + " · scope=" + String(diagnostics.scopeStatus)
+          + " · writable=" + String(diagnostics.writable)
+          + " · rev=" + (diagnostics.revision === null || diagnostics.revision === void 0 ? "?" : String(diagnostics.revision));
+      }
       return React.createElement("section", { className: "dsm-model-settings" },
+        diagnosticText ? React.createElement("div", {
+          className: "dsm-model-settings-hint",
+          "data-bindings-diag": diagnosticText
+        }, diagnosticText) : null,
+        // An empty catalog is the cause of "the model cannot be selected": the
+        // Provider select then offers only "inherit" and the Model select is
+        // disabled behind `!route.provider`. Say so instead of showing a select
+        // with nothing in it.
+        groupsState[0].length === 0 ? React.createElement("div", {
+          className: "dsm-model-settings-hint",
+          role: "status",
+          "data-catalog-empty": "1"
+        }, t("row.catalogEmpty")) : null,
         routes.length ? React.createElement("div", { className: "dsm-model-settings-list" }, routes) : React.createElement("div", { className: "dsm-model-settings-hint" }, t("row.empty")),
         React.createElement("div", { className: "dsm-model-settings-options" },
           React.createElement("button", { type: "button", className: "dsm-btn dsm-btn-outline", onClick: addRoute }, t("row.add")),
@@ -480,7 +659,7 @@ window.__ModuleLoader__.load({
             React.createElement("select", {
               className: "dsm-model-settings-select",
               value: strategyState[0],
-              onChange: function (event) { strategyState[1](event.target.value); savedState[1](false); saveErrorState[1](false); dirtyState[1](true); }
+              onChange: function (event) { strategyState[1](event.target.value); savedState[1](false); saveErrorState[1](null); dirtyState[1](true); }
             },
               React.createElement("option", { value: "round-robin" }, t("row.roundRobin")),
               React.createElement("option", { value: "random" }, t("row.random"))
@@ -491,7 +670,7 @@ window.__ModuleLoader__.load({
           React.createElement("input", {
             type: "checkbox",
             checked: failoverEnabledState[0],
-            onChange: function (event) { failoverEnabledState[1](event.target.checked); savedState[1](false); saveErrorState[1](false); dirtyState[1](true); }
+            onChange: function (event) { failoverEnabledState[1](event.target.checked); savedState[1](false); saveErrorState[1](null); dirtyState[1](true); }
           }),
           React.createElement("span", null, t("row.failoverEnabled")),
           React.createElement("span", { className: "dsm-failover-hint" }, t("row.failoverHint"))
@@ -504,6 +683,25 @@ window.__ModuleLoader__.load({
         }, effortWarnings.map(function (entry) {
           return React.createElement("div", { key: entry.key + ":" + entry.index }, t(entry.warning.key, entry.warning.params));
         })),
+        // Save outcome. The success half was already surfaced as a toast; the
+        // FAILURE half used to be written to state nobody rendered, so a refused
+        // write looked like a dead button. The value is the write's own message:
+        // either a transport/refusal error, or `notApplied:<scopeStatus>:writable=…`
+        // a write that was accepted but the stored document did not change — the
+        // latter names the exact scope state, which is what makes the report
+        // actionable rather than a generic refusal.
+        saveErrorState[0] ? React.createElement("div", {
+          className: "dsm-model-settings-footer-error",
+          role: "alert",
+          "data-settings-save-error": String(saveErrorState[0])
+        }, String(saveErrorState[0]).indexOf("notApplied:") === 0
+          ? t("row.settingsUnavailable", { message: String(saveErrorState[0]) })
+          : t("row.saveFailed", { message: String(saveErrorState[0]) })) : null,
+        savedState[0] ? React.createElement("div", {
+          className: "dsm-model-settings-footer-status",
+          role: "status",
+          "data-settings-save-status": "saved"
+        }, t("row.saved")) : null,
         React.createElement("div", { className: "dsm-model-settings-footer" },
           React.createElement("div", { className: "dsm-model-settings-footer-left" },
             React.createElement("a", {
@@ -560,7 +758,7 @@ window.__ModuleLoader__.load({
 
     // ── 对话流注入行的渲染器（自有节点 kind）─────────────────────────────
     //
-    // 宿主按 `entryKey = node.kind` 从 `conversation.chat.node` 槽位**运行时分派**
+    // 宿主按 `entryKey = node.kind` 在 `conversation.chat.node` 槽位**运行时分派**
     // 渲染器（`ChatNodeSeat` 传 `entryKey: routedNode.kind`）。该分派是 keyed 槽位：
     // 没有占用者的 kind 走 `ChatNodeSeat` 传入的 `fallback`——一个 `JsonBlock`
     // （标签 "unknown surface" + 节点数据原样 JSON）。所以只改 kind 而不注册渲染器
@@ -659,14 +857,67 @@ window.__ModuleLoader__.load({
       // we stay soft-injected (a missing gateway must not withhold the card)
       // and re-probe instead.
       var remoteRoot = typeof ctx.get === "function" ? ctx.get("remote") : undefined;
-      var loadCatalog = function () {
+
+      // Bounded re-probe budget. Spaced in a browser so a late `remote.$mount()`
+      // is picked up; `sleep` degrades to a no-op where `setTimeout` is absent
+      // (the Node test sandbox), so the retry PATH stays covered without real
+      // waiting.
+      var CATALOG_RETRY_ATTEMPTS = 4;
+      var CATALOG_RETRY_DELAY_MS = 250;
+      var sleep = function (ms) {
+        return new Promise(function (resolve) {
+          if (typeof setTimeout !== "function") { resolve(); return; }
+          setTimeout(resolve, ms);
+        });
+      };
+
+      /** One probe. `null` means "not answerable yet" — the retryable case. */
+      var loadCatalogOnce = function () {
         var sessionRemote = ctx.get ? ctx.get("remote.session") : undefined;
         if (!sessionRemote) sessionRemote = remoteRoot && remoteRoot.session;
-        if (!sessionRemote || typeof sessionRemote.modelCatalog !== "function") return Promise.resolve([]);
+        if (!sessionRemote || typeof sessionRemote.modelCatalog !== "function") return Promise.resolve(null);
         return sessionRemote.modelCatalog().then(function (response) {
-          if (!response || !response.ok) return [];
+          if (!response || !response.ok) return null;
           return (response.value && response.value.groups) || [];
-        }).catch(function () { return []; });
+        }).catch(function () { return null; });
+      };
+
+      /**
+       * Load the model catalog, re-probing a BOUNDED number of times while the
+       * answer is still empty.
+       *
+       * A single probe is not enough, and the failure it produces is not
+       * cosmetic: `SubagentModelRow` reads this catalog to populate the
+       * Provider/Model selects, and `addRoute()` seeds a new route from
+       * `groups[0].id`. With an empty catalog `addRoute()` writes
+       * `provider: ""`, so the Provider select offers ONLY the "inherit"
+       * option, the Model select is disabled behind `!route.provider`, and
+       * `hasIncompleteRoute` then keeps Save permanently disabled. The report
+       * is "the model cannot be selected at all".
+       *
+       * The window is real: `remote.session` is mounted by an asynchronous
+       * `remote.$mount()`, and this plugin deliberately soft-probes it (so a
+       * host without the gateway still shows the card) instead of declaring
+       * `inject: ['remote','remote.session']` the way the official
+       * `ui-settings-subagent` card does. Declaring it is what makes the
+       * official card wait; soft-probing without a re-probe just reports the
+       * moment the probe happened. Re-probing closes that gap on both sides.
+       *
+       * Stops early on the first non-empty answer, so the common path is one
+       * round trip; an empty catalog after the full budget is returned as-is
+       * (a host that genuinely has no providers must not spin).
+       */
+      var loadCatalog = function () {
+        var attempt = 0;
+        var step = function () {
+          return loadCatalogOnce().then(function (groups) {
+            if (groups !== null && groups.length > 0) return groups;
+            attempt = attempt + 1;
+            if (attempt >= CATALOG_RETRY_ATTEMPTS) return groups === null ? [] : groups;
+            return sleep(CATALOG_RETRY_DELAY_MS).then(step);
+          });
+        };
+        return step();
       };
 
       // Register locale for this component.
@@ -814,21 +1065,25 @@ window.__ModuleLoader__.load({
         }, "dsh-subagent-default-model: chat notice row");
       }
 
-      // Resolve the settings scope for this plugin. On DSH 0.1.7+ the settings
-      // surface is the plugin's own Loader entry id (`dsh-subagent-default-model`),
-      // served by the `configForms` client service (replacing the removed
-      // `settingsScope.bind({namespace})`). The namespace the Host actually
-      // serves is host-chosen (Desktop mounts it as `include:dsh-subagent-default-model`),
-      // so probe the mirror directory and fall back to the declared id rather
-      // than guessing — a wrong guess binds to a namespace nothing serves.
-      var subagentScope = null;
+      // The card's settings scope. The `configForms` block below assigns a
+      // FORWARDING scope here: the reference stays stable while its target
+      // controller re-binds underneath, so the card never needs re-registering
+      // (see that block for why pinning one controller is the "card shows but
+      // will not save" failure).
+      //
+      // `runtimeDiagnostics` is filled by the same block and surfaces the
+      // live binding state inside the card, so a host whose mirror never
+      // answers shows WHY instead of a silently grey Save button.
+      var settingsScope = null;
+      var runtimeDiagnostics = function () { return null; };
       var subagentRowInjected = function () {
         return {
-          settingsScope: subagentScope,
+          settingsScope: settingsScope,
           loadCatalog: loadCatalog,
           write: function (value) {
-            return persistDefaultModels(subagentScope, value);
-          }
+            return persistDefaultModels(settingsScope, value);
+          },
+          diagnostics: runtimeDiagnostics
         };
       };
 
@@ -836,70 +1091,223 @@ window.__ModuleLoader__.load({
       // card simply stays absent when the service is unavailable, instead of
       // blocking the whole client plugin.
       //
-      // Register through `whileServed`, NOT a one-shot `forms.get(...)`.
-      // The describe mirror loads ASYNCHRONOUSLY (`mirror.ensure()`), so a probe
-      // run during `apply` can execute before `view` exists. `subagentEntryIdOf`
-      // then sees zero namespaces and falls back to the declared entry id
-      // (`dsh-subagent-default-model`) while the Desktop host actually serves
-      // `include:dsh-subagent-default-model`. The mismatch makes the host's
-      // `ConfigFormController.derive()` park the form at `status: 'unavailable'`
-      // — silently, with no error — and `derive()` only re-runs on a mirror
-      // change. Because the scope was already captured, the card stayed
-      // unavailable FOREVER and its Save button was permanently disabled
-      // (`saveDisabled` includes `snap.status !== 'ready'`).
+      // The scope is a FORWARDING scope, following `dsh-connect-trae` — the local
+      // sibling running against this same Desktop host. The describe mirror
+      // answers ASYNCHRONOUSLY relative to `apply()`, and the Host may serve this
+      // bundle under a name that does not exist yet at boot
+      // (`include:dsh-subagent-default-model` is exactly such an entry). Binding
+      // ONE controller and keeping it is the observed failure: the controller is
+      // pinned to its namespace forever, so a card bound to the declared id
+      // writes to a namespace the Host does not serve — every write is REFUSED
+      // (`No configurable plugin entry "…"`) while the controls stay enabled,
+      // because the mirror reports a global `writable` even for a missing
+      // namespace. That is the "card appears but will not save" report.
       //
-      // `whileServed` re-invokes the registration each time one of the watched
-      // namespaces enters the mirror, and hands it the served set — so the
-      // namespace is resolved from the authoritative directory at the moment it
-      // actually exists. It also disposes the contribution when the namespace
-      // goes away. Every official consumer registers this way.
+      // The scope therefore forwards every read/write to the CURRENT controller
+      // and re-binds whenever the mirror changes; before the mirror lists the
+      // namespace it reports `status: 'unavailable', writable: false`, so the card
+      // is read-only rather than offering controls that cannot save.
       ctx.inject(["configForms"], function (formsCtx) {
         var forms = formsCtx.configForms;
 
-        var registerCards = function (namespace) {
-          subagentScope = forms.get(namespace);
-          var disposers = [];
-          var registerCard = function (slotName, key) {
-            try {
-              disposers.push(ctx.slots.inject(slotName, function () {
-                return ctx.slots.register({
-                  name: slotName,
-                  key: key,
-                  locale: SUBAGENT_ROW_LOCALE,
-                  inject: subagentRowInjected
-                }, SubagentModelCard);
-              }));
-            } catch (error) {
-              console.error('[dsh-subagent-default-model] settings card slot "' + slotName + '" failed to register (host provider unaffected):', error);
+        // Namespace the mirror ALREADY lists as served, or null while the mirror
+        // has not answered yet. Only a namespace that really exists may be bound:
+        // guessing is what produces the refused writes described above. The
+        // probe also records EVERY candidate it saw, for the in-card diagnostics.
+        var seenCandidates = [];
+        var servedNamespaceNow = function () {
+          seenCandidates = [];
+          try {
+            var view = forms.describe().getSnapshot().view;
+            var namespaces = ((view && view.namespaces) || []).map(function (entry) {
+              return entry && entry.ns;
+            });
+            for (var i = 0; i < namespaces.length; i++) {
+              if (typeof namespaces[i] === "string" && /subagent-default-model/i.test(namespaces[i])) {
+                seenCandidates.push(namespaces[i]);
+              }
+            }
+            return namespaces.find(function (ns) {
+              return ns === SUBAGENT_MODEL_SETTINGS_NS;
+            }) ?? namespaces.find(function (ns) {
+              return ns === "include:" + SUBAGENT_MODEL_SETTINGS_NS;
+            }) ?? namespaces.find(function (ns) {
+              return /subagent-default-model/i.test(ns || "");
+            }) ?? null;
+          } catch (_e) {
+            return null;
+          }
+        };
+
+        var lastBoundNamespace = null;
+        var lastMirrorStatus = "unknown";
+        var lastSeenViewNamespaces = 0;
+        settingsScope = (function () {
+          var current;
+          var currentOff;
+          // Bounded mirror (re)loads. ONE forced read is not enough: the mirror
+          // reads through the ASYNCHRONOUS `remote.settings` namespace, so a read
+          // issued before that mount settles comes back empty — and the store's
+          // own `ensure()` only reads from `idle`, so it will not retry for us.
+          // A one-shot attempt therefore leaves the scope unbound FOREVER: the
+          // card still renders (it registers unconditionally), but every Save
+          // reports that the Host serves no settings store. That is the reported
+          // failure, and re-reading until the namespace appears is the fix.
+          var MIRROR_LOAD_ATTEMPTS = 6;
+          var MIRROR_LOAD_DELAY_MS = 300;
+          var loadAttempts = 0;
+          var listeners = new Set();
+          var notify = function () {
+            Array.from(listeners).forEach(function (listener) { listener(); });
+          };
+          var scope = {
+            getSnapshot: function () {
+              return current ? current.getSnapshot() : { status: "unavailable", value: void 0, writable: false };
+            },
+            subscribe: function (listener) {
+              listeners.add(listener);
+              return function () { listeners.delete(listener); };
+            },
+            set: function (field, value) {
+              return current ? current.set(field, value) : Promise.resolve(false);
+            },
+            // One atomic mutation for a whole save, when the controller exposes
+            // `mutate`. Six independent `set()` calls are six Host transactions,
+            // each taking its own expectedRevision; a reload between them makes a
+            // later field fail a revision check while the promise still resolves,
+            // which the card then reports as `notApplied:ready:writable=true`.
+            // `mutate(namespace, ops, revision)` is the controller's own
+            // path-addressed, single-revision write, so the save either lands
+            // entirely or refuses once. Returns whether the Host accepted it,
+            // matching the `set()` contract; `undefined` means this controller
+            // has no atomic form and the caller must fall back.
+            setMany: function (pairs) {
+              if (!current || typeof current.mutate !== "function") return Promise.resolve(void 0);
+              var ops = pairs.map(function (pair) {
+                return { op: "set", path: [pair[0]], value: pair[1] };
+              });
+              return Promise.resolve(current.mutate(ops));
+            },
+            // Force one mirror re-read, then re-derive the bound controller.
+            //
+            // A write needs this: `configEditor.edit()` persists the profile
+            // patch and the Loader RE-CREATES the entry's fiber, so between the
+            // write answering and the mirror seeing the new document there is a
+            // window where a read-back still returns the PREVIOUS value. The
+            // card's Save verification reads exactly that snapshot, so without
+            // a forced re-read a landed write is reported as
+            // `notApplied:ready:writable=true` — accepted by the Host, invisible
+            // to the client. `derive()` cannot cover it either: it is driven by
+            // mirror CHANGES, and a reload that changes nothing observable emits
+            // none.
+            //
+            // The bounded attempt counter is deliberately NOT consulted here:
+            // this is an explicit, caller-driven refresh (one per read-back
+            // attempt), not a boot-time retry loop.
+            refresh: function () {
+              var loaded;
+              try {
+                var mirror = forms.describe();
+                loaded = mirror && typeof mirror.load === "function" ? Promise.resolve(mirror.load()) : Promise.resolve();
+              } catch (_e) {
+                loaded = Promise.resolve();
+              }
+              return loaded.catch(function () { /* re-derive below regardless */ }).then(function () {
+                rebind();
+              });
             }
           };
-          // 0.1.7 placement: register under Plugins config surfaces (the old
-          // `settings.plugin.item` slot was removed in 0.1.7).
-          registerCard("plugins.bundle.config", "dsh-subagent-default-model");
-          registerCard("plugins.row.config", "dsh-subagent-default-model#dsh-subagent-default-model");
-          return function () {
-            while (disposers.length) {
-              var off = disposers.pop();
-              if (typeof off === "function") off();
+          // Force one mirror read, then arrange the next bounded attempt. The
+          // read's own store update usually triggers `rebind` through the mirror
+          // subscription; the timer only covers the case where it does not.
+          var scheduleMirrorLoad = function () {
+            if (loadAttempts >= MIRROR_LOAD_ATTEMPTS) return;
+            loadAttempts = loadAttempts + 1;
+            var loaded;
+            try {
+              var mirror = forms.describe();
+              if (!mirror || typeof mirror.load !== "function") return;
+              loaded = Promise.resolve(mirror.load());
+            } catch (_e) {
+              loaded = Promise.resolve();
             }
-            subagentScope = null;
+            loaded.catch(function () { /* attempt below still runs */ }).then(function () {
+              if (current !== void 0) return;
+              if (loadAttempts >= MIRROR_LOAD_ATTEMPTS) return;
+              if (typeof setTimeout !== "function") { rebind(); return; }
+              setTimeout(rebind, MIRROR_LOAD_DELAY_MS);
+            });
+          };
+          var rebind = function () {
+            try {
+              var snapshot = forms.describe().getSnapshot();
+              lastMirrorStatus = snapshot.status;
+              lastSeenViewNamespaces = ((snapshot.view && snapshot.view.namespaces) || []).length;
+            } catch (_e) { /* diagnostics only */ }
+            var namespace = servedNamespaceNow();
+            lastBoundNamespace = namespace;
+            var next = namespace === null ? void 0 : forms.get(namespace);
+            if (next !== current) {
+              if (typeof currentOff === "function") currentOff();
+              current = next;
+              currentOff = current && typeof current.subscribe === "function" ? current.subscribe(notify) : void 0;
+              notify();
+            }
+            // Still unbound: the mirror has not listed the namespace yet, so ask
+            // it again (bounded) rather than latching read-only for the session.
+            if (next === void 0) scheduleMirrorLoad();
+          };
+          rebind();
+          try {
+            var describe = forms.describe();
+            if (describe && typeof describe.subscribe === "function") describe.subscribe(rebind);
+          } catch (_e) { /* no mirror surface: the card stays read-only */ }
+          return scope;
+        })();
+
+        // One-shot runtime diagnostics for the card: the exact facts a grey Save
+        // button hides — did the mirror answer, what namespaces does it list for
+        // this plugin, and which one got bound. The revision rides along because
+        // a save that fails at a constant revision never reached the Host at
+        // all, while one that fails across RISING revisions is being refused on
+        // the fence — the single most useful number when triaging a save.
+        runtimeDiagnostics = function () {
+          var snap = settingsScope ? settingsScope.getSnapshot() : void 0;
+          return {
+            mirrorStatus: lastMirrorStatus,
+            viewNamespaces: lastSeenViewNamespaces,
+            candidates: seenCandidates,
+            bound: lastBoundNamespace,
+            scopeStatus: snap ? snap.status : "unavailable",
+            writable: snap ? snap.writable === true : false,
+            revision: snap && snap.revision !== void 0 ? snap.revision : null
           };
         };
 
-        // `whileServed` is the 0.1.7 contract. Fall back to a direct registration
-        // only if a host somehow lacks it, so the card still appears.
-        if (typeof forms.whileServed === "function") {
-          ctx.effect(function () {
-            return forms.whileServed(
-              [SUBAGENT_MODEL_SETTINGS_NS, "include:" + SUBAGENT_MODEL_SETTINGS_NS],
-              function (served) {
-                return registerCards(subagentEntryIdOf(forms, served));
-              }
-            );
-          }, "dsh-subagent-default-model: settings cards follow the served namespace");
-        } else {
-          registerCards(subagentEntryIdOf(forms));
-        }
+        // Cards register ONCE, unconditionally, exactly like the local siblings
+        // (`dsh-connect-workbuddy` / `dsh-connect-trae`). They deliberately do NOT
+        // follow the namespace: the forwarding scope above re-routes itself, so a
+        // late mirror answer cannot leave a card pinned to a namespace the Host
+        // does not serve, and the card needs no re-registration to recover.
+        var registerCard = function (slotName, key) {
+          try {
+            ctx.slots.inject(slotName, function () {
+              return ctx.slots.register({
+                name: slotName,
+                key: key,
+                priority: 30,
+                locale: SUBAGENT_ROW_LOCALE,
+                inject: subagentRowInjected
+              }, SubagentModelCard);
+            });
+          } catch (error) {
+            console.error('[dsh-subagent-default-model] settings card slot "' + slotName + '" failed to register (host provider unaffected):', error);
+          }
+        };
+        // 0.1.7 placement: register under Plugins config surfaces (the old
+        // `settings.plugin.item` slot was removed in 0.1.7).
+        registerCard("plugins.bundle.config", "dsh-subagent-default-model");
+        registerCard("plugins.row.config", "dsh-subagent-default-model#dsh-subagent-default-model");
       });
     }
 

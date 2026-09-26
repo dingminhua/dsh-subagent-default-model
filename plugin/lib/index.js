@@ -52,20 +52,43 @@ export const name = "dsh-subagent-default-model";
 // namespace from the configForms mirror instead of guessing it.
 
 /**
- * Mark a schema's field as volatile on the DSH lines that support it.
+ * Mark a schema's field as volatile, on every schemastery build.
  *
- * `volatile()` exists from schemastery 3.18.4 (the DSH 0.1.7 line, which is the
- * only line whose settings write gate reads the marker). On a host without the
- * method the schema stays byte-identical to the unmarked original (identity
- * no-op), so the plugin still loads — the field simply loses hot-reload
- * semantics rather than breaking the whole plugin at module-eval time.
+ * The marker is NOT optional decoration: `@deepseek-ai/dsh-settings` derives the
+ * settings surface from it in two places, and BOTH fail silently without it.
+ *
+ *   - `volatileForm(schema)` (dsh-settings `lib/index.js`) returns `undefined`
+ *     when no field carries the marker, and `describe()` then DROPS the entry
+ *     from the namespace directory (`if (form === void 0) return []`). The
+ *     entry never reaches the client's describe mirror, so the settings card's
+ *     forwarding scope never binds and every Save reports
+ *     `notApplied:unavailable:writable=false` — a "the Host serves no settings
+ *     store for this plugin" error for a plugin the Host is serving perfectly.
+ *   - `isVolatilePath(schema, path)` refuses every edit whose path is not under
+ *     a marked node, with `Config field "…" is not volatile`.
+ *
+ * `volatile()` is sugar introduced in schemastery 3.18.4 — upstream it is
+ * literally `extra("volatile", true)` behind a double-marking guard. A stale or
+ * hoisted 3.18.1 install is entirely reachable (observed: the vendored copy was
+ * 3.18.1, so `volatile()` was absent and the marker was never applied — the
+ * plugin loaded, the card rendered, and every Save failed with the message
+ * above). `extra()` exists in both builds, so falling back to it keeps the exact
+ * 3.18.4 semantics and also works where `volatile()` is missing; the declared
+ * dependency floor is therefore 3.18.1. A schema offering neither method is
+ * returned unchanged rather than breaking the plugin at module-eval time.
  *
  * @template T
  * @param {object} schema - a schemastery field.
- * @returns {object} the field, marked volatile when supported.
+ * @returns {object} the field, marked volatile whenever the build allows it.
  */
 export function volatileField(schema) {
-	return typeof schema?.volatile === "function" ? schema.volatile() : schema;
+	if (typeof schema?.volatile === "function") return schema.volatile();
+	// Pre-3.18.4 fallback: identical marker, no double-marking guard needed
+	// because `extra` is a plain assignment of the same meta key.
+	if (typeof schema?.extra === "function" && schema.meta?.volatile !== true) {
+		return schema.extra("volatile", true);
+	}
+	return schema;
 }
 
 /** One model entry: a bare model id (uses the section `provider`) or an explicit `{provider, model}` pair. */
@@ -78,9 +101,25 @@ const MODEL_ENTRY = z.union([
 	})
 ]);
 /** Schema of the `subagent-default-model` settings section; an absent section keeps inheriting the parent route. */
+// EVERY field MUST carry a `.default(...)`, including the string ones that
+// would naturally be "absent when unset". The settings surface is built by
+// `projectForm()` (`@deepseek-ai/dsh-settings`), which walks the form schema and
+// DROPS any field whose resolved value is `undefined`:
+//
+//     return field === void 0 ? [] : [[key, projectForm(child, field)]];
+//
+// A bare `z.string()` with no default resolves to `undefined`, so such a field
+// is absent from the descriptor the settings card reads AND writes against. The
+// card then compares its draft (`provider: "workbuddy"`) to a descriptor that
+// never mentions `provider`, and reports the misleading
+// `notApplied:ready:writable=true`: the scope is ready and writable, and the
+// field it wrote is simply not one this form can see. Declaring `""` as the
+// default keeps the field present-and-empty, which is exactly the "inherit the
+// parent route" state the rest of this plugin already treats as unset
+// (`defaultModel()` tests `section.model.length > 0`).
 const SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA = z.object({
-	provider: volatileField(z.string().description("Default provider for subagent runs without an explicit agentOptions")),
-	model: volatileField(z.string().description("Default model id; the single-model form, backward compatible")),
+	provider: volatileField(z.string().default("").description("Default provider for subagent runs without an explicit agentOptions")),
+	model: volatileField(z.string().default("").description("Default model id; the single-model form, backward compatible")),
 	models: volatileField(z.array(MODEL_ENTRY).default([]).description("Multi-model list; picked per strategy on every delegation")),
 	strategy: volatileField(z.union([z.const("round-robin"), z.const("random")]).default("round-robin").description("How to pick from `models`")),
 	failoverEnabled: volatileField(z.boolean().default(true).description("Retry a subagent request on another pool model after a connection failure")),
@@ -90,7 +129,7 @@ const SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA = z.object({
 	// writes this key as part of EVERY save, so omitting it made every save
 	// fail — not just the reasoning-effort field. It also carries the
 	// single-model form's effort, which `defaultModel()` reads back.
-	reasoningEffort: volatileField(z.string().description("Reasoning effort for the single-model form (`model`)"))
+	reasoningEffort: volatileField(z.string().default("").description("Reasoning effort for the single-model form (`model`)"))
 }).default({});
 
 /** The plugin's Cordis Config — on DSH 0.1.7+ this IS the settings section. */

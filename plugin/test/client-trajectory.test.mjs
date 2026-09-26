@@ -721,7 +721,7 @@ function collect(node, predicate, out = []) {
  * async `loadCatalog()` effect: the first pass renders with an empty catalog,
  * the flush resolves it, and the second pass renders the settled panel.
  */
-async function renderSettingsCard({ groups, value }) {
+async function renderSettingsCard({ groups, value, snapshotOverride, write }) {
 	const react = makeReactDouble();
 	const reactRequire = (id) => {
 		if (id === "react") return react;
@@ -732,7 +732,10 @@ async function renderSettingsCard({ groups, value }) {
 		}
 		throw new Error(`unexpected require: ${id}`);
 	};
-	const snapshot = { status: "ready", writable: true, value };
+	// `snapshot` may be supplied by the caller as a LIVE object so a test can flip
+	// its status between renders (the card reads it on every render, while its
+	// route draft is seeded once). Default: a settled, writable scope.
+	const snapshot = snapshotOverride ?? { status: "ready", writable: true, value };
 	const { ctx, slotRegistrations, dictionaries } = makeCtx({
 		settingsScope: { getSnapshot: () => snapshot, subscribe: () => () => {}, set: async () => {} },
 		settingsValue: value
@@ -747,7 +750,8 @@ async function renderSettingsCard({ groups, value }) {
 	const props = {
 		t,
 		settingsScope: { getSnapshot: () => snapshot, subscribe: () => () => {} },
-		loadCatalog: async () => groups
+		loadCatalog: async () => groups,
+		...(write === undefined ? {} : { write })
 	};
 	// The card body is hidden while collapsed; seed the open state by rendering
 	// the component whose first hook is `useState(false)` as already open.
@@ -757,7 +761,10 @@ async function renderSettingsCard({ groups, value }) {
 		await Promise.resolve();
 		tree = renderPass();
 	}
-	return { tree, react };
+	// Re-render once more so state written by an event handler (a save attempt)
+	// reaches the tree, the way React would.
+	const rerender = () => { tree = renderPass(); return tree; };
+	return { tree, react, rerender, getTree: () => tree };
 }
 
 /** Flatten a rendered tree to searchable text. */
@@ -807,87 +814,258 @@ test("panel render stays clean for an unknown model (lagging catalog is not a wa
 
 // ── DSH 0.1.7 settings-面契约（对齐 dsh-ldvh abb35db / 3c07fda）──────────────
 
-test("resolves the served settings namespace instead of assuming the bare id", async () => {
+test("binds the served settings namespace through a forwarding scope, not a one-shot controller", async () => {
 	// 0.1.7 的 configForms.get() 对宿主 served-namespace 目录做**精确匹配**，而
 	// Desktop 宿主以 `include:<包名>` 挂载社区 bundle（真机核对：host/Config 的
 	// listConfigs 以 include:dsh-subagent-default-model 寻址）。硬编码声明 id 会让
 	// 设置卡绑定到无人服务的命名空间——status: unavailable，静默失效、不报错。
 	//
-	// 关键：解析必须发生在**命名空间真的被服务时**，而不是 apply 时探测一次。
-	// mirror 是异步加载的（mirror.ensure()），apply 期探测可能落空并回落到声明 id，
-	// 而回落后**永不重探** —— 表现就是保存按钮永久禁用（saveDisabled 含
-	// snap.status !== 'ready'）。官方范式是 configForms.whileServed(...)，它在
-	// 命名空间进入 mirror 时重新调用注册函数，并把 served 集合交给它。
-	assert.ok(clientSource.includes("function subagentEntryIdOf(forms, servedNamespaces)"), "resolver must accept the served-namespace set from whileServed");
+	// 关键（真机 2026-09-25 复现，同族 dsh-connect-trae 的注释同样记载）：mirror 相对
+	// apply 是**异步应答**的，而绑定一次 controller 就把它永久钉在那个 namespace 上。
+	// 卡片照样渲染、控件照样可编辑，但每次写入都被拒（No configurable plugin entry
+	// "…"），因为 mirror 即使在命名空间缺失时也报全局 writable —— 表现就是「卡片能看
+	// 到但存不下去」。解法是 scope 转发每次读写到**当前** controller，并由 mirror 驱动
+	// 重绑；未绑定时报只读而非假可写。
+	assert.ok(clientSource.includes("var settingsScope = null;"), "the card reads a stable scope reference");
+	assert.ok(clientSource.includes("settingsScope = (function () {"), "the configForms block installs a forwarding scope");
+	assert.ok(clientSource.includes("var servedNamespaceNow = function ()"), "the served namespace is probed from the mirror");
 	assert.ok(clientSource.includes("forms.describe().getSnapshot().view"), "probe reads the served-namespace directory from the mirror");
-	assert.ok(clientSource.includes("servedNamespaces.has"), "the whileServed set is consulted first (mirror may still be mid-fold)");
 	assert.ok(clientSource.includes("SUBAGENT_MODEL_SETTINGS_NS"), "probe matches the declared entry id exactly first");
 	assert.ok(clientSource.includes('"include:" + SUBAGENT_MODEL_SETTINGS_NS'), "probe then accepts the include:-prefixed form");
 	assert.ok(clientSource.includes("/subagent-default-model/i.test(ns || \"\")"), "probe finally falls back to a package-name substring match");
 	// The constant must be the Loader entry id, NOT the pre-0.1.7 settings.yaml
 	// section name: on 0.1.7 the namespace IS the entry id, and the legacy name
 	// belongs to the removed standalone-settings model.
-	assert.ok(clientSource.includes('var SUBAGENT_MODEL_SETTINGS_NS = "dsh-subagent-default-model"'), "the fallback constant must be the Loader entry id (cordis.patch.yml insert.id)");
+	assert.ok(clientSource.includes('var SUBAGENT_MODEL_SETTINGS_NS = "dsh-subagent-default-model"'), "the constant must be the Loader entry id (cordis.patch.yml insert.id)");
 	assert.ok(!clientSource.includes('SUBAGENT_MODEL_SETTINGS_NS = "subagent-default-model"'), "must not fall back to the legacy 0.1.6 section name");
 	assert.ok(!clientSource.includes("configForms.get(SUBAGENT_MODEL_SETTINGS_NS)"), "must not call get() with the bare declared id — bind the probed ns instead");
-	// The bind site must re-run per served-set change, not capture once at apply.
-	assert.ok(clientSource.includes("forms.whileServed("), "the cards must follow whileServed, not a one-shot get() during apply");
-	assert.ok(clientSource.includes("registerCards(subagentEntryIdOf(forms, served))"), "each whileServed pass binds the namespace resolved from the served set");
+	// The controller must be swapped UNDER the stable scope, driven by the mirror:
+	// a scope captured once cannot recover when the entry appears later.
+	assert.ok(clientSource.includes("describe.subscribe(rebind)"), "the mirror subscription must drive the re-bind");
+	assert.ok(clientSource.includes("current.set(field, value)"), "writes forward to the CURRENT controller, never a captured one");
+	assert.ok(clientSource.includes('{ status: "unavailable", value: void 0, writable: false }'), "before the mirror answers the scope is read-only, never falsely writable");
+	// `whileServed` cannot express this: it keys off namespaces ENTERING the mirror,
+	// so an entry the host serves under a late name never triggers it.
+	assert.ok(!clientSource.includes("whileServed"), "the registration must not depend on whileServed callbacks");
 });
 
-test("cards bind to the namespace the host actually serves when the mirror is late", async () => {
-	// Behavioural guard for the permanent-Save-disable regression.
-	//
-	// Timeline: apply() runs while the mirror is EMPTY (the async load has not
-	// landed), so the resolver cannot see `include:...` yet. A one-shot probe
-	// would capture the bare declared id and park the form at `unavailable`
-	// forever. `whileServed` instead re-registers when the namespace appears.
+test("a late mirror answer re-routes the scope to the served namespace so writes are not refused", async () => {
+	// 真机 2026-09-25 的故障形态：apply 时 mirror 还是空的，scope 落在一个宿主不服务
+	// 的 namespace 上——卡片出现、控件可编辑，但每次写入被拒（No configurable plugin
+	// entry …）。守卫两点：① 卡片必须在 apply 时就出现，不等任何事件；② mirror 一到，
+	// 写入必须落到**被服务**的那个 controller；在那之前 scope 报只读，而不是假装可写。
 	const bound = [];
+	const writes = [];
 	const slotRegs = [];
-	let servedCallback = null;
+	let mirrorListener = null;
+	let view = { namespaces: [] }; // the mirror answers LATE
+	const controllerFor = (ns) => ({
+		getSnapshot: () => ns === "include:dsh-subagent-default-model"
+			? { status: "ready", writable: true, value: {} }
+			: { status: "unavailable", writable: false, value: void 0 },
+		subscribe: () => () => {},
+		set: async (field, value) => {
+			writes.push([ns, field, value]);
+			return ns === "include:dsh-subagent-default-model";
+		},
+	});
 	const forms = {
-		describe: () => ({ getSnapshot: () => ({ view: { namespaces: [] } }) }), // mirror still empty
-		get: (ns) => {
-			bound.push(ns);
-			return {
-				getSnapshot: () => ({ status: ns === "include:dsh-subagent-default-model" ? "ready" : "unavailable", writable: true, value: {} }),
-				subscribe: () => () => {}, set: async () => true,
-			};
-		},
-		whileServed: (namespaces, register) => {
-			// The host calls `register(served)` once a watched ns enters the mirror.
-			servedCallback = () => register(new Set(["include:dsh-subagent-default-model"]));
-			return () => { servedCallback = null; };
-		},
+		describe: () => ({
+			getSnapshot: () => ({ view }),
+			subscribe: (listener) => { mirrorListener = listener; return () => { mirrorListener = null; }; },
+			load: () => {},
+		}),
+		get: (ns) => { bound.push(ns); return controllerFor(ns); },
 	};
-	const services = {
-		uiConversation: { events: { register: () => () => {} } },
-		configForms: forms,
-	};
+	const services = { uiConversation: { events: { register: () => () => {} } }, configForms: forms };
 	const ctx = {
 		get: (n) => services[n],
-		inject: (deps, cb) => { const miss = deps.filter((d) => services[d] === undefined); if (miss.length) return () => {}; const d = Object.create(null); for (const k of deps) d[k] = services[k]; return cb(d); },
-		effect: (cb) => { const off = cb(); return () => {}; },
-		on: () => () => {}, emit: () => {},
+		inject: (deps, cb) => { const d = Object.create(null); for (const k of deps) d[k] = services[k]; return cb(d); },
+		effect: (cb) => { cb(); return () => {}; },
 		locale: { register: () => () => {}, bind: () => (k) => k },
-		slots: { inject: (s, cb) => cb(), register: (def) => { slotRegs.push(def); return () => {}; } },
+		slots: {
+			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
+			register: (options, component) => ({ options, component }),
+		},
 		uiConversation: services.uiConversation,
 	};
 	const { apply } = capturedModule.factory(factoryRequire);
 	apply(ctx);
 
-	// At apply time the mirror had nothing: no binding yet, no cards yet.
-	const cardsOf = (regs) => regs.filter((d) => d.name.startsWith("plugins."));
-	assert.deepEqual(bound, [], "must not bind a namespace while the mirror is still empty");
-	assert.equal(cardsOf(slotRegs).length, 0, "cards must wait for a served namespace instead of registering against a guess");
+	// (1) Cards are live immediately, with no event; the scope stays honestly
+	// read-only while the mirror lists nothing.
+	const cards = slotRegs.filter((d) => d.options.name.startsWith("plugins."));
+	assert.equal(cards.length, 2, "both placements must register at apply time, without waiting for an event");
+	assert.deepEqual(cards.map((d) => d.options.name), ["plugins.bundle.config", "plugins.row.config"]);
+	assert.deepEqual(bound, [], "no namespace may be bound while the mirror lists none");
+	const injected = cards[0].options.inject();
+	assert.equal(injected.settingsScope.getSnapshot().status, "unavailable", "an unbound scope reports unavailable");
+	assert.equal(injected.settingsScope.getSnapshot().writable, false, "and must not pretend to be writable");
+	assert.equal(await injected.settingsScope.set("provider", "x"), false, "a write before binding is refused locally, not sent to a guessed namespace");
+	assert.deepEqual(writes, [], "nothing may be written to a guessed namespace");
 
-	// The async mirror load lands: the host now serves include:<entry id>.
-	assert.ok(typeof servedCallback === "function", "apply must subscribe through whileServed");
-	servedCallback();
+	// (2) The mirror answers with the name the Desktop host actually serves.
+	view = { namespaces: [{ ns: "include:dsh-subagent-default-model" }] };
+	assert.ok(typeof mirrorListener === "function", "apply must subscribe to the describe mirror");
+	mirrorListener();
 
-	assert.deepEqual(bound, ["include:dsh-subagent-default-model"], "the bind must use the served namespace, not the declared id");
-	assert.equal(cardsOf(slotRegs).length, 2, "both placements register once the namespace is served");
-	assert.deepEqual(cardsOf(slotRegs).map((d) => d.name), ["plugins.bundle.config", "plugins.row.config"]);
+	assert.deepEqual(bound, ["include:dsh-subagent-default-model"], "the mirror answer binds the SERVED namespace");
+	assert.equal(injected.settingsScope.getSnapshot().status, "ready", "the card becomes editable once the served namespace is known");
+	assert.equal(await injected.settingsScope.set("provider", "deepseek-official"), true, "the write lands on the served controller");
+	assert.deepEqual(writes, [["include:dsh-subagent-default-model", "provider", "deepseek-official"]]);
+});
+
+test("the scope offers an ATOMIC write and forces a mirror read for verification", async () => {
+	// Two properties the `notApplied:ready:writable=true` report depends on:
+	//   ① one Save must be ONE Host transaction. Six independent `set()` calls
+	//      take six different revisions; a reload between them fences a later
+	//      field out while the promise still resolves, so the save is
+	//      half-applied and the read-back disagrees with the draft.
+	//   ② the read-back must FORCE a mirror read. A landed write is not visible
+	//      immediately — `configEditor.edit()` re-creates the entry fiber and the
+	//      mirror only learns the new document once that reload commits — so a
+	//      plain `getSnapshot()` can still return the previous value.
+	const bound = [];
+	const mutations = [];
+	const loads = [];
+	const slotRegs = [];
+	let mirrorListener = null;
+	const view = { namespaces: [{ ns: "include:dsh-subagent-default-model" }] };
+	const controllerFor = (ns) => ({
+		getSnapshot: () => ({ status: "ready", writable: true, value: {} }),
+		subscribe: () => () => {},
+		set: async () => true,
+		mutate: async (ops) => { mutations.push([ns, ops]); return true; }
+	});
+	const forms = {
+		describe: () => ({
+			getSnapshot: () => ({ view }),
+			subscribe: (listener) => { mirrorListener = listener; return () => { mirrorListener = null; }; },
+			load: () => { loads.push(1); return Promise.resolve(); }
+		}),
+		get: (ns) => { bound.push(ns); return controllerFor(ns); }
+	};
+	const services = { uiConversation: { events: { register: () => () => {} } }, configForms: forms };
+	const ctx = {
+		get: (n) => services[n],
+		inject: (deps, cb) => { const d = Object.create(null); for (const k of deps) d[k] = services[k]; return cb(d); },
+		effect: (cb) => { cb(); return () => {}; },
+		locale: { register: () => () => {}, bind: () => (k) => k },
+		slots: {
+			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
+			register: (options, component) => ({ options, component })
+		},
+		uiConversation: services.uiConversation
+	};
+	const { apply } = capturedModule.factory(factoryRequire);
+	apply(ctx);
+	const cards = slotRegs.filter((d) => d.options.name.startsWith("plugins."));
+	const injected = cards[0].options.inject();
+	const scope = injected.settingsScope;
+
+	assert.deepEqual(bound, ["include:dsh-subagent-default-model"], "the mirror is already ready, so the served namespace binds at once");
+
+	// ① the atomic form exists and reaches the controller's own `mutate`.
+	assert.equal(typeof scope.setMany, "function", "the scope must expose an atomic write");
+	const pairs = [["provider", "workbuddy"], ["model", "glm-5.3-flash"], ["failoverEnabled", true]];
+	const accepted = await scope.setMany(pairs);
+	assert.equal(accepted, true, "an accepted atomic write answers true, like set()");
+	assert.equal(mutations.length, 1, "one save must be ONE mutate() call, not one per field");
+	assert.equal(mutations[0][0], "include:dsh-subagent-default-model", "the atomic write targets the SERVED namespace");
+	// The ops are built INSIDE the vm sandbox, so their Array/Object prototypes
+	// belong to that realm and `deepStrictEqual` would reject them on identity
+	// alone. Compare the serialized shape: it is what crosses the wire anyway.
+	assert.equal(
+		JSON.stringify(mutations[0][1]),
+		JSON.stringify([
+			{ op: "set", path: ["provider"], value: "workbuddy" },
+			{ op: "set", path: ["model"], value: "glm-5.3-flash" },
+			{ op: "set", path: ["failoverEnabled"], value: true }
+		]),
+		"the ops must be the path-addressed form the host mutate() accepts"
+	);
+
+	// ② the verification path can force a fresh read.
+	assert.equal(typeof scope.refresh, "function", "the scope must expose a forced re-read for verification");
+	const before = loads.length;
+	await scope.refresh();
+	assert.ok(loads.length > before, "refresh must actually ask the mirror to reload");
+});
+
+test("an unbound scope reports its state when a write is refused, not a generic failure", async () => {
+	// The refusal message must name the scope state and the refused field, so a
+	// failed save is actionable instead of a bare "could not save".
+	const slotRegs = [];
+	const forms = {
+		describe: () => ({ getSnapshot: () => ({ view: { namespaces: [] } }), subscribe: () => () => {}, load: () => {} }),
+		get: () => { throw new Error("no namespace may be bound"); }
+	};
+	const services = { uiConversation: { events: { register: () => () => {} } }, configForms: forms };
+	const ctx = {
+		get: (n) => services[n],
+		inject: (deps, cb) => { const d = Object.create(null); for (const k of deps) d[k] = services[k]; return cb(d); },
+		effect: (cb) => { cb(); return () => {}; },
+		locale: { register: () => () => {}, bind: () => (k) => k },
+		slots: {
+			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
+			register: (options, component) => ({ options, component })
+		},
+		uiConversation: services.uiConversation
+	};
+	const { apply } = capturedModule.factory(factoryRequire);
+	apply(ctx);
+	const injected = slotRegs.filter((d) => d.options.name.startsWith("plugins."))[0].options.inject();
+	const scope = injected.settingsScope;
+
+	// Nothing is bound, so a write cannot be sent anywhere.
+	assert.equal(await scope.set("provider", "x"), false, "an unbound scope refuses locally");
+	// The atomic form must be honest too: not a silent success.
+	assert.equal(await scope.setMany([["provider", "x"]]), void 0, "an unbound scope cannot honour an atomic write");
+	// And the snapshot must explain the state the card will report.
+	const snap = scope.getSnapshot();
+	assert.equal(snap.status, "unavailable");
+	assert.equal(snap.writable, false);
+});
+
+test("registers both cards and binds the served namespace when the mirror is already ready", async () => {
+	// 真机 2026-09-25：卡片消失的根因是注册曾整个押在 whileServed 回调上，而该回调只对
+	// 「进入」mirror 的命名空间触发。同族（dsh-ldvh / dsh-connect-workbuddy /
+	// dsh-connect-trae）都在 apply 时直接注册并对齐 mirror 现状——两平台一致。
+	const bound = [];
+	const slotRegs = [];
+	const forms = {
+		describe: () => ({
+			getSnapshot: () => ({ view: { namespaces: [{ ns: "include:dsh-subagent-default-model" }] } }),
+			subscribe: () => () => {},
+		}),
+		get: (ns) => {
+			bound.push(ns);
+			return { getSnapshot: () => ({ status: "ready", writable: true, value: {} }), subscribe: () => () => {}, set: async () => true };
+		},
+	};
+	const services = { configForms: forms };
+	const ctx = {
+		get: (n) => services[n],
+		inject: (deps, cb) => {
+			const d = Object.create(null);
+			for (const k of deps) d[k] = services[k];
+			return cb(d);
+		},
+		effect: (cb) => { cb(); return () => {}; },
+		locale: { register: () => () => {}, bind: () => (k) => k },
+		slots: {
+			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
+			register: (options, component) => ({ options, component }),
+		},
+		uiConversation: { events: { register: () => () => {} } },
+	};
+	const { apply } = capturedModule.factory(factoryRequire);
+	apply(ctx);
+
+	assert.deepEqual(bound, ["include:dsh-subagent-default-model"], "the already-served namespace binds at apply time");
+	const cards = slotRegs.filter((d) => d.options.name.startsWith("plugins."));
+	assert.equal(cards.length, 2, "both placements must register immediately");
+	assert.deepEqual(cards.map((d) => d.options.name), ["plugins.bundle.config", "plugins.row.config"]);
 });
 
 test("binds to the include:-prefixed namespace the Desktop host actually serves", async () => {
@@ -1161,6 +1339,403 @@ test("catalog stays empty (never throws) when remote.session never mounts", asyn
 	const { apply } = capturedModule.factory(factoryRequire);
 	apply(ctx);
 	assert.equal((await face().loadCatalog()).length, 0, "a missing gateway degrades to an empty selector, never a throw");
+});
+
+// ── model catalog: bounded re-probe when the first answer is EMPTY ───────────
+// A single probe is not enough even once `remote.session` exists: the catalog
+// can still be empty on the first call while the gateway finishes its own
+// provider handshake. That empty answer is not cosmetic — `SubagentModelRow`
+// seeds a new route from `groups[0].id`, so an empty catalog makes `addRoute()`
+// write `provider: ""`, leaves the Model select disabled behind
+// `!route.provider`, and keeps Save permanently disabled via
+// `hasIncompleteRoute`. The user-visible report is "the model cannot be
+// selected at all". Re-probing until the catalog is non-empty is the fix.
+
+/** Catalog that answers EMPTY `emptyFirst` times, then serves `groups`. */
+function lateCatalogCtx({ emptyFirst, groups }) {
+	let calls = 0;
+	const remoteSession = {
+		async modelCatalog() {
+			calls += 1;
+			return calls <= emptyFirst
+				? { ok: true, value: { groups: [] } }
+				: { ok: true, value: { groups } };
+		}
+	};
+	const services = () => ({
+		"remote.session": remoteSession,
+		remote: { session: remoteSession },
+		configForms: {
+			describe: () => ({ getSnapshot: () => ({ view: { namespaces: [{ ns: "include:dsh-subagent-default-model" }] } }) }),
+			get: () => ({ getSnapshot: () => ({ status: "ready", writable: true, value: {} }), subscribe: () => () => {}, set: async () => {} })
+		}
+	});
+	let captured = null;
+	const ctx = {
+		get: (n) => services()[n],
+		inject: (deps, cb) => { const s = services(); const d = Object.create(null); for (const k of deps) d[k] = s[k]; return cb(d); },
+		effect: (cb) => { cb(); return () => {}; },
+		on: () => () => {}, emit: () => {},
+		locale: { register: () => () => {}, bind: () => (k) => k },
+		slots: { inject: (s, cb) => cb(), register: (def) => { captured = def; return () => {}; } }
+	};
+	return { ctx, face: () => (captured ? captured.inject() : null), calls: () => calls };
+}
+
+test("catalog re-probes while the answer is empty, so a late catalog still populates the selects", async () => {
+	const groups = [{ id: "workbuddy-global", models: [{ id: "glm-5.3-flash" }] }];
+	// The first two answers are empty; the third serves the catalog. Without a
+	// re-probe the card would keep that first empty answer forever.
+	const { ctx, face } = lateCatalogCtx({ emptyFirst: 2, groups });
+	const { apply } = capturedModule.factory(factoryRequire);
+	apply(ctx);
+	const resolved = await face().loadCatalog();
+	assert.equal(resolved.length, 1, "the catalog must be picked up once the empty answers stop");
+	assert.equal(resolved[0].id, "workbuddy-global");
+});
+
+test("catalog stops re-probing as soon as it has models (no needless round trips)", async () => {
+	const groups = [{ id: "first-try", models: [{ id: "m" }] }];
+	const { ctx, face, calls } = lateCatalogCtx({ emptyFirst: 0, groups });
+	const { apply } = capturedModule.factory(factoryRequire);
+	apply(ctx);
+	await face().loadCatalog();
+	assert.equal(calls(), 1, "a non-empty first answer must not be re-probed");
+});
+
+test("catalog re-probing is BOUNDED (a host with no providers must not spin)", async () => {
+	// `remote.session` is present but the catalog is always empty — a host that
+	// genuinely registers no providers. The probe count must terminate rather
+	// than loop forever.
+	const { ctx, face, calls } = lateCatalogCtx({ emptyFirst: Number.POSITIVE_INFINITY, groups: [] });
+	const { apply } = capturedModule.factory(factoryRequire);
+	apply(ctx);
+	const resolved = await face().loadCatalog();
+	assert.equal(resolved.length, 0, "an always-empty catalog resolves empty, never throws");
+	assert.equal(calls(), 4, "the re-probe budget must be bounded (4 attempts)");
+});
+
+test("an empty catalog is EXPLAINED on the panel, not left as a silently empty select", async () => {
+	// The empty-catalog state must be visible: otherwise the user sees a Model
+	// select with no options and no way to tell whether it is broken, still
+	// loading, or unconfigured. `data-catalog-empty` marks the notice so this
+	// contract is assertable.
+	const { tree } = await renderSettingsCard({
+		groups: [],
+		value: { provider: "", model: "" }
+	});
+	const nodes = collect(tree, (n) => n.props && n.props["data-catalog-empty"]);
+	assert.equal(nodes.length, 1, "exactly one empty-catalog notice must render");
+	assert.ok(treeText(tree).includes("模型目录"), "the notice must carry the localized explanation");
+});
+
+// ── Save: must never be permanently unclickable, and must report failures ────
+// The reported symptom was "Save cannot be clicked at all", with no message.
+// Two independent defects produced it, and both are guarded here:
+//
+//  1. `saveDisabled` included `snap.status !== "ready" || snap.writable === false`.
+//     The settings scope is bound ASYNCHRONOUSLY from the describe mirror, so
+//     while the mirror has not answered — or on a Host that never serves this
+//     namespace — both stay true FOREVER and the button stays grey with no
+//     explanation. The family cards (`trae` / `workbuddy`) gate on
+//     `!dirty || saving` only and let the write report its own refusal.
+//  2. `saveErrorState` was dead state: written on failure, never rendered, so a
+//     refused write was indistinguishable from a dead button.
+//
+// `Save` is found structurally (the primary button in the card footer) rather
+// than by label, so a copy change cannot silently disarm these tests.
+function saveButton(tree) {
+	const buttons = collect(tree, (n) => n.type === "button" && n.props && n.props.className === "dsm-btn dsm-btn-primary");
+	assert.equal(buttons.length, 1, "expected exactly one primary (Save) button");
+	return buttons[0];
+}
+
+test("Save stays armed when the scope never becomes ready (the permanently-grey regression)", async () => {
+	// Model the real timeline: the mirror answers LATE, so the card first renders
+	// while the scope is still unbound. The old gate
+	// (`snap.status !== 'ready' || snap.writable === false`) then latched Save
+	// disabled FOREVER, with no message — the reported "Save cannot be clicked".
+	// A LIVE snapshot object lets this test flip the scope after render.
+	const snapshot = { status: "ready", writable: true, value: { provider: "p", model: "m" } };
+	const { getTree, rerender } = await renderSettingsCard({
+		groups: [{ id: "p", models: [{ id: "m" }] }],
+		value: { provider: "p", model: "m" },
+		snapshotOverride: snapshot
+	});
+	// Untouched: nothing to save yet, so disabled is correct.
+	assert.equal(saveButton(getTree()).props.disabled, true, "an untouched form has nothing to save");
+	// The mirror loses the namespace (or never answers): scope unbound, not writable.
+	snapshot.status = "unavailable";
+	snapshot.writable = false;
+	// Make the draft dirty through the real Provider select handler.
+	const providerSelect = collect(rerender(), (n) => n.type === "select" && n.props && n.props.value === "p")[0];
+	assert.ok(providerSelect, "expected the provider select to render");
+	providerSelect.props.onChange({ target: { value: "p" } });
+	const after = rerender();
+	assert.equal(
+		saveButton(after).props.disabled,
+		false,
+		"a dirty draft must keep Save armed even when the scope is not ready — the family cards do not pre-gate on scope state"
+	);
+});
+
+test("a refused write surfaces a visible reason instead of a silently dead button", async () => {
+	// The write rejects, the way a refused settings write does.
+	const { getTree, rerender } = await renderSettingsCard({
+		groups: [{ id: "p", models: [{ id: "m" }] }],
+		value: { provider: "p", model: "m" },
+		write: async () => { throw new Error("writeRefused"); }
+	});
+	const providerSelect = collect(rerender(), (n) => n.type === "select" && n.props && n.props.value === "p")[0];
+	providerSelect.props.onChange({ target: { value: "p" } });
+	saveButton(rerender()).props.onClick();
+	// Flush the whole microtask queue: the write path is a promise chain
+	// (`Promise.resolve().then(write).then(verify).catch(report)`), so a fixed
+	// number of `await Promise.resolve()` hops can stop one tick short.
+	await new Promise((resolve) => setImmediate(resolve));
+	const after = rerender();
+	const errors = collect(after, (n) => n.props && n.props["data-settings-save-error"]);
+	assert.equal(errors.length, 1, "a failed save must render exactly one error node");
+	assert.equal(errors[0].props["data-settings-save-error"], "writeRefused", "the error node must carry the concrete cause");
+	assert.equal(errors[0].props.role, "alert", "the failure must be announced, not just painted");
+});
+
+test("Save is ATTEMPTED even while the scope reports unavailable (no pre-gate on scope state)", async () => {
+	// The decisive property, and the one that keeps regressing in this plugin:
+	// a write must NOT be refused just because the describe MIRROR has not filled
+	// in. `ConfigFormController.mutate()` sends operations straight to the Host;
+	// only `persistence === 'memory'` refuses locally. The derived
+	// `status`/`writable` come from a SEPARATE asynchronous read path (`derive()`),
+	// so gating on them turns a working Host into a permanently unclickable Save —
+	// first as a greyed-out button, then (after that was fixed) as an error message
+	// that never even attempts the write.
+	//
+	// This asserts the write actually runs, with the scope still `unavailable`.
+	let wrote = 0;
+	const snapshot = { status: "ready", writable: true, value: { provider: "p", model: "m" } };
+	const { getTree, rerender } = await renderSettingsCard({
+		groups: [{ id: "p", models: [{ id: "m" }] }],
+		value: { provider: "p", model: "m" },
+		snapshotOverride: snapshot,
+		write: async () => { wrote += 1; return true; }
+	});
+	const providerSelect = collect(rerender(), (n) => n.type === "select" && n.props && n.props.value === "p")[0];
+	providerSelect.props.onChange({ target: { value: "p" } });
+	// The mirror never answered for this namespace.
+	snapshot.status = "unavailable";
+	snapshot.writable = false;
+	saveButton(rerender()).props.onClick();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(wrote, 1, "the write must be attempted even when the scope is not ready — the Host may accept it");
+});
+
+// ── the fence-and-retry contract, driven through the REAL write path ────────
+// These render the REAL registered card with the REAL `persistDefaultModels`
+// (captured from the injected slot face, not a stub) against a controller that
+// models `ConfigFormController`'s documented semantics:
+//   · `mutate()/set()` answers `false` when the carried revision is stale, and
+//     its `recover()` has already folded the FRESH revision into the snapshot
+//     by the time `false` is returned — exactly the SettingsConflictError path;
+//   · an accepted write folds the new value into the snapshot immediately.
+// A save must then SURVIVE one fence refusal, because the immediate retry
+// carries the fresh revision. This is the `notApplied:ready:writable=true`
+// regression: a fence refusal used to end the save with a misleading report
+// while the document never changed.
+
+function makeFencedSettingsHost({ staleBy = 1, landAfterLoads = 0 } = {}) {
+	// `hostRevision` is what the Host would accept right now; the controller's
+	// snapshot starts `staleBy` behind it, so the first write is fenced out.
+	const doc = { provider: "workbuddy", model: "", models: [], strategy: "round-robin", failoverEnabled: true, reasoningEffort: "" };
+	let hostRevision = 4;
+	let loadsSinceCommit = 0;
+	const ctrlListeners = new Set();
+	const mirrorListeners = new Set();
+	const snap = { status: "ready", writable: true, value: structuredClone(doc), revision: hostRevision - staleBy };
+	const notifyCtrl = () => { for (const listener of [...ctrlListeners]) listener(); };
+	const mirror = {
+		getSnapshot: () => ({ view: { namespaces: [{ ns: "dsh-subagent-default-model" }] } }),
+		subscribe: (listener) => { mirrorListeners.add(listener); return () => mirrorListeners.delete(listener); },
+		// The real `load()` re-reads Host state: the controller's `recover()`
+		// calls it after a refusal, which is how the fresh revision arrives.
+		async load() {
+			snap.revision = hostRevision;
+			loadsSinceCommit += 1;
+			if (landAfterLoads === 0 || loadsSinceCommit > landAfterLoads) snap.value = structuredClone(doc);
+			for (const listener of [...mirrorListeners]) listener();
+			notifyCtrl();
+		}
+	};
+	const controller = {
+		getSnapshot: () => snap,
+		subscribe: (listener) => { ctrlListeners.add(listener); return () => ctrlListeners.delete(listener); },
+		set: (field, value) => controller.mutate([{ op: "set", path: [field], value }]),
+		mutate: async (ops) => {
+			if (snap.revision !== hostRevision) {
+				// Refused on the fence. `recover()` has already re-read, so the
+				// NEXT attempt observes the fresh revision — model that.
+				snap.revision = hostRevision;
+				notifyCtrl();
+				return false;
+			}
+			for (const op of ops) doc[op.path[0]] = op.value;
+			hostRevision += 1;
+			// `acceptView()` folds the write answer in — unless a reload is
+			// still committing, in which case only `load()` makes it visible.
+			loadsSinceCommit = 0;
+			if (landAfterLoads === 0) { snap.value = structuredClone(doc); snap.revision = hostRevision; }
+			else { snap.revision = hostRevision; }
+			notifyCtrl();
+			return true;
+		}
+	};
+	return {
+		controller,
+		mirror,
+		snap,
+		doc,
+		hostRevision: () => hostRevision
+	};
+}
+
+/** Render the REAL card wired to the REAL injected write path. */
+async function renderCardThroughInjectedFace(host) {
+	const react = makeReactDouble();
+	const reactRequire = (id) => {
+		if (id === "react") return react;
+		if (id === "@deepseek-ai/dsh-client-ui-primitives") {
+			return { Toast: function Toast() {}, IconChevronDownOutlineRegular: function Icon() {} };
+		}
+		throw new Error(`unexpected require: ${id}`);
+	};
+	const { ctx, slotRegistrations, dictionaries } = makeCtx({
+		configFormsOverride: { describe: () => host.mirror, get: () => host.controller }
+	});
+	capturedModule.factory(reactRequire).apply(ctx);
+	const cardRow = cardRegistrations(slotRegistrations)[0].value;
+	const t = (key, params) => {
+		const template = dictionaries.zh?.[key] ?? key;
+		return params === undefined ? template : template.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
+	};
+	const injected = cardRow.options.inject();
+	const props = {
+		t,
+		settingsScope: injected.settingsScope,
+		loadCatalog: async () => [{ id: "workbuddy", models: [{ id: "glm-5.3-flash" }] }],
+		write: injected.write
+	};
+	const renderPass = () => { react.beginPass(); return expand(cardRow.component({ ...props })); };
+	renderPass();
+	for (let i = 0; i < 4; i++) { await Promise.resolve(); renderPass(); }
+	return { getTree: () => renderPass(), rerender: renderPass, injected };
+}
+
+test("a revision-fence refusal is retried once and the save lands", async () => {
+	// The exact `notApplied:ready:writable=true` shape: the controller's
+	// snapshot revision is STALE, so the Host refuses the first write with a
+	// SettingsConflictError (answers `false`). The old code ignored that
+	// answer and reported a scope-state error while the document never
+	// changed; the retry must carry the recovered revision and land.
+	const host = makeFencedSettingsHost({ staleBy: 1 });
+	const { rerender } = await renderCardThroughInjectedFace(host);
+	const providerSelect = collect(rerender(), (n) => n.type === "select")[0];
+	providerSelect.props.onChange({ target: { value: "workbuddy" } });
+	saveButton(rerender()).props.onClick();
+	// The write path is a promise chain with a bounded retry; flush the queue.
+	for (let i = 0; i < 12; i++) await new Promise((resolve) => setImmediate(resolve));
+	const errors = collect(rerender(), (n) => n.props && n.props["data-settings-save-error"]);
+	assert.equal(errors.length, 0, `the save must survive one fence refusal, not report: ${errors[0]?.props?.["data-settings-save-error"]}`);
+	// The document moved: the write reached storage despite the first refusal.
+	assert.ok(host.hostRevision() > 4, "an accepted write advanced the Host revision (the fence was cleared and the write landed)");
+});
+
+test("a slow reload is waited out by the read-back retry", async () => {
+	// The write is ACCEPTED, but the reload that publishes it takes two mirror
+	// loads to become visible. The read-back retry must wait it out instead of
+	// reporting a landed write as not applied.
+	const host = makeFencedSettingsHost({ staleBy: 0, landAfterLoads: 2 });
+	const { rerender } = await renderCardThroughInjectedFace(host);
+	const providerSelect = collect(rerender(), (n) => n.type === "select")[0];
+	providerSelect.props.onChange({ target: { value: "workbuddy" } });
+	saveButton(rerender()).props.onClick();
+	for (let i = 0; i < 12; i++) await new Promise((resolve) => setImmediate(resolve));
+	const errors = collect(rerender(), (n) => n.props && n.props["data-settings-save-error"]);
+	assert.equal(errors.length, 0, `a slow reload must not be reported as a failure: ${errors[0]?.props?.["data-settings-save-error"]}`);
+});
+
+test("an accepted write whose read-back never converges is SAVED, not failed", async () => {
+	// The live-observed shape of `notApplied:ready:writable=true`: the write
+	// was ACCEPTED (write=atomic, no refusal), the profile patch verifiably
+	// held the new value, yet the describe mirror kept answering the previous
+	// document across every bounded re-read. An accepted write IS landed —
+	// `configEditor.edit()` only resolves after the patch is written and the
+	// Loader reconciled — so the verdict must be SAVED, with the form re-seeded
+	// from the draft. A hard failure here is a FALSE failure, the exact bug
+	// this card became known for.
+	const host = makeFencedSettingsHost({ staleBy: 0, landAfterLoads: Number.MAX_SAFE_INTEGER });
+	const { rerender } = await renderCardThroughInjectedFace(host);
+	const providerSelect = collect(rerender(), (n) => n.type === "select")[0];
+	providerSelect.props.onChange({ target: { value: "workbuddy" } });
+	saveButton(rerender()).props.onClick();
+	// READBACK_ATTEMPTS is 6 with 250 ms delays; setTimeout is unavailable in
+	// the vm sandbox, so the retries collapse to microtasks — flush generously.
+	for (let i = 0; i < 12; i++) await new Promise((resolve) => setImmediate(resolve));
+	const errors = collect(rerender(), (n) => n.props && n.props["data-settings-save-error"]);
+	assert.equal(errors.length, 0, `an accepted write must never be reported as not applied: ${errors[0]?.props?.["data-settings-save-error"]}`);
+	// And the write really did reach storage.
+	assert.ok(host.hostRevision() > 4, "the accepted write advanced the Host revision");
+});
+
+test("a refused write still reports the rich notApplied detail", async () => {
+	// The refusal path is where the rich report belongs: the Host kept
+	// refusing (revision fence or otherwise) across the retry, so nothing
+	// landed and the message must carry the scope state, revision, write
+	// path, and the refusal marker.
+	const host = makeFencedSettingsHost({ staleBy: 0, landAfterLoads: 0 });
+	// Make every write refuse: the snapshot revision stays stale no matter
+	// how often recover() refreshes it.
+	host.controller.mutate = async () => {
+		host.snap.revision = host.hostRevision();
+		return false;
+	};
+	const { rerender } = await renderCardThroughInjectedFace(host);
+	const providerSelect = collect(rerender(), (n) => n.type === "select")[0];
+	providerSelect.props.onChange({ target: { value: "workbuddy" } });
+	saveButton(rerender()).props.onClick();
+	for (let i = 0; i < 12; i++) await new Promise((resolve) => setImmediate(resolve));
+	const errors = collect(rerender(), (n) => n.props && n.props["data-settings-save-error"]);
+	assert.equal(errors.length, 1, "a refused write must be reported");
+	const message = String(errors[0].props["data-settings-save-error"]);
+	assert.match(message, /^notApplied:ready:writable=true/, "the scope state leads the report");
+	assert.match(message, /:rev=\d+/, "the mirror revision rides along");
+	assert.match(message, /:write=(atomic|sequential)/, "the write path is named");
+	assert.match(message, /:refused=/, "a refusal is named as such — distinct from a lagging read-back");
+});
+
+test("an accepted write with a lagging read-back is saved, and the scope state rides only in the console note", async () => {
+	// The contract change this card needed: `mutate()` being ACCEPTED is the
+	// proof of persistence — `configEditor.edit()` resolves only after the
+	// profile patch is written and the Loader reconciled, and a refusal throws
+	// with `:refused=`. A read-back that keeps answering the previous document
+	// (mirror lag across the reload) must therefore NOT fail the save; that
+	// false failure was the entire `notApplied:ready:writable=true` report.
+	// The old expectation here asserted that false failure.
+	const snapshot = { status: "ready", writable: true, value: { provider: "p", model: "m" } };
+	const { rerender } = await renderSettingsCard({
+		groups: [{ id: "p", models: [{ id: "m" }] }],
+		value: { provider: "p", model: "m" },
+		snapshotOverride: snapshot,
+		// Accepted by the transport; the scope value never updates (the mirror
+		// is stuck on the previous document).
+		write: async () => true
+	});
+	const providerSelect = collect(rerender(), (n) => n.type === "select" && n.props && n.props.value === "p")[0];
+	providerSelect.props.onChange({ target: { value: "p" } });
+	snapshot.status = "unavailable";
+	snapshot.writable = false;
+	saveButton(rerender()).props.onClick();
+	await new Promise((resolve) => setImmediate(resolve));
+	const errors = collect(rerender(), (n) => n.props && n.props["data-settings-save-error"]);
+	assert.equal(errors.length, 0, "an accepted write must not be reported as not applied because its read-back lags");
 });
 
 test("apply must not capture remote.session at apply time", () => {

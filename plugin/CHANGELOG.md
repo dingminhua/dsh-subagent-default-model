@@ -1,5 +1,76 @@
 # Changelog
 
+## 2.0.5 (2026-09-26)
+
+### Fixed
+
+- **真机实锤的最终根因：写入成功了，是回读校验把它误报成失败**。带着 2.0.5 的取证报错在真机复现，三条铁证拼出完整图景：
+  ① `write=atomic` 且无 `:refused=` —— 原子写入**被宿主接受**；
+  ② profile patch 的 mtime 正是点击保存的那一秒，内容与草稿**逐字段一致** —— **写入已落盘**；
+  ③ 报错里 `rev=2`（revision 已前进）但 `got=` 仍是旧值 —— describe **mirror 在整个重试窗口内一直返回旧文档**。
+  即「已接受的写入 ⟹ 必然落盘」（`configEditor.edit()` 只有在 patch 写盘且 Loader 完成调和后才 resolve；任何失败都会抛错并让 `mutate()` 返回 `false` 走 `:refused=` 路径），而严格六字段回读等值校验把 mirror 的滞后当成了保存失败——这正是 `notApplied:ready:writable=true` 的全部真相。
+  修复：**已接受的写入 ⟹ 报告保存成功**，表单从草稿重置；回读重试保留（快速收敛时用存量真值校准），最终仍不匹配时取草稿为真值并在 console 留 warn。原有的 revision-change 重播种效应会在 mirror 追上后把显示收敛到宿主实际保存的内容。
+
+- **revision 栅栏拒绝现在会重试一次**（同一次保存的另一条硬化）。用真实宿主代码复现了机制：`configEditor.edit()` 先 `reconcileProfilePatches()`（重建条目 fiber → revision 由 `entry.fiber.uid` 派生而变化）再做 revision 检查，携带旧 revision 的写入会被 `SettingsConflictError` 拒绝、`ConfigFormController.mutate()` 回 `false`。控制器在返回 `false` 前已调 `recover() → mirror.load()` 折入新鲜 revision，因此**紧接着的重试必然携带正确 revision 并落盘**；第二次仍被拒才报错。同时把一次保存从六次独立 `set()` 合并为**一次原子 `mutate(ops)`**（六个 op 一笔事务、一个 revision）。
+
+### Changed
+
+- **失败报告自带完整取证**：`notApplied` 报错附带 `scope 状态 + writable + mirror revision + 写入路径(atomic/sequential) + 逐字段差异(got/exp)`。正是这套取证让最终根因在真机上一次定位（2.0.4 及之前只有一个笼统的 scope 状态）。
+- **设置卡常显 `[diag <build>]` 诊断行**（mirror 状态、绑定命名空间、scope 状态、revision、构建标记）。之前它只在 `!writable || status!=="ready"` 时显示——恰好把最需要它的故障窗口藏掉了。构建标记（`DSM_CLIENT_BUILD`）用于确认页面实际运行的 client bundle；宿主在启动时快照 bundle，排查期间每次修改 client.js 必须递增它。
+
+### Testing
+
+- 全量 **112 项通过**（+4）。新增用例都驱动**真实注册卡片 + 真实 `persistDefaultModels`**（从注入的 slot face 捕获，而非桩），对照一个忠实建模 `ConfigFormController` 语义（拒绝先 `recover()` 折入新 revision、接受即折入新值）的控制器：
+  ① **栅栏拒绝被重试一次并落盘**；② 慢 reload 被回读重试等过去，不误报；③ **已接受但回读永不收敛的写入报「已保存」而非失败**（真机根因的回归守卫）；④ 真正被拒的写入报错带 rev / write 路径 / `:refused=` 标记，与回读滞后可区分。
+
+## 2.0.4 (2026-09-26)
+
+### Fixed
+
+- **设置卡片保存永久失败（P0）：插件自带的 schemastery 缺 `.volatile()`，整段设置命名空间被宿主静默丢弃**。用户报告的现象是保存时报
+  `本机宿主未为此插件提供设置存储（notApplied:unavailable:writable=false），暂时无法保存；请确认插件已在当前 profile 中启用，然后重启 DSH。`——而该插件确实已启用、宿主也确实在服务它，重启与重装都无法改变。
+  根因链条（每一环都已用真实宿主代码验证）：
+  1. `@deepseek-ai/dsh-settings` 从 Config schema 派生设置面时调用 `volatileForm()`；**没有任何字段带 volatile 标记时它返回 `undefined`，`describe()` 随即 `return []` 丢弃该条目**——插件因此根本不出现在设置命名空间目录里。
+  2. 客户端卡片的 scope 从 describe mirror 的这份目录里解析命名空间；目录里没有它，`servedNamespaceNow()` 永远返回 `null`，scope 永不绑定。
+  3. 未绑定的 scope 其快照就是字面量 `{ status: "unavailable", value: undefined, writable: false }`，于是保存走完全程后落到
+     `notApplied:unavailable:writable=false`——**这正是用户看到的那句话**。
+  4. 标记为何没打上：`volatileField()` 只在 `schema.volatile` 是函数时才调用它，而插件 `node_modules` 里实际装的是 **schemastery 3.18.1**，该版本尚无 `volatile()`（3.18.4 才引入）。`package.json` 声明的是 `>=3.18.4`、lockfile 也钉的是 3.18.4，**实际安装树却是 3.18.1**，于是降级分支的恒等 no-op 被当作正常路径执行。
+  修复：`volatileField()` 在 `volatile()` 缺失时回退到 `extra("volatile", true)`——3.18.4 的 `volatile()` 本体就是这一句（外加一个重复标记守卫），故该回退在旧构建上语义完全一致、在新构建上仍走原路径。同时把 `@deepseek-ai/schemastery` 依赖下限由 `>=3.18.4` 放宽为 `>=3.18.1`，因为代码已不再依赖 3.18.4 专有方法。
+  证据（`SettingsForms.describe()` 与宿主写入门，均为真实宿主代码，对照 git HEAD 的修复前模块）：
+  | | 命名空间是否出现在设置目录 | Save（`mutate`）结果 |
+  |---|---|---|
+  | 修复前 | **0 个（被丢弃）** | `REFUSED -> Plugin entry "dsh-subagent-default-model" has no volatile fields` |
+  | 修复后 | 1 个，字段全部可编辑 | `ACCEPTED`，且落盘分节内容正确 |
+
+- **上一条修好后的第二层故障（同一张卡、另一条根因）：`provider` / `model` / `reasoningEffort` 三个字段在「空分节」下被宿主从设置表单里静默剔除**。第一层修复后，保存报错从
+  `notApplied:unavailable:writable=false` 变成 **`notApplied:ready:writable=true`**——scope 已 ready 且可写，写入却「没生效」。
+  `@deepseek-ai/dsh-settings` 的设置面由 `projectForm()` 逐字段投影，而它会**丢弃任何解析值为 `undefined` 的字段**：
+
+  ```js
+  return field === void 0 ? [] : [[key, projectForm(child, field)]];
+  ```
+
+  三个字符串字段当初只写了 `z.string()`、**没有 `.default(...)`**，于是空分节下解析为 `undefined`、整条被剔除。后果是卡片读到的 descriptor 里根本没有这三个键：它写进去、回读时该键不存在，于是判定不一致并抛 `notApplied:ready:writable=true`。**一个表单看不见的字段，就是它既写不了也验不了的字段。**
+  修复：三者补上 `.default("")`（空串正是本插件各处既有的「未设置 → 继承父会话路由」语义，`defaultModel()` 判的就是 `length > 0`）。
+  **作用范围已精确界定**（两种输入都实测过，不夸大）：
+  | 分节状态 | 无 `.default("")` | 有 `.default("")` |
+  |---|---|---|
+  | **空分节**（首次保存、刚装好） | 缺失 **provider, model, reasoningEffort** | 六个齐全 |
+  | 已存过值的分节 | 六个齐全（该键已非 `undefined`，`projectForm` 不再剔除） | 六个齐全 |
+  也就是说：本缺陷打击的是**首次保存**（以及任何把这三个键清空的路径）；已经存过值以后它不再发作——这正是它难被发现的原因。用户 14:05 那次报错发生在**已有存值**的状态下，因此主要成因见下一条（回读竞态 / 半写入），本缺陷是同一张卡上独立存在的第二个坑。
+
+- **同一次修复：把「一次保存」从六次独立写入合并为一次原子写入，并让回读等待真正落盘**。这一条解释用户 14:05 的报错（该次写入**确实落盘了**：profile patch 的 mtime 与内容都证明六个字段都写进去了）：
+  1. **六次独立事务**——卡片原先对六个字段各调一次 `scope.set()`，每笔各自取一次 `expectedRevision`；而 `configEditor.edit()` 会在写入后重建条目 fiber（`dsh-settings` 的 revision 正是由 `entry.fiber.uid` 派生），链中靠后的字段会被 revision 栅栏挡下、`remote.settings.mutate` 回 `ok:false`、`ConfigFormController.mutate()` 返回 **`false`**——旧代码**忽略了这个返回值**，把半写入当成成功。现优先走单次 `mutate(ops)`（服务端把全部 op 收进**一次** `write()`），原子落盘；控制器无原子形态时回退顺序写入，但**在第一个被拒处即中断**。
+  2. **回读竞态**——`edit()` 落盘后 Loader 重建 fiber，mirror 要等这次 reload 提交才看得到新文档；旧代码在写 promise 一 resolve 就立刻读快照判定，于是把「已落盘但回读还是旧值」报成 `notApplied:ready:writable=true`。现改为经 scope 的 `refresh()` **强制重读**并在有界次数内重试，再判定。
+
+### Testing
+
+- 全量 **108 项通过**（原 101 项 + 7 项新增守卫）。
+- 新增守卫（`plugin/test/settings-install.test.mjs`）：① 无 `volatile()` 的旧构建上 `extra()` 回退必须**真的打上标记**（而非恒等 no-op 直接返回，那正是缺陷形态）；② 有 `volatile()` 时优先走 `volatile()`；③ 两者皆无的字段原样返回，不在模块求值期炸掉；④ **回归守卫**：遍历真实 `Config` 每个字段断言 `meta.volatile === true`；⑤ **每个字段必须声明 `.default(...)`**，并逐个断言那三个空串默认值；⑥ 以空分节解析 schema、解开 volatile 引用后断言**六个键一个不少**（`projectForm` 判的就是这个）。
+- 新增守卫（`plugin/test/client-trajectory.test.mjs`）：⑦ scope 必须提供原子写入 `setMany`，且一次保存只产生**一次** `mutate`、op 为宿主要求的 path-addressed 形态；⑧ scope 必须提供 `refresh()` 强制 mirror 重读（否则「已落盘但回读仍是旧值」会被误报）；⑨ 未绑定的 scope 对 `set` 回 `false`、对 `setMany` 回 **`undefined`（绝不谎报成功）**，快照如实报 `unavailable` / `writable: false`。
+- **变异验证**（守卫必须能变红）：把 `.default("")` 从 `provider` 去掉 → 2 项测试变红；把 `extra()` 回退改为死代码 → 2 项测试变红；未变异基线 0 失败。模块在每次变异后**逐字节还原**（已断言）。
+- 修复前的 `volatile() absence degrades to an identity field` 用例断言的是**缺陷本身**，已按上述替换。
+
 ## 2.0.3 (2026-09-26)
 
 ### Fixed
