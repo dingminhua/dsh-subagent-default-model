@@ -1542,10 +1542,13 @@ test("Save is ATTEMPTED even while the scope reports unavailable (no pre-gate on
 // regression: a fence refusal used to end the save with a misleading report
 // while the document never changed.
 
-function makeFencedSettingsHost({ staleBy = 1, landAfterLoads = 0 } = {}) {
+function makeFencedSettingsHost({ staleBy = 1, landAfterLoads = 0, initialDoc } = {}) {
 	// `hostRevision` is what the Host would accept right now; the controller's
 	// snapshot starts `staleBy` behind it, so the first write is fenced out.
-	const doc = { provider: "workbuddy", model: "", models: [], strategy: "round-robin", failoverEnabled: true, reasoningEffort: "" };
+	// `landAfterLoads` models a reload that takes N mirror re-reads to become
+	// visible: the STORED document updates on write, but the snapshot the card
+	// reads only reflects it after that many loads — the live-observed mirror lag.
+	const doc = initialDoc ?? { provider: "workbuddy", model: "", models: [], strategy: "round-robin", failoverEnabled: true, reasoningEffort: "" };
 	let hostRevision = 4;
 	let loadsSinceCommit = 0;
 	const ctrlListeners = new Set();
@@ -1709,6 +1712,72 @@ test("a refused write still reports the rich notApplied detail", async () => {
 	assert.match(message, /:rev=\d+/, "the mirror revision rides along");
 	assert.match(message, /:write=(atomic|sequential)/, "the write path is named");
 	assert.match(message, /:refused=/, "a refusal is named as such — distinct from a lagging read-back");
+});
+
+test("deleting a route and saving must not resurrect the deleted route while the mirror lags", async () => {
+	// The live-reported bug: 「删掉一个，保存，然后还是会出现删掉的那个」.
+	// The write verifiably lands in the profile patch, but the describe mirror
+	// keeps serving the PREVIOUS document; the re-seed effect used to let that
+	// stale value overwrite the just-saved draft — resurrecting the deleted
+	// route. The save hold now refuses every re-seed that disagrees with what
+	// was saved, so the form keeps the saved truth until the mirror converges.
+	const TWO_ROUTES = {
+		provider: "workbuddy", model: "",
+		models: [
+			{ provider: "workbuddy", model: "glm-5.3-flash", reasoningEffort: "low" },
+			{ provider: "ds-v4f", model: "deepseek-v4-flash", reasoningEffort: "low" }
+		],
+		strategy: "round-robin", failoverEnabled: true, reasoningEffort: ""
+	};
+	// The mirror NEVER converges in this scenario — the worst observed case:
+	// every re-read keeps answering the previous document.
+	const host = makeFencedSettingsHost({ staleBy: 0, landAfterLoads: Number.MAX_SAFE_INTEGER, initialDoc: structuredClone(TWO_ROUTES) });
+	const { rerender } = await renderCardThroughInjectedFace(host);
+	const removeButtons = () => collect(rerender(), (n) => n.type === "button" && n.props.className === "dsm-model-settings-remove");
+	const saveOf = () => saveButton(rerender());
+	assert.equal(removeButtons().length, 2, "the card starts with the two stored routes");
+	// Delete the first route, then save.
+	removeButtons()[0].props.onClick();
+	for (let i = 0; i < 3; i++) { await Promise.resolve(); rerender(); }
+	assert.equal(removeButtons().length, 1, "the deletion is live in the draft before saving");
+	saveOf().props.onClick();
+	// The write lands; the bounded read-back, the lag-accept, and the bounded
+	// convergence poll all run as microtasks here (setTimeout is unavailable
+	// in the vm sandbox), so flush generously.
+	for (let i = 0; i < 40; i++) { await new Promise((resolve) => setImmediate(resolve)); rerender(); }
+	const errors = collect(rerender(), (n) => n.props && n.props["data-settings-save-error"]);
+	assert.equal(errors.length, 0, `saving a deletion must not report an error: ${errors[0]?.props?.["data-settings-save-error"]}`);
+	assert.equal(removeButtons().length, 1, "the deleted route must NOT resurrect while the mirror lags");
+	// And the stored document really has only the surviving route.
+	assert.equal(JSON.stringify(host.doc.models).includes("glm-5.3-flash"), false, "the deletion reached the stored document");
+});
+
+test("once the lagging mirror converges, the held re-seed releases without resurrecting", async () => {
+	// The same scenario, but the reload becomes visible after 3 mirror
+	// re-reads. The convergence poll keeps re-reading until the mirror agrees;
+	// the form keeps the saved draft throughout and syncs (to the same values)
+	// once the hold releases.
+	const TWO_ROUTES = {
+		provider: "workbuddy", model: "",
+		models: [
+			{ provider: "workbuddy", model: "glm-5.3-flash", reasoningEffort: "low" },
+			{ provider: "ds-v4f", model: "deepseek-v4-flash", reasoningEffort: "low" }
+		],
+		strategy: "round-robin", failoverEnabled: true, reasoningEffort: ""
+	};
+	const host = makeFencedSettingsHost({ staleBy: 0, landAfterLoads: 3, initialDoc: structuredClone(TWO_ROUTES) });
+	const { rerender } = await renderCardThroughInjectedFace(host);
+	const removeButtons = () => collect(rerender(), (n) => n.type === "button" && n.props.className === "dsm-model-settings-remove");
+	const saveOf = () => saveButton(rerender());
+	assert.equal(removeButtons().length, 2, "the card starts with the two stored routes");
+	removeButtons()[0].props.onClick();
+	for (let i = 0; i < 3; i++) { await Promise.resolve(); rerender(); }
+	saveOf().props.onClick();
+	for (let i = 0; i < 40; i++) { await new Promise((resolve) => setImmediate(resolve)); rerender(); }
+	const errors = collect(rerender(), (n) => n.props && n.props["data-settings-save-error"]);
+	assert.equal(errors.length, 0, "saving a deletion must not report an error");
+	assert.equal(removeButtons().length, 1, "the form keeps exactly the saved route across the lag AND the convergence");
+	assert.equal(JSON.stringify(host.doc.models).includes("glm-5.3-flash"), false, "the deletion reached the stored document");
 });
 
 test("an accepted write with a lagging read-back is saved, and the scope state rides only in the console note", async () => {
