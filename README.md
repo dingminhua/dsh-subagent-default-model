@@ -79,6 +79,25 @@ npm install dsh-subagent-default-model
 
 安装、更新或卸载 bundle 后，需要重启对应的 DSH 进程；仅修改设置不需要重启。
 
+## 平台支持
+
+**Windows / macOS / Linux 均受支持**，且不需要任何平台专用配置或额外步骤。
+
+| 平台 | 配置路径 | 状态 |
+| --- | --- | --- |
+| Windows | `%USERPROFILE%\.dsh\profiles\<profile>\cordis.patch.yml` | ✅ 受支持，CI 覆盖 |
+| macOS | `~/.dsh/profiles/<profile>/cordis.patch.yml` | ✅ 受支持，CI 覆盖 |
+| Linux | `~/.dsh/profiles/<profile>/cordis.patch.yml` | ✅ 受支持，CI 覆盖 |
+
+插件本体是**纯 JavaScript**——宿主半边与客户端半边都不读文件系统、不拼路径、不派生进程、也不判断 `process.platform`，只消费 DSH 宿主暴露的服务与事件，因此平台差异由宿主承担。已被检查并持续验证的平台面：
+
+- **依赖树跨平台**：`package-lock.json` 锁定了 Windows 三套可选原生构建（x64 / arm64 / ia32），npm 只装匹配当前平台的那个；插件直接依赖 `@deepseek-ai/schemastery` 为纯 JS。
+- **CRLF 安全**：Windows 检出可能得到 CRLF 源码（仓库未固定 `core.autocrlf`），全套测试在该形态下已验证通过。
+- **路径解析**：仓库脚本统一用 `fileURLToPath`，避免 `URL.pathname` 在 Windows 上折成不存在的 `\C:\...`。
+- **测试发现**：`npm test` 走 `node --test` 由 Node 自行发现，不依赖 shell 展开 glob（cmd/PowerShell 下 glob 不展开）。
+
+CI 在 `ubuntu-latest` / `windows-latest` / `macos-latest` 三个平台同时跑同一套测试，因此以上为持续验证而非一次性声明。细节见 [plugin/README.md](plugin/README.md#平台支持)。
+
 ## 配置
 
 可以在 Web 设置卡片中配置（**设置 → 插件 → dsh-subagent-default-model**），也可以编辑 profile 的 patch 文件 `~/.dsh/profiles/<profile>/cordis.patch.yml`——DSH 0.1.7 起设置就存在那里，段名是本插件的 Loader 条目 id `dsh-subagent-default-model`（不再使用 `~/.dsh/settings.yaml`，详见 [plugin/README.md](plugin/README.md#配置)）。

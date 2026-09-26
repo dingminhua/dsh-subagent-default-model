@@ -122,6 +122,20 @@ You can also edit the profile patch `~/.dsh/profiles/<profile>/cordis.patch.yml`
 | `failoverEnabled` | boolean | `true` | Switch models by queue and strategy inside the `models` list when a subagent hits a connection failure (subagents only). |
 | `reasoningEffort` | string | — | Optional reasoning strength for a model entry (e.g. `high`, `max`). |
 
+## Platform support
+
+**Windows, macOS, and Linux are all supported**, and no platform-specific configuration is needed. The plugin's runtime code is **pure JavaScript**: `lib/index.js` (host half) and `lib/client.js` (client half) never touch the filesystem, join paths, spawn processes, or branch on `process.platform` — they only consume services and events the DSH host exposes, so platform differences are owned entirely by the host.
+
+Platform-relevant surfaces that were checked and are now continuously verified:
+
+- **Config path**: the profile patch lives at `.dsh/profiles/<profile>/cordis.patch.yml` under the user's home directory. On Windows that is `%USERPROFILE%\.dsh\profiles\<profile>\cordis.patch.yml` (typically `C:\Users\<you>\.dsh\...`), the same convention as `~/.dsh/...` on macOS/Linux.
+- **Dependency tree**: `package-lock.json` locks all three Windows optional native builds (`win32-x64-msvc`, `win32-arm64-msvc`, `win32-ia32-msvc`), and npm installs only the one matching the current platform. This plugin's direct dependency `@deepseek-ai/schemastery` is pure JS.
+- **Line endings**: the repo does not pin `core.autocrlf`, so a Windows checkout may produce CRLF sources. The full suite was verified in that shape — assertions that parse source text match on substrings, never on line terminators, so CRLF vs LF does not change the result.
+- **Path derivation**: repository scripts use `fileURLToPath`, never `URL.pathname`. The latter yields `/C:/...` on Windows, which `path.join` folds into the non-existent `\C:\...` — a hard failure that only ever appears on Windows.
+- **Test discovery**: `npm test` invokes `node --test` with no glob, letting the Node test runner discover cases itself rather than depending on shell expansion — a glob like `test/*.test.mjs` expands under POSIX sh but is passed through literally by cmd/PowerShell.
+
+CI runs the same suite on `ubuntu-latest`, `windows-latest`, and `macos-latest`, so these guarantees are continuously verified rather than asserted once.
+
 ## Subagent connection-failure failover
 
 With `failoverEnabled` on (the default), when a subagent's own loop hits a connection-class failure, the plugin automatically switches models inside the `models` list and retries, following `strategy`:

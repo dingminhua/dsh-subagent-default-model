@@ -14,8 +14,9 @@
 ### 1. 确认代码与测试
 
 ```bash
-cd /Users/dmh2002/DshProject/dsh-subagent-default-model
-npm --prefix plugin test        # 单元测试，应 8/8 通过
+cd /Users/dmh2002/DshProject/dsh-subagent-default-model   # macOS / Linux
+# Windows: cd C:\Users\<你>\DshProject\dsh-subagent-default-model
+npm --prefix plugin test        # 单元测试，应 92/92 通过
 ```
 
 ### 2. 更新版本号

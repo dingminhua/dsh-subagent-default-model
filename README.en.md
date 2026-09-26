@@ -79,6 +79,25 @@ npm install dsh-subagent-default-model
 
 After installing, updating, or removing the bundle, restart the corresponding DSH process; only changing settings does not require a restart.
 
+## Platform support
+
+**Windows, macOS, and Linux are all supported**, with no platform-specific configuration or extra steps.
+
+| Platform | Config path | Status |
+| --- | --- | --- |
+| Windows | `%USERPROFILE%\.dsh\profiles\<profile>\cordis.patch.yml` | ✅ Supported, covered by CI |
+| macOS | `~/.dsh/profiles/<profile>/cordis.patch.yml` | ✅ Supported, covered by CI |
+| Linux | `~/.dsh/profiles/<profile>/cordis.patch.yml` | ✅ Supported, covered by CI |
+
+The plugin is **pure JavaScript** — neither the host half nor the client half reads the filesystem, joins paths, spawns processes, or branches on `process.platform`; it only consumes services and events the DSH host exposes, so platform differences are owned by the host. Platform-relevant surfaces that are checked and continuously verified:
+
+- **Cross-platform dependency tree**: `package-lock.json` locks all three Windows optional native builds (x64 / arm64 / ia32), and npm installs only the one matching the current platform; the plugin's direct dependency `@deepseek-ai/schemastery` is pure JS.
+- **CRLF-safe**: a Windows checkout may produce CRLF sources (the repo does not pin `core.autocrlf`), and the full suite was verified in that shape.
+- **Path derivation**: repository scripts use `fileURLToPath`, avoiding `URL.pathname` folding into a non-existent `\C:\...` on Windows.
+- **Test discovery**: `npm test` runs `node --test` and lets Node discover cases itself, rather than relying on shell glob expansion (which does not happen under cmd/PowerShell).
+
+CI runs the same suite on `ubuntu-latest`, `windows-latest`, and `macos-latest`, so the above is continuously verified rather than asserted once. Details in [plugin/README.en.md](plugin/README.en.md#platform-support).
+
 ## Configuration
 
 Configure via the Web settings card (Settings → Plugins → dsh-subagent-default-model), or by editing the profile patch `~/.dsh/profiles/<profile>/cordis.patch.yml` — since DSH 0.1.7 that is where settings live, keyed by this plugin's Loader entry id `dsh-subagent-default-model` (the old `~/.dsh/settings.yaml` is no longer used; see [plugin/README.en.md](plugin/README.en.md#configuration)).

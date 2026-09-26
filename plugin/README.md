@@ -114,8 +114,20 @@ npm install dsh-subagent-default-model
 ```
 
 > **从 0.1.6 及更早版本升级**：旧版把配置写在 `~/.dsh/settings.yaml` 的 `subagent-default-model` 段。0.1.7 会在启动时把该文件**一次性导入并改名**为 `settings.yaml.imported`，改名后不再回读。导入按段名直接当条目 id 用，而本插件的条目 id 是 `dsh-subagent-default-model`，因此旧段**不会被导入**（宿主日志留一条 `section subagent-default-model … was not imported into entry subagent-default-model`），旧值只留在改名后的文件里——需要手工搬到上面的 `config:` 里。
-  strategy: round-robin  # round-robin | random
-```
+
+## 平台支持
+
+**Windows / macOS / Linux 均受支持**，且不需要任何平台专用配置。本插件的运行时代码是**纯 JavaScript**：`lib/index.js`（宿主半边）与 `lib/client.js`（客户端半边）不读取文件系统、不拼接路径、不派生进程、也不判断 `process.platform`——它只消费 DSH 宿主暴露的服务与事件，因此平台差异完全由 DSH 宿主承担。
+
+已被检查并纳入持续验证的平台相关面：
+
+- **配置路径**：profile patch 位于用户主目录下的 `.dsh/profiles/<profile>/cordis.patch.yml`。Windows 上是 `%USERPROFILE%\.dsh\profiles\<profile>\cordis.patch.yml`（通常是 `C:\Users\<你>\.dsh\...`），与 macOS/Linux 的 `~/.dsh/...` 指向同一处约定。
+- **依赖树**：`package-lock.json` 同时锁定 Windows 三套可选原生构建（`win32-x64-msvc`、`win32-arm64-msvc`、`win32-ia32-msvc`），npm 只安装与当前平台匹配的那一个；本插件的直接依赖 `@deepseek-ai/schemastery` 是纯 JS。
+- **换行符**：仓库未固定 `core.autocrlf`，Windows 检出可能得到 CRLF 源码。全部测试已在该形态下验证通过——解析源码的断言都基于子串而非行尾，因此 CRLF/LF 不影响结果。
+- **路径解析**：仓库脚本统一用 `fileURLToPath` 而非 `URL.pathname`。后者在 Windows 上会得到 `/C:/...` 并被 `path.join` 折成不存在的 `\C:\...`，属于只会在 Windows 上暴露的硬故障。
+- **测试发现**：`npm test` 直接调用 `node --test`（不带 glob），由 Node 测试运行器自行发现用例，不依赖 shell 展开——`test/*.test.mjs` 这类 glob 在 POSIX sh 下会展开、在 cmd/PowerShell 下会原样传入，行为不一致。
+
+CI 在 `ubuntu-latest`、`windows-latest`、`macos-latest` 三个平台上同时运行同一套测试，因此上述约定有持续验证而非一次性声明。
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
