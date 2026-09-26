@@ -16,27 +16,17 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { Context } from "@deepseek-ai/cordis";
-import { SettingsProvider } from "@deepseek-ai/dsh-settings";
 import * as defaultModelPlugin from "../lib/index.js";
 
 // ── harness (mirrors plugin/test/failover.test.mjs) ─────────────────────────
+//
+// DSH 0.1.7 settings model: the plugin's `Config` IS the settings section, so
+// the section object is handed straight to the plugin as its config. The old
+// `SettingsProvider` / `settings.publish()` path (and the `SettingsProvider`
+// export itself) no longer exists on 0.1.7, and importing it crashed this
+// script with a SyntaxError before it ran a single assertion.
 
-class MemorySettings extends SettingsProvider {
-	constructor(ctx, document) {
-		super(ctx, "settings");
-		this.document = document;
-	}
-
-	async load() {
-		return this.document;
-	}
-
-	get writable() {
-		return false;
-	}
-}
-
-async function createHarness(document = {}) {
+async function createHarness(config = undefined) {
 	const root = new Context();
 	root.provide("subagents", {
 		async start(name, request) {
@@ -46,12 +36,10 @@ async function createHarness(document = {}) {
 			return spec;
 		}
 	});
-	const settings = new MemorySettings(root, document);
-	await settings.load().then((loaded) => settings.publish(loaded));
 	await root[Symbol.for("cordis.init")]?.();
-	const fiber = root.registry.plugin(defaultModelPlugin);
+	const fiber = root.registry.plugin(defaultModelPlugin, config);
 	await fiber;
-	return { root, settings, fiber };
+	return { root, fiber };
 }
 
 function makeAgent(id, { origin = "subagent", provider = "deepseek-official", model = "deepseek-v4-pro" } = {}) {
@@ -111,23 +99,48 @@ function loadClientDefinitions() {
 		"row.chatModelChange": "已切换到",
 		"row.chatModelResume": "继续使用"
 	};
+	// 0.1.7 client seams. The pre-0.1.7 `settingsScope` + `conversationEvents`
+	// services are gone: the card resolves its scope through
+	// `ctx.inject(["configForms"], …)`, effects run through `ctx.effect`, and
+	// trajectory/chat definitions register on `uiConversation.events`.
+	// Mirrors the stub in plugin/test/client-trajectory.test.mjs, which is the
+	// maintained copy of this harness.
+	const fakeScope = {
+		getSnapshot: () => ({ status: "ready", writable: true, value: {} }),
+		subscribe: () => () => {},
+		set: async () => {}
+	};
+	const configForms = {
+		describe() {
+			return { getSnapshot: () => ({ view: { namespaces: [{ ns: "subagent-default-model" }] } }) };
+		},
+		get() {
+			return fakeScope;
+		}
+	};
 	apply({
 		connection: { api: {} },
+		effect(callback) {
+			callback();
+			return () => {};
+		},
+		inject(services, callback) {
+			const scope = {};
+			if (services.includes("configForms")) scope.configForms = configForms;
+			callback(scope);
+		},
 		locale: {
 			register() {},
 			bind() {
 				return (key) => zh[key] ?? key;
 			}
 		},
-		settingsScope: {
-			bind() {
-				return { get: async () => ({}), set: async () => {} };
-			}
-		},
-		slots: { inject() {} },
-		conversationEvents: {
-			register(definition) {
-				registrations.push(definition);
+		slots: { inject() {}, register() {} },
+		uiConversation: {
+			events: {
+				register(definition) {
+					registrations.push(definition);
+				}
 			}
 		}
 	});
@@ -148,14 +161,14 @@ function appendRequestContextIfChanged(sessionPostedEvents, previous, next) {
 
 // ── run the simulation ──────────────────────────────────────────────────────
 
+// The section is flat on 0.1.7: the plugin's `Config` IS the settings section,
+// so there is no wrapping `subagent-default-model:` key anymore.
 const SECTION = {
-	"subagent-default-model": {
-		provider: "deepseek-official",
-		model: "deepseek-v4-pro",
-		models: ["deepseek-v4-pro", "deepseek-v4-flash"],
-		strategy: "round-robin",
-		failoverEnabled: true
-	}
+	provider: "deepseek-official",
+	model: "deepseek-v4-pro",
+	models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+	strategy: "round-robin",
+	failoverEnabled: true
 };
 
 const harness = await createHarness(SECTION);

@@ -14,7 +14,6 @@
 
 import assert from "node:assert/strict";
 import { Context } from "@deepseek-ai/cordis";
-import { SettingsProvider } from "@deepseek-ai/dsh-settings";
 import * as defaultModelPlugin from "../lib/index.js";
 
 const BASE = "http://127.0.0.1:8799/v1";
@@ -22,6 +21,28 @@ const FAIL_MODEL = "deepseek-v4-pro";
 const OK_MODEL = "deepseek-v4-flash";
 
 // ── minimal OpenAI-compatible call ──────────────────────────────────────────
+//
+// The mock answers the "ok" model with a streamed SSE body (DSH requests
+// streams by default — see mock-llm-server.mjs), so a plain `res.json()` parses
+// nothing and yields an empty reply. Parse both shapes: `application/json` for
+// the error path, and `text/event-stream` for the success path.
+
+/** Join the `delta.content` fragments of an SSE chat-completion stream. */
+function parseSseContent(text) {
+	let content = "";
+	for (const line of text.split("\n")) {
+		if (!line.startsWith("data:")) continue;
+		const payload = line.slice(5).trim();
+		if (payload.length === 0 || payload === "[DONE]") continue;
+		try {
+			const chunk = JSON.parse(payload);
+			content += chunk?.choices?.[0]?.delta?.content ?? "";
+		} catch {
+			// A malformed frame is not a reply fragment; skip it.
+		}
+	}
+	return content;
+}
 
 async function callChat(model) {
 	const res = await fetch(`${BASE}/chat/completions`, {
@@ -29,7 +50,17 @@ async function callChat(model) {
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }] })
 	});
-	const body = await res.json().catch(() => ({}));
+	const contentType = res.headers.get("content-type") ?? "";
+	const text = await res.text();
+	if (contentType.includes("text/event-stream")) {
+		return { status: res.status, body: { choices: [{ message: { content: parseSseContent(text) } }] } };
+	}
+	let body = {};
+	try {
+		body = text.length ? JSON.parse(text) : {};
+	} catch {
+		body = {};
+	}
 	return { status: res.status, body };
 }
 
@@ -42,23 +73,14 @@ function failureFromHttp({ status, body }) {
 }
 
 // ── harness (mirrors plugin/test/failover.test.mjs) ─────────────────────────
+//
+// DSH 0.1.7 settings model: the plugin's `Config` IS the settings section, so
+// the section object is handed straight to the plugin as its config. The old
+// `SettingsProvider` / `settings.publish()` path (and the
+// `SettingsProvider` export itself) no longer exists on 0.1.7, and importing it
+// crashed this script with a SyntaxError before it ran a single assertion.
 
-class MemorySettings extends SettingsProvider {
-	constructor(ctx, document) {
-		super(ctx, "settings");
-		this.document = document;
-	}
-
-	async load() {
-		return this.document;
-	}
-
-	get writable() {
-		return false;
-	}
-}
-
-async function createHarness(document) {
+async function createHarness(config) {
 	const root = new Context();
 	root.provide("subagents", {
 		async start(name, request) {
@@ -68,10 +90,8 @@ async function createHarness(document) {
 			return spec;
 		}
 	});
-	const settings = new MemorySettings(root, document);
-	await settings.load().then((loaded) => settings.publish(loaded));
 	await root[Symbol.for("cordis.init")]?.();
-	const fiber = root.registry.plugin(defaultModelPlugin);
+	const fiber = root.registry.plugin(defaultModelPlugin, config);
 	await fiber;
 	return { root, fiber };
 }
@@ -106,14 +126,14 @@ function dispatchRequest(ctx, agent, seed) {
 
 // ── run ─────────────────────────────────────────────────────────────────────
 
+// The section is flat on 0.1.7: the plugin's `Config` IS the settings section,
+// so there is no wrapping `subagent-default-model:` key anymore.
 const SECTION = {
-	"subagent-default-model": {
-		provider: "mock-local",
-		model: FAIL_MODEL,
-		models: [FAIL_MODEL, OK_MODEL],
-		strategy: "round-robin",
-		failoverEnabled: true
-	}
+	provider: "mock-local",
+	model: FAIL_MODEL,
+	models: [FAIL_MODEL, OK_MODEL],
+	strategy: "round-robin",
+	failoverEnabled: true
 };
 
 console.log("① 真实调用 fail 模型:", FAIL_MODEL);

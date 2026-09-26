@@ -11,7 +11,19 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Windows is a first-class target, not an afterthought: the plugin runs on
+    # the DSH desktop shell, which ships for Windows. A single `ubuntu-latest`
+    # job cannot catch platform-path defects — `new URL(...).pathname` and
+    # `path.join(...)` agree on POSIX and diverge on Windows (`/C:/…` →
+    # `\C:\…`), so the bug class is invisible here and fatal there. The matrix
+    # also pins the line-endings story: a Windows checkout with
+    # `core.autocrlf=true` yields CRLF sources, which every text-parsing test
+    # must tolerate.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: plugin
@@ -26,6 +38,11 @@ jobs:
           cache: npm
           cache-dependency-path: plugin/package-lock.json
 
+      # `npm test` runs `node --test` with no arguments on every platform:
+      # discovery is done by the Node test runner itself, never by the shell.
+      # A glob like `test/*.test.mjs` is expanded by POSIX sh but passed through
+      # literally by PowerShell/cmd, so it would silently behave differently on
+      # Windows.
       - name: Install dependencies
         run: npm ci
 

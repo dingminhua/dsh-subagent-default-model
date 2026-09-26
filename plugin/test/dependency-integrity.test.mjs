@@ -13,8 +13,17 @@ import assert from "node:assert/strict";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const pluginDir = new URL("..", import.meta.url).pathname;
+// `fileURLToPath`, NOT `new URL(...).pathname`: on Windows a file URL is
+// `file:///C:/Users/...`, whose `pathname` is `/C:/Users/...`. `join()` then
+// folds that into `\C:\Users\...` — a path that does not exist — so
+// `readFileSync` throws ENOENT before any assertion runs and the entire suite
+// dies on a Windows checkout. `fileURLToPath` is the only form correct on every
+// platform, and it also decodes percent-escapes for paths containing spaces
+// (e.g. `C:\Users\My Project\...`). The regression test at the bottom of this
+// file guards every other module against reintroducing the pathname form.
+const pluginDir = fileURLToPath(new URL("..", import.meta.url));
 const pkg = JSON.parse(readFileSync(join(pluginDir, "package.json"), "utf8"));
 
 /** Every entry directly under one node_modules scope. */
@@ -65,4 +74,42 @@ test("devDependency specs are ranges, never exact prerelease pins", () => {
 		if (/^\d/.test(spec) && spec.includes("-")) offenders.push(`${name}@${spec}`);
 	}
 	assert.deepEqual(offenders, [], `devDependencies pinned to an exact prerelease: ${offenders.join(", ")}`);
+});
+
+test("no module derives a filesystem path from URL.pathname (Windows-hostile)", () => {
+	// `new URL(...).pathname` yields `/C:/Users/...` on Windows, which `path.join`
+	// then folds into the non-existent `\C:\Users\...`; it also leaves
+	// percent-escapes in paths containing spaces. `fileURLToPath` is correct on
+	// every platform. This guard exists because the defect is invisible on
+	// macOS/Linux (where the two forms agree) and only surfaces on a Windows
+	// checkout — exactly the class of bug a macOS-only CI cannot catch.
+	const offenders = [];
+	for (const relative of ["test", "scripts", "lib"]) {
+		const dir = join(pluginDir, relative);
+		if (!existsSync(dir)) continue;
+		for (const name of readdirSync(dir)) {
+			if (!/\.(mjs|cjs|js)$/.test(name)) continue;
+			const file = join(dir, name);
+			const source = readFileSync(file, "utf8");
+			// Match `URL(...).pathname` but not `url.pathname` (a URL object's
+			// own property, which is legitimate and platform-independent).
+			// Comments are stripped first so this guard's own documentation —
+			// which necessarily names the forbidden form — cannot match itself.
+			const code = source
+				.replace(/\/\*[\s\S]*?\*\//g, " ")
+				.replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+			if (/new URL\([^)]*\)\s*\.pathname|import\.meta\.url\.pathname/.test(code)) {
+				offenders.push(`${relative}/${name}`);
+			}
+		}
+	}
+	assert.deepEqual(offenders, [], `modules deriving a path from URL.pathname (use fileURLToPath): ${offenders.join(", ")}`);
+});
+
+test("cross-platform path handling is exercised by the other test files", () => {
+	// Belt-and-braces: assert the suite actually imports `fileURLToPath` where it
+	// resolves the plugin root, so a future refactor cannot silently revert to
+	// the pathname form while this file's guard is the only thing checking.
+	const source = readFileSync(join(pluginDir, "test", "dependency-integrity.test.mjs"), "utf8");
+	assert.ok(source.includes("fileURLToPath"), "this guard file must itself use fileURLToPath");
 });
