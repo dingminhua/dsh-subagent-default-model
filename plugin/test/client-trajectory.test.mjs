@@ -654,6 +654,9 @@ function makeReactDouble() {
 	const cleanups = [];
 	let cursor = 0;
 	return {
+		// Test-only window onto the hook cells (diagnostics; never read by the
+		// component code under test).
+		get cells() { return cells; },
 		// A "pass" is one render: hook cursors restart, state cells persist. That
 		// mirrors React closely enough to model "effect ran, state updated,
 		// component re-rendered".
@@ -1602,34 +1605,62 @@ function makeFencedSettingsHost({ staleBy = 1, landAfterLoads = 0, initialDoc } 
 
 /** Render the REAL card wired to the REAL injected write path. */
 async function renderCardThroughInjectedFace(host) {
-	const react = makeReactDouble();
-	const reactRequire = (id) => {
-		if (id === "react") return react;
-		if (id === "@deepseek-ai/dsh-client-ui-primitives") {
-			return { Toast: function Toast() {}, IconChevronDownOutlineRegular: function Icon() {} };
-		}
-		throw new Error(`unexpected require: ${id}`);
-	};
-	const { ctx, slotRegistrations, dictionaries } = makeCtx({
-		configFormsOverride: { describe: () => host.mirror, get: () => host.controller }
-	});
-	capturedModule.factory(reactRequire).apply(ctx);
+	// Shares one ctx across mounts so the plugin (and its scope, whose held
+	// save must survive the card unmounting) is applied exactly once — the way
+	// the real page keeps one client plugin across panel switches. The React
+	// double the bundle's `React` resolves to is the CURRENT mount's (fresh
+	// hook cells per mount, exactly what a remount produces), so the require
+	// indirection must be mutable rather than bound to the first mount.
+	const cardCtx = host.__cardCtx ?? (host.__cardCtx = (() => {
+		const bootReact = makeReactDouble();
+		// The bundle captures `var React = require("react")` ONCE at factory
+		// time, so a plain mutable binding can never reach it. Hand the factory
+		// a stable Proxy whose property reads forward to whichever double the
+		// current mount owns — the bundle's `React.useState` then lands on the
+		// current mount's cells, which is exactly what a real remount does.
+		const mutableReact = { current: bootReact };
+		const reactProxy = new Proxy({}, {
+			get(_target, prop) {
+				const delegate = mutableReact.current;
+				const value = delegate[prop];
+				return typeof value === "function" ? value.bind(delegate) : value;
+			}
+		});
+		const reactRequire = (id) => {
+			if (id === "react") return reactProxy;
+			if (id === "@deepseek-ai/dsh-client-ui-primitives") {
+				return { Toast: function Toast() {}, IconChevronDownOutlineRegular: function Icon() {} };
+			}
+			throw new Error(`unexpected require: ${id}`);
+		};
+		const made = makeCtx({ configFormsOverride: { describe: () => host.mirror, get: () => host.controller } });
+		capturedModule.factory(reactRequire).apply(made.ctx);
+		return { ...made, mutableReact };
+	})());
+	const mutableReact = cardCtx.mutableReact;
+	const slotRegistrations = cardCtx.slotRegistrations;
+	const dictionaries = cardCtx.dictionaries;
 	const cardRow = cardRegistrations(slotRegistrations)[0].value;
 	const t = (key, params) => {
 		const template = dictionaries.zh?.[key] ?? key;
 		return params === undefined ? template : template.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
 	};
-	const injected = cardRow.options.inject();
+	const injected = host.__injected ?? (host.__injected = cardRow.options.inject());
 	const props = {
 		t,
 		settingsScope: injected.settingsScope,
 		loadCatalog: async () => [{ id: "workbuddy", models: [{ id: "glm-5.3-flash" }] }],
 		write: injected.write
 	};
-	const renderPass = () => { react.beginPass(); return expand(cardRow.component({ ...props })); };
-	renderPass();
-	for (let i = 0; i < 4; i++) { await Promise.resolve(); renderPass(); }
-	return { getTree: () => renderPass(), rerender: renderPass, injected };
+	// A FRESH React double per mount: hook cells are per-component-instance, so
+	// a new double is exactly what a remount produces — and the bundle's React
+	// proxy now forwards to THIS one.
+	const react = makeReactDouble();
+	mutableReact.current = react;
+	const renderComponent = () => { react.beginPass(); return expand(cardRow.component({ ...props })); };
+	renderComponent();
+	for (let i = 0; i < 4; i++) { await Promise.resolve(); renderComponent(); }
+	return { getTree: () => renderComponent(), rerender: renderComponent, injected, react };
 }
 
 test("a revision-fence refusal is retried once and the save lands", async () => {
@@ -1732,13 +1763,15 @@ test("deleting a route and saving must not resurrect the deleted route while the
 	// The mirror NEVER converges in this scenario — the worst observed case:
 	// every re-read keeps answering the previous document.
 	const host = makeFencedSettingsHost({ staleBy: 0, landAfterLoads: Number.MAX_SAFE_INTEGER, initialDoc: structuredClone(TWO_ROUTES) });
-	const { rerender } = await renderCardThroughInjectedFace(host);
+	const { rerender, react } = await renderCardThroughInjectedFace(host);
 	const removeButtons = () => collect(rerender(), (n) => n.type === "button" && n.props.className === "dsm-model-settings-remove");
 	const saveOf = () => saveButton(rerender());
 	assert.equal(removeButtons().length, 2, "the card starts with the two stored routes");
-	// Delete the first route, then save.
+	// Delete the first route, then save. The deletion must be live IMMEDIATELY:
+	// the react double runs effects synchronously during each render, and any
+	// intervening await can let the (unheld) re-seed effect overwrite the draft
+	// before the save hold exists — assert on a SYNCHRONOUS re-render.
 	removeButtons()[0].props.onClick();
-	for (let i = 0; i < 3; i++) { await Promise.resolve(); rerender(); }
 	assert.equal(removeButtons().length, 1, "the deletion is live in the draft before saving");
 	saveOf().props.onClick();
 	// The write lands; the bounded read-back, the lag-accept, and the bounded
@@ -1750,6 +1783,65 @@ test("deleting a route and saving must not resurrect the deleted route while the
 	assert.equal(removeButtons().length, 1, "the deleted route must NOT resurrect while the mirror lags");
 	// And the stored document really has only the surviving route.
 	assert.equal(JSON.stringify(host.doc.models).includes("glm-5.3-flash"), false, "the deletion reached the stored document");
+});
+
+test("a REMOUNTED card seeds from the saved form, not the lagging mirror", async () => {
+	// The live-reported failure after 2.0.6: save a deletion, switch away from
+	// the Plugins page, come back — the card is UNMOUNTED and remounted, so any
+	// hold kept in component state died with it, and the remounted card seeded
+	// from the still-lagging mirror (the deleted route back). The hold now
+	// lives on the SCOPE (plugin lifetime), so the remounted card must seed
+	// from what was actually saved. This drives the exact contract: hold a
+	// saved form on the scope, mount a card against a mirror still serving the
+	// PREVIOUS document, and require the card to show the SAVED form.
+	const TWO_ROUTES = {
+		provider: "workbuddy", model: "",
+		models: [
+			{ provider: "workbuddy", model: "glm-5.3-flash", reasoningEffort: "low" },
+			{ provider: "ds-v4f", model: "deepseek-v4-flash", reasoningEffort: "low" }
+		],
+		strategy: "round-robin", failoverEnabled: true, reasoningEffort: ""
+	};
+	// A mirror that NEVER converges: the stored document updates on write, but
+	// the snapshot the card reads keeps answering the previous document.
+	const host = makeFencedSettingsHost({ staleBy: 0, landAfterLoads: Number.MAX_SAFE_INTEGER, initialDoc: structuredClone(TWO_ROUTES) });
+	const first = await renderCardThroughInjectedFace(host);
+	const removeButtonsOf = (tree) => collect(tree, (n) => n.type === "button" && n.props.className === "dsm-model-settings-remove");
+	assert.equal(removeButtonsOf(first.rerender()).length, 2, "the card starts with the two stored routes");
+
+	// Simulate the completed save directly: the write landed (the stored
+	// document has the deletion) and the scope HOLDS the saved form — the exact
+	// state `save()` leaves behind when the mirror lags. This isolates the
+	// remount contract from the save pipeline's own (already covered) tests.
+	const ONE_ROUTE = structuredClone(TWO_ROUTES);
+	ONE_ROUTE.models = [ONE_ROUTE.models[1]];
+	host.doc.models = structuredClone(ONE_ROUTE.models);
+	first.injected.settingsScope.setSavedForm(JSON.stringify(
+		[{ provider: "ds-v4f", model: "deepseek-v4-flash", reasoningEffort: "low" }]
+	));
+
+	// Remount: the card unmounts (its state dies) and a fresh one mounts
+	// against the SAME scope and the STILL-LAGGING mirror.
+	const second = await renderCardThroughInjectedFace(host);
+	const remountedRoutes = removeButtonsOf(second.rerender());
+	assert.equal(remountedRoutes.length, 1, `the REMOUNTED card must show the saved form (1 route), not the lagging mirror's ${remountedRoutes.length}`);
+	// The hold is intact — the mirror has not agreed, so nothing cleared it.
+	assert.equal(first.injected.settingsScope.savedForm(), second.injected.settingsScope.savedForm(), "the hold survives the remount (it lives on the scope)");
+});
+
+test("a REMOUNTED card with NO hold seeds normally from the mirror", async () => {
+	// The converged case: nothing is held, so the remounted card seeds from the
+	// mirror as it always did. Guards against the hold making the card blind.
+	const ONE_ROUTE = {
+		provider: "workbuddy", model: "",
+		models: [{ provider: "workbuddy", model: "glm-5.3-flash", reasoningEffort: "low" }],
+		strategy: "round-robin", failoverEnabled: true, reasoningEffort: ""
+	};
+	const host = makeFencedSettingsHost({ staleBy: 0, landAfterLoads: 0, initialDoc: structuredClone(ONE_ROUTE) });
+	const { rerender, injected } = await renderCardThroughInjectedFace(host);
+	assert.equal(injected.settingsScope.savedForm(), null, "nothing is held before any save");
+	const removeButtonsOf = (tree) => collect(tree, (n) => n.type === "button" && n.props.className === "dsm-model-settings-remove");
+	assert.equal(removeButtonsOf(rerender()).length, 1, "an unheld card seeds from the mirror normally");
 });
 
 test("once the lagging mirror converges, the held re-seed releases without resurrecting", async () => {
@@ -1770,8 +1862,10 @@ test("once the lagging mirror converges, the held re-seed releases without resur
 	const removeButtons = () => collect(rerender(), (n) => n.type === "button" && n.props.className === "dsm-model-settings-remove");
 	const saveOf = () => saveButton(rerender());
 	assert.equal(removeButtons().length, 2, "the card starts with the two stored routes");
+	// Synchronous delete-then-save (no intervening await): the react double
+	// runs effects during each render, and an unheld re-seed between the delete
+	// and the save would overwrite the draft before the hold exists.
 	removeButtons()[0].props.onClick();
-	for (let i = 0; i < 3; i++) { await Promise.resolve(); rerender(); }
 	saveOf().props.onClick();
 	for (let i = 0; i < 40; i++) { await new Promise((resolve) => setImmediate(resolve)); rerender(); }
 	const errors = collect(rerender(), (n) => n.props && n.props["data-settings-save-error"]);

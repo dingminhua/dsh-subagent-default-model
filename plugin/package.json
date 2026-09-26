@@ -1,6 +1,6 @@
 {
   "name": "dsh-subagent-default-model",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "为 DeepSeek Harness 子代理配置默认模型路由：支持单模型、轮询、随机，以及按路由设置推理强度（reasoning effort）。",
   "keywords": [
     "deepseek-harness",

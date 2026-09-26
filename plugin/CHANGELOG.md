@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.7 (2026-09-26)
+
+### Fixed
+
+- **真机报告：「切换出去之后还是之前的状态」——保存保持随卡片卸载丢失**。2.0.6 的「保存保持」放在组件 ref 里，用户离开 Plugins 页即卸载、保持随之死亡；回来重挂的卡片从**仍滞后的 mirror** 播种，删除的路由又回来了。
+  修复：**保持提升到 scope 层**（插件生命周期，不随卡片卸载）。scope 新增 `savedForm()/setSavedForm()/clearSavedForm()`；重挂的卡片**播种优先用保存的表单**（从 held 路由重建完整分节，含 effort 折叠规则），mirror 与保存一致前 re-seed 一律拒绝；收敛轮询改为读 scope 上的 held，**跨卸载存活**，收敛即释放。
+  测试基建同步修复一个真缺陷：测试沙箱里 bundle 在 factory 时一次性捕获 `React`，第二次挂载的 hooks 全写进首个 double 的 cells——用 Proxy 转发到当前挂载的 double 后，删除/保存类交互测试才真正驱动了被测组件。
+
 ## 2.0.6 (2026-09-26)
 
 ### Fixed
