@@ -45,7 +45,7 @@ dsh plugin --profile desktop add dsh-subagent-default-model
 
 ## 发布（Release / Publish）
 
-发布到 npm registry。**完整权威流程见仓库根目录 [`RELEASING.md`](../../RELEASING.md)**（含 2FA 确认、tag 修正、代理、验证步骤）。
+发布到 npm registry。**完整权威流程见仓库根目录 [`RELEASING.md`](../../RELEASING.md)**（含 2FA 确认、tag 修正、代理、验证步骤、GitHub Release）。
 
 要点速览：
 
@@ -62,10 +62,21 @@ git push origin vX.Y.Z
 # 4. 发布到 npm（账号若开启 2FA，需在浏览器确认一步）
 cd plugin
 npm publish
+
+# 5. 创建 GitHub Release（易漏！npm 发布成功不会自动建 Release）
+cd ..
+export PATH="/opt/homebrew/bin:$PATH"   # 本机 gh 不在默认 PATH 上
+gh release create vX.Y.Z \
+  --repo dingminhua/dsh-subagent-default-model \
+  --title "vX.Y.Z — <一句话>" \
+  --notes-file /tmp/rel-body.md \
+  --verify-tag
 ```
 
 > ⚠️ 发布前先跑一遍测试：`npm --prefix plugin test`。
 > `package.json` 的 `files` 字段已限定只发布 `lib/`、`icons/`、`cordis.patch.yml`、`LICENSE`、`README.md`、`README.en.md`、`CHANGELOG.md`，`test/` 和 `node_modules/` 不会进入发布包。
+>
+> ⚠️ **第 5 步别漏**：npm 发布与 GitHub Release 是**两条独立链路**，`npm publish` 成功不会自动建 Release。历史上有版本（`v2.0.2`、`v2.0.7`）就是在这里漏掉的。补救办法与批量核对脚本见 [`RELEASING.md`](../../RELEASING.md) 的「忘了创建 GitHub Release」一节。
 
 本地安装（DSH Desktop / desktop profile）：
 

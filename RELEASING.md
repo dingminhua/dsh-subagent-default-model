@@ -7,7 +7,13 @@
 - npm 已登录：`npm whoami` 应显示 `dmh2002`（若报 `need auth`，先 `npm login`）
 - 账号若开启 2FA（两步验证）：`npm publish` 时需**在浏览器确认一步**（见下文 2FA 说明）
 - GitHub 仓库：`https://github.com/dingminhua/dsh-subagent-default-model`（默认分支 `main`）
+- **`gh` CLI 已登录**：`gh auth status` 应显示 `Logged in to github.com account dingminhua`（第 8 步创建 GitHub Release 需要；未装/未登录时可用网页版替代，见该步说明）
 - 网络：本机已配置代理 `127.0.0.1:7897`（git 与 npm 均已配置，用于访问 GitHub / npm registry；若在其他机器发布，直连即可）
+
+> ⚠️ **本机 `npm` / `gh` 不在默认登录 PATH 上**（`/etc/paths` 不含 `/opt/homebrew/bin`，`bash -lc 'command -v npm'` 为空）。在脚本或非交互 shell 里调用时需显式带上：
+> ```bash
+> export PATH="/opt/homebrew/bin:$PATH"
+> ```
 
 ## 每次发布的完整步骤
 
@@ -106,7 +112,68 @@ npm view dsh-subagent-default-model dist-tags.latest   # 应为 X.Y.Z
 >
 > 只凭一条 `npm view ... version` 输出旧版就重做版本号，是本项目**实际踩过的坑**（见下文 E409 条目）：发布其实早已成功，误判后多打了一个版本、多推了一个 tag，事后还需 revert 回滚。
 
+### 8. 创建 GitHub Release
+
+**这一步很容易漏**（历史上有版本就漏过，见下方「覆盖率」）。它位于 npm 发布**之后**，因为 Release 正文要引用已发布的版本号；而它与 npm 发布**互相独立**——npm 成功不代表 Release 已建，反之亦然。
+
+```bash
+export PATH="/opt/homebrew/bin:$PATH"   # 本机 gh 不在默认 PATH 上
+cd /Users/dmh2002/DshProject/dsh-subagent-default-model
+
+gh release create vX.Y.Z \
+  --repo dingminhua/dsh-subagent-default-model \
+  --title "vX.Y.Z — <一句话卖点>" \
+  --notes-file /tmp/rel-body.md \
+  --verify-tag
+```
+
+- `--verify-tag`：tag 不在远端时**直接报错**，避免建出一个指向不存在 tag 的 Release。
+- `--notes-file`：正文从文件读，避免多行 Markdown 在 shell 里被转义搞坏。
+- **不要加** `--draft` / `--prerelease`：本项目发布正式版本。
+
+**标题格式**（沿用既有惯例）：`vX.Y.Z — <一句话>`
+**正文格式**（对照 v2.0.0 / v2.0.1 / v2.0.8 的既有正文）：
+
+```markdown
+## <主题：做了什么>
+
+> <一句话摘要 + 升级建议；必要处标注「破坏性变更」>
+
+**根因**：…    （先讲清为什么会坏，再讲怎么修的）
+**修法**：…
+**验证**：<表格或列表，写实测数据而非估算>
+
+## 安装
+（`dsh plugin --profile desktop add <pkg>` 与 `npm install` 两种方式 + 重启提示）
+
+## 测试
+（如 `128/128 通过`，注明新增用例数）
+```
+
+**验证 Release 真的建成了**（用两种独立途径，不要只看命令退出码）：
+
+```bash
+export PATH="/opt/homebrew/bin:$PATH"
+gh release view vX.Y.Z --repo dingminhua/dsh-subagent-default-model \
+  --json tagName,name,isDraft,isPrerelease,publishedAt
+
+# 独立复核（公开 API，无需鉴权）
+curl -s "https://api.github.com/repos/dingminhua/dsh-subagent-default-model/releases?per_page=100" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+      for(const r of JSON.parse(s)) console.log(r.tag_name, r.draft?"DRAFT":"", r.name)})'
+```
+
+**没装 / 没登录 `gh` 时**：用网页版 <https://github.com/dingminhua/dsh-subagent-default-model/releases/new?tag=vX.Y.Z> 手动创建，正文粘贴同一份 Markdown 即可。
+
+> 📌 **覆盖率提示**：截至 v2.0.8，仓库有 **19 个 tag，但只有 3 个 Release**（`v2.0.0`、`v2.0.1`、`v2.0.8`）——
+> 其余 **16 个 tag 都没有对应 Release**（`v0.3.0`…`v1.3.0` 全线、`v2.0.2`、`v2.0.7`）。也就是说，这一步历来容易被跳过，
+> **不是**「每个版本都做过」。**从 v2.0.8 起应视为每次发布的必做步骤**；如需补齐历史，用上文脚本逐个查出后
+> `gh release create <tag> --verify-tag --title "…" --notes-file …` 补建（npm 包不受影响，无需重发）。
+
 ## 完整示例（以 0.3.1 为准）
+
+> 下面按**紧凑编号**（1–7）串一遍端到端流程，与上文「完整步骤」的 1–8 编号**不是一一对应**（2FA 合并在第 5 步内）。
+> ⚠️ 第 7 步是 **v2.0.8 起新补入文档**的步骤：0.3.1 当初**并未**创建 Release，此处仅为流程示范。
 
 ```bash
 # 1. 测试
@@ -124,11 +191,50 @@ git push origin v0.3.1
 # 5. 发布（走 2FA 确认）
 cd plugin && npm publish
 
-# 6. 验证
+# 6. 验证 npm
 cd .. && npm view dsh-subagent-default-model version  # → 0.3.1
+
+# 7. 创建 GitHub Release（v2.0.8 起新增的必做步骤，详见上文「8. 创建 GitHub Release」）
+export PATH="/opt/homebrew/bin:$PATH"
+gh release create v0.3.1 \
+  --repo dingminhua/dsh-subagent-default-model \
+  --title "v0.3.1 — README 中英双语" \
+  --notes-file /tmp/rel-body.md \
+  --verify-tag
 ```
 
 ## 常见问题
+
+### 忘了创建 GitHub Release
+
+**症状**：npm 上版本已发布，但 <https://github.com/dingminhua/dsh-subagent-default-model/releases> 里找不到该版本；`git tag` 有、Release 没有。历史上 `v2.0.2` / `v2.0.7` 就是这样漏掉的。
+
+**为什么容易漏**：npm 发布与 GitHub Release 是**两条互相独立的链路**——`npm publish` 成功不会自动建 Release，而发布流程文档在 v2.0.8 之前只写到「验证 npm 发布成功」就结束了。
+
+**补救**（tag 已存在，直接补建即可，不影响已发布的 npm 包）：
+
+```bash
+export PATH="/opt/homebrew/bin:$PATH"
+cd /Users/dmh2002/DshProject/dsh-subagent-default-model
+gh release create vX.Y.Z \
+  --repo dingminhua/dsh-subagent-default-model \
+  --title "vX.Y.Z — <一句话>" \
+  --notes-file /tmp/rel-body.md \
+  --verify-tag
+```
+
+正文可参照同版本在 `plugin/CHANGELOG.md` 里的记录来写。
+
+**一次核对全部历史版本是否都有 Release**：
+
+```bash
+export PATH="/opt/homebrew/bin:$PATH"
+cd /Users/dmh2002/DshProject/dsh-subagent-default-model
+for t in $(git tag -l | sort -V); do
+  gh release view "$t" --repo dingminhua/dsh-subagent-default-model >/dev/null 2>&1 \
+    && echo "  ✅ $t" || echo "  ❌ $t  (缺 Release)"
+done
+```
 
 ### `npm publish` 报 EOTP（需要一次性密码）
 

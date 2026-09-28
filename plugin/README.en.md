@@ -45,7 +45,7 @@ dsh plugin --profile desktop add dsh-subagent-default-model
 
 ## Release / Publish
 
-Publish to the npm registry. **The full authoritative flow lives in [`RELEASING.md`](../../RELEASING.md)** (2FA confirmation, tag fix, proxy, verification).
+Publish to the npm registry. **The full authoritative flow lives in [`RELEASING.md`](../../RELEASING.md)** (2FA confirmation, tag fix, proxy, verification, GitHub Release).
 
 Quick reference:
 
@@ -62,10 +62,21 @@ git push origin vX.Y.Z
 # 4. Publish to npm (if the account has 2FA, confirm in the browser)
 cd plugin
 npm publish
+
+# 5. Create the GitHub Release (EASY TO MISS — npm publish does NOT create one)
+cd ..
+export PATH="/opt/homebrew/bin:$PATH"   # gh is not on the default PATH on this machine
+gh release create vX.Y.Z \
+  --repo dingminhua/dsh-subagent-default-model \
+  --title "vX.Y.Z — <one-liner>" \
+  --notes-file /tmp/rel-body.md \
+  --verify-tag
 ```
 
 > ⚠️ Run the tests first: `npm --prefix plugin test`.
 > The `files` field in `package.json` limits publishing to `lib/`, `icons/`, `cordis.patch.yml`, `LICENSE`, `README.md`, `README.en.md`, `CHANGELOG.md` — `test/` and `node_modules/` are never packed.
+>
+> ⚠️ **Do not skip step 5.** Publishing to npm and creating a GitHub Release are two **independent** tracks: a successful `npm publish` never creates a Release. Past versions (`v2.0.2`, `v2.0.7`) were missed exactly here. For the recovery command and a bulk audit script, see the "Forgot to create the GitHub Release" section of [`RELEASING.md`](../../RELEASING.md).
 
 Local install (DSH Desktop / desktop profile):
 
