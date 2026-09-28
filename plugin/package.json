@@ -1,6 +1,6 @@
 {
   "name": "dsh-subagent-default-model",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "description": "为 DeepSeek Harness 子代理配置默认模型路由：支持单模型、轮询、随机，以及按路由设置推理强度（reasoning effort）。",
   "keywords": [
     "deepseek-harness",
@@ -68,14 +68,14 @@
     "@deepseek-ai/schemastery": ">=3.18.1 <4.0.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-settings": ">=0.1.7-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-subagent": ">=0.1.7-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-client-connection": ">=0.1.7-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-client-locale": ">=0.1.7-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.7-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-primitives": ">=0.1.7-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.7-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.7-rc.1 <0.2.0"
+    "@deepseek-ai/dsh-settings": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-subagent": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-connection": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-locale": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.7-rc.1 <0.3.0-0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-client-connection": {

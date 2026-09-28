@@ -80,6 +80,28 @@ npm install dsh-subagent-default-model
 - 本地开发用 `link:` 安装：`dsh plugin --profile desktop add /Users/dmh2002/DshProject/dsh-subagent-default-model/plugin`，node_modules 里是源码软链，改代码后**重启 DSH Desktop** 生效
 - 正式安装 / 他机安装使用 npm registry 版本（见上方 Install）
 
+## 宿主版本要求
+
+全部 8 个 `@deepseek-ai/*` peer 声明为 **`>=0.1.7-rc.1 <0.3.0-0`**：支持 0.1.7 线及其后的**整个 0.2.x 线**（prerelease 与正式版都放行），0.3.0 起不再声明支持。
+
+要理解这个区间为什么长这样，得先知道 DSH **怎么校验**它。`@deepseek-ai/dsh-app-boot` 对每个 `@deepseek-ai/dsh` / `dsh-*` peer 执行：
+
+```js
+semver.satisfies(runtimeVersion, range, { includePrerelease: true })
+```
+
+`includePrerelease: true` **关闭了 semver 的 prerelease 元组规则**——预发布版本不再「缺少同元组载体就被拒」，而是直接按常规序比较。两个后果都是反直觉的：
+
+| 上界写法 | `0.2.0-rc.1` | `0.2.0`（正式版） | 说明 |
+| --- | --- | --- | --- |
+| `<0.2.0` | ✅ 放进 | ❌ **拒绝** | 最坏组合：预发布能装，正式版一发布就把 bundle 摘掉 |
+| `<0.3.0` | ✅ | ✅ | 但会一并放进 `0.3.0-rc.1`，超出已验证范围 |
+| **`<0.3.0-0`** | ✅ | ✅ | 推荐：0.2.x 全放行，`0.3.0-rc.1` 也挡住 |
+
+上界写错时宿主**不会降级运行**：`loadProfileDirectory()` 对不兼容 bundle 直接抛错，该 bundle 落入 `skippedBundles`，启动时 stderr 输出 `skipping profile bundle "dsh-subagent-default-model"`——插件本体与设置卡片**一起消失**。
+
+`plugin/test/peer-range.test.mjs` 是这条契约的回归护栏：它调用宿主同款的 `semver.satisfies(..., { includePrerelease: true })`，并逐条断言上表的结果。
+
 ## 配置
 
 优先用 Web 设置卡片（**设置 → 插件 → dsh-subagent-default-model**）。

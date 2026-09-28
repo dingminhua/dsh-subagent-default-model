@@ -67,11 +67,36 @@
 
 **CI 门禁**：`.github/workflows/ci.yml` 在 `ubuntu-latest`、`windows-latest`、`macos-latest` 上跑同一套测试。新增脚本或测试时不要绕过 `npm test`，否则该改动在 Windows 上不受验证。
 
+## 宿主版本契约（改 `peerDependencies` 前必读）
+
+DSH 校验 peer 时**不用默认 semver 选项**。`@deepseek-ai/dsh-app-boot` 对每个 `@deepseek-ai/dsh` / `dsh-*` peer 执行：
+
+```js
+semver.satisfies(runtimeVersion, range, { includePrerelease: true })
+```
+
+`includePrerelease: true` 会**关闭 prerelease 元组规则**，于是上界附近的判定变得反直觉：
+
+| 上界写法 | `0.2.0-rc.1` | `0.2.0`（正式版） | 结论 |
+| --- | --- | --- | --- |
+| `<0.2.0` | ✅ 放进 | ❌ **拒绝** | 最坏：预发布能装，正式版一发布整个 bundle 被摘 |
+| `<0.3.0` | ✅ | ✅ | 但放进 `0.3.0-rc.1`，超出已验证范围 |
+| **`<0.3.0-0`** | ✅ | ✅ | 当前采用：0.2.x 全放行，`0.3.0-rc.1` 也挡住 |
+
+规则：
+
+- **上界必须带 `-0`**，否则会静默放进下一行的 prerelease。
+- **不要为了「只支持 0.1.7」而写 `<0.2.0`**——它挡不住 `0.2.0-rc.1`，却挡住正式的 `0.2.0`。
+- 上界写错时宿主**不降级**：`loadProfileDirectory()` 抛错 → 该 bundle 进 `skippedBundles` → stderr 输出 `skipping profile bundle "dsh-subagent-default-model"`，插件本体与设置卡片一起消失。
+- `plugin/test/peer-range.test.mjs` 是护栏，**必须与 `package.json` 同步改**；它调用宿主同款的 `semver.satisfies(..., { includePrerelease: true })`，并用手写回退实现做交叉验证（不支持的 `^` / `~` 语法会抛错而非静默返回 `false`）。
+- 想诚实表达「仅 0.1.7 线」时，正确写法是 `>=0.1.7-rc.1 <0.2.0-0`（同时挡住 `0.2.0-rc.1` 与 `0.2.0`），而不是 `<0.2.0`。
+
 ## 不要做的事
 
 - ❌ 重新创建 `dev-web.sh` 或 `web` profile（3080 旧工作流已废弃）
 - ❌ 手动把 `plugin/lib` 复制进 node_modules（`link:` 已保证实时同步）
 - ❌ 手动在 `~/.dsh/profiles/desktop` 里跑 `pnpm install` 重装整个依赖树
+- ❌ 把 peer 上界写成裸 `<0.2.0`（见上一节：挡不住预发布、却挡住正式版）
 
 ## 设置命名空间白名单（当前版本已不需要）
 
@@ -80,10 +105,13 @@
 ## 测试
 
 ```bash
-npm --prefix plugin test    # 全套单元测试（92 个用例，含跨平台守卫）
+npm --prefix plugin test    # 全套单元测试（含跨平台守卫）+ peer 区间护栏；判定看 fail 0
 node integration.mjs        # 派发与生命周期集成测试
 node prove.mjs              # Cordis traceable-proxy 回归测试
 ```
+
+> 用例数刻意不写死（已从 92 → 112 → 116 → 120 漂移多次）。判定标准是
+> `node --test` 汇总里的 **`fail 0`**，以及 **`pass` 等于 `tests`**。
 
 辅助脚本（本地验证用）：
 

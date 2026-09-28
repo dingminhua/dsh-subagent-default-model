@@ -1,7 +1,8 @@
 // DSH 0.1.7 settings model: the plugin's own Cordis `Config` IS the settings
 // section. There is no standalone `installSettingsSection` / `settingsNamespace`
 // export and no `ctx.settings.installSection` seam anymore (both removed in
-// 0.1.7 — see docs/dsh-0.1.5-rc2-to-0.1.7-rc1-research.md §3.2/§3.3). The host
+// 0.1.7; the host-side check is `@deepseek-ai/dsh-settings` `describe()`, which
+// derives the settings surface from `Config`). The host
 // projects the `Config` into a form keyed by the Loader entry id and writes
 // changes back to the profile patch. These tests pin:
 //   1. `Config` is exported and matches the old section schema shape;

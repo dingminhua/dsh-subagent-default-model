@@ -1,7 +1,7 @@
 # Bug 2: `cordis_inspect_query(platform=client)` hangs forever
 
-**Status:** root cause located in the DSH Desktop build, *not* in this plugin's repository.
-**Affected build:** `dsh-desktop-next` 2.0.15-next, harness packages `0.1.7-rc.2`.
+**Status:** root cause located in the DSH Desktop build, *not* in this plugin's repository. **Still unfixed as of `0.2.0-rc.1`.**
+**Affected build:** observed on `dsh-desktop-next` 2.0.15-next (harness packages `0.1.7-rc.2`); re-checked against harness `0.2.0-rc.1`, where both defects are unchanged.
 
 ## Symptom
 
@@ -162,3 +162,23 @@ This is the DSH application's own code
 it inside `app.asar` is overwritten by any DSH update, so the change belongs
 upstream. The plugin in this repository is unaffected by, and cannot fix, this
 defect; the workaround is to avoid `platform: "client"`.
+
+## Verified against 0.2.0-rc.1 (2026-09-29)
+
+Re-checked in the sibling `deepseek-harness` checkout at tag `dsh-v0.2.0-rc.1`.
+**Both defects are still present**, so the workaround above still applies:
+
+- `packages/extensions/cordis-host-runner/src/inspect-registry.ts` —
+  `resolveClientQuery()` still begins `if (!resolution.ok) return { accepted: false }`,
+  discarding the page's refusal (defect 1). Confirmed by reading the file **at the
+  `dsh-v0.2.0-rc.1` tag** (not just the working tree), and the only change to that
+  package between the two tags is its `package.json` version line.
+- `dsh-tool-cordis` still declares no `timeoutMs` for `cordis_inspect_query` — zero
+  occurrences of the identifier in `packages/extensions/tool-cordis/src/index.ts` at
+  the `dsh-v0.2.0-rc.1` tag — so a pending client query remains unbounded.
+
+The sibling checkout also shows the packages' *version* fields are now
+`0.2.0-rc.1`, which is what a peer-range gate keys on — see the host-version
+requirement section in `plugin/README.md` for why this plugin's peers are
+declared `>=0.1.7-rc.1 <0.3.0-0` rather than pinned below `0.2.0`.
+

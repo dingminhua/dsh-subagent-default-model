@@ -16,8 +16,12 @@
 ```bash
 cd /Users/dmh2002/DshProject/dsh-subagent-default-model   # macOS / Linux
 # Windows: cd C:\Users\<你>\DshProject\dsh-subagent-default-model
-npm --prefix plugin test        # 单元测试，应 92/92 通过
+npm --prefix plugin test        # 单元测试，必须 0 fail 且 pass 数与 tests 数相等
 ```
+
+> 这里刻意不写死用例数：它会随每次改动漂移（本项目已从 92 → 112 → 116 → 120），
+> 写死后每次都得跟着改，且容易漏改。判定标准是 `node --test` 汇总里的
+> **`fail 0`**，以及 **`pass` 等于 `tests`**（有 `skipped`/`todo` 时另计）。
 
 ### 2. 更新版本号
 

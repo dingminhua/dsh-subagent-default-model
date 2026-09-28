@@ -79,6 +79,17 @@ npm install dsh-subagent-default-model
 
 安装、更新或卸载 bundle 后，需要重启对应的 DSH 进程；仅修改设置不需要重启。
 
+### 宿主版本要求
+
+本插件声明全部 8 个 `@deepseek-ai/*` peer 为 **`>=0.1.7-rc.1 <0.3.0-0`**：支持 0.1.7 线及其后的**整个 0.2.x 线**（含 prerelease 与正式版），0.3.0 起不再声明支持。
+
+> ⚠️ 上界必须带 `-0`（`<0.3.0-0` 而非 `<0.3.0`）。DSH 用
+> `semver.satisfies(runtime, range, { includePrerelease: true })` 校验 peer，
+> 该选项会**关闭 prerelease 元组规则**，于是 `<0.3.0` 会放进 `0.3.0-rc.1`，
+> 把支持范围悄悄扩到未经验证的一行。同理，**上界写 `<0.2.0` 是危险的**：
+> 它会放进 `0.2.0-rc.1` 却**拒绝正式的 `0.2.0`**——正式版一发布，整个
+> bundle 会被宿主跳过（`skipping profile bundle`），插件本体与设置卡片一起消失。
+
 ## 平台支持
 
 **Windows / macOS / Linux 均受支持**，且不需要任何平台专用配置或额外步骤。

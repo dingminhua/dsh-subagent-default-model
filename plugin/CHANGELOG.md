@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.0.8 (2026-09-29)
+
+### Fixed
+
+- **P0：peer 上界 `<0.2.0` 会在 DSH 0.2.0 正式版发布时把整个 bundle 摘掉**。宿主校验 peer **不用默认 semver 选项**：`@deepseek-ai/dsh-app-boot` 执行的是
+  `semver.satisfies(runtimeVersion, range, { includePrerelease: true })`。该选项**关闭 prerelease 元组规则**，于是 `<0.2.0` 的实际行为与直觉相反——它**放进** `0.2.0-rc.1`，却**拒绝**正式的 `0.2.0`。后果不是降级运行：`loadProfileDirectory()` 对不兼容 bundle 直接抛错，bundle 落入 `skippedBundles`，启动时 stderr 打印 `skipping profile bundle "dsh-subagent-default-model"`，**插件本体与设置卡片一起消失**。
+  修复：8 个 `@deepseek-ai/*` peer 统一改为 **`>=0.1.7-rc.1 <0.3.0-0`**——放行 0.1.7 线及其后的整个 0.2.x 线（prerelease 与正式版都收），并用 `-0` 后缀挡住 `0.3.0-rc.1`（否则裸 `<0.3.0` 会在 `includePrerelease` 下放它进来，把支持面悄悄扩到未经验证的一行）。
+  用上游**真实门禁函数** `evaluatePluginCompatibility` 验收：改前 `0.1.7-rc.1/rc.2/0.2.0-rc.1` 通过而 `0.2.0`/`0.2.1` 被拒（8 个 peer 全不满足）；改后 `0.1.7-rc.1 … 0.2.1` 全部通过，`0.3.0-rc.1`/`0.3.0` 被拒。
+
+- **回归护栏本身有缺陷：`peer-range.test.mjs` 以裸 semver 语义断言，因此给的是假安全感**。旧测试手写模拟了 prerelease 元组规则并**恒开**，即**恰好漏掉了宿主真实使用的 `includePrerelease` 选项**，于是它断言「`0.2.0-rc.1` 必须被拒绝」——与宿主实际行为**完全相反**，且在该断言下全绿，掩盖了上面那条 P0。
+  修复：护栏改为**调用真实 `semver` 包**（`{ includePrerelease: true }`——宿主同款选项），并显式保留两条反向断言（旧 `<0.2.0` 上界放进 `0.2.0-rc.1`、拒绝 `0.2.0`），任何人重新引入裸 `<0.2.0` 都会立刻变红（已实测：把旧区间写回去，该文件 10 项中 2 项失败）。
+  手写回退实现（`semver` 解析不到时的降级路径）同步修正，并新增与真实 semver 的**交叉验证**——该验证当场抓出回退实现自身的两个真缺陷：`^`/`~` 运算符被正则漏掉而恒判 `false`。现回退只实现声明的 `>= > < <= =` 语法（136 项对照零不一致），遇到 `^` / `~` / x-range **抛错而非静默返回 `false`**——"自信地答错"正是旧护栏的病根。
+  **关于 `semver` 的定位（一处刻意设计）**：`semver` **不是**本插件的声明依赖，它只经由 npm 的 peer 自动安装链进入依赖树（root devDep `dsh-settings` → `dsh-config-editor` → peer `dsh-app-boot` → dep `semver`）。把 CI 判定挂在未声明的传递依赖上，会在 npm 改变 peer 解析的那天连带弄坏构建，而本仓的既有约定（`dependency-integrity.test.mjs`）是测试必须自洽。因此 `semver` 只作**可选的高保真交叉验证**：在场时用它校验回退实现，缺席时打印一行 `# note:` 跳过，断言本身仍由回退实现承担——而回退实现的可信度来自它自己的语义钉子（`HOST's includePrerelease semantics` 一条，直接钉住两条反向判定，不依赖 `semver`）。两条路径都已实测：有 `semver` 时 10/10 通过；隐藏 `node_modules/semver` 后同样 10/10 通过且打印跳过说明；在**无 semver** 状态下把旧区间写回，仍有 2 项失败。
+
+- **lockfile 与 `package.json` 漂移**：`package-lock.json` 根条目仍停在 `version: 2.0.3`（`package.json` 已 2.0.7），`@deepseek-ai/schemastery` 下限也仍是旧的 `>=3.18.4`（`package.json` 已放宽为 `>=3.18.1`）。已同步根条目的 version / dependencies / devDependencies / peerDependencies / engines，并加校验确认逐字段一致。
+
+### Changed
+
+- **文档补齐宿主版本契约**：根 `README`（中/英）、`plugin/README`（中/英）新增「宿主版本要求」一节，用表格说明三种上界写法在 `0.2.0-rc.1` / `0.2.0` 上的实际判定，并写明写错时宿主是「跳过整个 bundle」而非降级。`DEVELOPMENT.md` 新增「宿主版本契约（改 `peerDependencies` 前必读）」，含「想表达仅 0.1.7 线时应写 `<0.2.0-0` 而非 `<0.2.0`」这一纠正，并把裸 `<0.2.0` 列入「不要做的事」。
+
+### Added
+
+- **`plugin/test/settings-write-gate.test.mjs`：用真实宿主写入门做的端到端保存回归（8 项）**。此前**所有**设置类测试都驱动宿主控制器的**替身**——这正是 2.0.4–2.0.7 那串保存故障能藏住的原因：插件自己的卡片、自己的 scope、自己对写契约的理解三者相互一致，而真实的 `@deepseek-ai/dsh-settings` 门禁并不一致。新测试直接 **import 真实的 `SettingsForms`**，把插件真实的 `Config` 灌进去，覆盖历史上每一处真实故障：
+  ① **2.0.4 回归**——命名空间仍出现在真实 `describe()` 目录里（`volatileForm()` 返回 `undefined` 时 `describe()` 会 `return []` 丢弃该条目，正是「宿主不为本插件提供设置存储」那句报错的成因）；
+  ② **2.0.5 回归**——六个卡片字段在真实描述符里**全部存在且可见**（`projectForm()` 丢弃解析为 `undefined` 的字段，被丢的字段卡片读不回、验不了，即 `notApplied:ready:writable=true`）；
+  ③ 真实门禁**接受卡片的单次原子六字段保存**（含曾让每次保存都失败的 `reasoningEffort`）；
+  ④ 保存值经真实 `describe()` **回读一致**；⑤ `unset` 数组下标**真的删除元素**（「删掉的路由又回来」的宿主语义面）；⑥ 旧 revision 被拒且错误类型/机器码为 `SettingsConflictError` / `SETTINGS_CONFLICT`（2.0.5 的「重试一次」正是按这两个标识判定，换个类型就不会重试）；⑦ 携带新 revision 的重试**落盘成功**。
+  夹具只替身 Service 解析的协作者（`configEditor` / `profileContext` / loader await），并**严格保留宿主的两段式模型**：`entry.options.config` 存**原始**值、`fiber.config` 存**已解析**值（volatile 字段是 `{ get() }` 引用）——把两者合并会把 `{ get() }` 交给期待纯数据的门禁，被 `cloneJsonShaped` 以「contains a function」拒绝（该失败在本轮实测中确实发生过，已修）。
+  有效性已用**变异验证**：抹掉 `volatileField()` 的标记后 8 项中 7 项失败；抹掉 `provider` 的 `.default("")` 后 ② 失败。`dsh-settings` 的 `src/` 在 `dsh-v0.1.7-rc.2` 与 `dsh-v0.2.0-rc.1` 之间**逐字节相同**，故该门禁在两个宿主上行为一致。
+
+### Docs
+
+- **`docs/client-inspect-hang-rootcause.md` 更新影响版本**：补记该文档的结论已对 `0.2.0-rc.1` 复核——`resolveClientQuery()` 的 `if (!resolution.ok) return { accepted: false }`（丢弃页面拒绝）与 `dsh-tool-cordis` 缺少 `timeoutMs` **两处缺陷均未修复**，故「避免 `platform: "client"`」的 workaround 继续有效；文档状态由「0.1.7-rc.2 上定位」改为「截至 0.2.0-rc.1 仍未修复」。
+
+- **修正失效的文档引用与陈旧用例数**：`settings-install.test.mjs` 曾指向仓库中并不存在的 `docs/dsh-0.1.5-rc2-to-0.1.7-rc1-research.md`，已改为描述真实证据（`dsh-settings` 的 `describe()`）；`RELEASING.md` / `DEVELOPMENT.md` 里写死的用例数（92）早已过期，改为「看 `fail 0` 且 `pass` == `tests`」——该数字已漂移四次（92 → 112 → 116 → 120 → 128），写死必然再次过期。
+
 ## 2.0.7 (2026-09-26)
 
 ### Fixed
@@ -161,6 +197,12 @@
 
 ### Fixed
 
+- **会话整体拒绝加载（P0）：对话流注入行仍用 v3 已废除的消息来源包装 `{ kind: "plugin", plugin: … }`**。会话格式 v4 要求每条落盘消息的 `source.kind` 是**生产者自有**标识（`user` / `tool` / `agent-message` / 插件用 `plugin:<包名>`）；旧的裸 `"plugin"` 包装已在 v4 中废除。厂商迁移器**只在读取** v3 会话时改写（`rewritePluginSource`），**活插件运行时直写**旧形状会绕过迁移、直接撞上 `assertV4MessageSources` 的硬校验并抛
+  `format v4 message requires a producer-owned source kind`。
+  本插件每次注入模型通知行都带 source，因此**每一轮都触发一次**——真实会话 `session-dbff9280`（cwd `dsh-subagent-default-model`，2026-09-25 16:24）的 `titleInput` 里该报错重复了 **5 次**，整轮运行失败。
+  更严重的是失败范围：`assertV4MessageSources` 在**会话被收养（adopt）时扫描全部历史消息槽**，因此**单条坏 source 会让整份会话不可加载**（该会话已无 `session.v4.jsonl.zstd`，仅存一份 projcache 存档，损失不可逆）。
+  已把 `lib/client.js` 两处发射点改为自有的 `source: { kind: "plugin:dsh-subagent-default-model", … }`（`form` / `summary` 等附加字段不受影响）。**注意与 `98bf2a7` 的节点 kind 区分**：`source.kind` 是消息来源标识，节点 kind 是渲染分类，二者不可混改。
+  回归护栏见 `plugin/test/client-trajectory.test.mjs` 的 `assertProducerOwnedSource`（逐字模拟 `assertV4MessageSources`：拒绝 `{kind:"plugin",plugin:"x"}` / `{kind:""}` / `{}` / `undefined` / `[]`，放行 `{kind:"plugin:dsh-subagent-default-model"}`）。
 - **宿主整体装载失败（P0）：依赖树指向已被删除的 `/Applications/DSH Desktop.app`**。`plugin/node_modules/@deepseek-ai/` 下的 `schemastery` / `cordis` / `dsh-settings` 三个条目是**指向旧应用包的符号链接**；应用换成 `DSH NEXT.app` 后这些链接全部悬空，`lib/index.js` 第一行的 `import z from "@deepseek-ai/schemastery"` 直接 `ERR_MODULE_NOT_FOUND`。宿主表现为 `dsh-subagent-default-model (dsh-subagent-default-model): failed to import`，插件**一行都没跑**——而 `npm test` 仍全绿。已删除悬空链接并以 `npm install` 重建为真实目录。判据：`find node_modules -maxdepth 3 -type l ! -exec test -e {} \; -print` 必须为空。
 - **devDependency 精确锁定致 `npm install` ERESOLVE**：`@deepseek-ai/dsh-settings` 写死 `0.1.7-rc.1`，而它自身 peer 依赖 `@deepseek-ai/dsh-brand@0.1.7-rc.1`，该包只发布了 `0.1.7-rc.2`，于是干净安装直接失败。这正是本仓 CHANGELOG **1.2.2 已经记过的那条教训**（「此处必须用范围而非精确锁定」）——被 0.1.7 适配时的版本推进重新踩了一次。已改为 `^0.1.7-rc.1`。
 - **旧 `settings.yaml` 配置不会随 0.1.7 迁移过来**：0.1.6 及更早，本插件把配置注册为 `~/.dsh/settings.yaml` 的 `subagent-default-model` 段。0.1.7 起该文件在启动时被**一次性导入并改名**为 `settings.yaml.imported`（改名先于首次写入，所以部分导入永不重试），导入按段名**直接当条目 id** 使用，而本插件的条目 id 是 `dsh-subagent-default-model`——于是该段导入失败，宿主日志留 `section subagent-default-model … was not imported into entry subagent-default-model`，`profile/cordis.patch.yml` 里始终没有本插件的 `config:`。**本机实测命中**：旧值仍在 `.imported` 文件中，需手工搬进 profile patch。README / DEVELOPMENT.md 已改为描述 0.1.7 的真实存储位置并写明该陷阱（原文档仍在教用户编辑 `~/.dsh/settings.yaml`）。

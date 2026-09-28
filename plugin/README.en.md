@@ -80,6 +80,28 @@ Notes:
 - Local dev uses a `link:` install: `dsh plugin --profile desktop add /Users/dmh2002/DshProject/dsh-subagent-default-model/plugin` — `node_modules` holds a source symlink, so **restart DSH Desktop** after changing code.
 - Production / other machines use the npm registry version (see Install above).
 
+## Host version requirement
+
+All eight `@deepseek-ai/*` peers are declared as **`>=0.1.7-rc.1 <0.3.0-0`**: the 0.1.7 line and the **entire 0.2.x line** (prereleases and stable releases alike) are supported; 0.3.0 and later are not declared.
+
+To see why the range has this shape, look at how DSH **validates** it. For every `@deepseek-ai/dsh` / `dsh-*` peer, `@deepseek-ai/dsh-app-boot` runs:
+
+```js
+semver.satisfies(runtimeVersion, range, { includePrerelease: true })
+```
+
+`includePrerelease: true` **disables semver's prerelease-tuple rule** — a prerelease is no longer rejected for lacking a same-tuple carrier; it is compared by the ordinary ordering. Both consequences are counter-intuitive:
+
+| Ceiling | `0.2.0-rc.1` | `0.2.0` (stable) | Note |
+| --- | --- | --- | --- |
+| `<0.2.0` | ✅ admitted | ❌ **rejected** | The worst split: prereleases install, and the stable release strips the bundle |
+| `<0.3.0` | ✅ | ✅ | But also admits `0.3.0-rc.1`, beyond the verified range |
+| **`<0.3.0-0`** | ✅ | ✅ | Recommended: all of 0.2.x, and `0.3.0-rc.1` is refused |
+
+A wrong ceiling does not degrade gracefully: `loadProfileDirectory()` throws for an incompatible bundle, which lands in `skippedBundles` and prints `skipping profile bundle "dsh-subagent-default-model"` to stderr at startup — the plugin and its settings card both disappear.
+
+`plugin/test/peer-range.test.mjs` is the regression guard for this contract: it calls the host's own `semver.satisfies(..., { includePrerelease: true })` and asserts each row of the table above.
+
 ## Configuration
 
 Use the Web settings card (**Settings → Plugins → dsh-subagent-default-model**).

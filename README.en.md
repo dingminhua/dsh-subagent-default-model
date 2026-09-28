@@ -79,6 +79,17 @@ npm install dsh-subagent-default-model
 
 After installing, updating, or removing the bundle, restart the corresponding DSH process; only changing settings does not require a restart.
 
+### Host version requirement
+
+All eight `@deepseek-ai/*` peers are declared as **`>=0.1.7-rc.1 <0.3.0-0`**: the 0.1.7 line and the **entire 0.2.x line** (prereleases and stable releases alike) are supported; 0.3.0 and later are not declared.
+
+> ⚠️ The ceiling must carry the `-0` suffix (`<0.3.0-0`, not `<0.3.0`). DSH validates peers with
+> `semver.satisfies(runtime, range, { includePrerelease: true })`, and that option **disables the
+> prerelease-tuple rule**, so `<0.3.0` would admit `0.3.0-rc.1` and silently widen support to an
+> unverified line. For the same reason, **a `<0.2.0` ceiling is dangerous**: it admits `0.2.0-rc.1`
+> while **rejecting stable `0.2.0`** — the day the stable release ships, the whole bundle is skipped
+> by the host (`skipping profile bundle`) and both the plugin and its settings card disappear.
+
 ## Platform support
 
 **Windows, macOS, and Linux are all supported**, with no platform-specific configuration or extra steps.
