@@ -404,6 +404,33 @@ function isRouteContextMessage(message) {
 }
 
 /**
+ * Read the route an agent's loop will actually request, at PRE-STEP time.
+ *
+ * This is the loop's own resolved route (`agent.options.provider` / `.model`) —
+ * the exact pair `prepareRequest()` copies into the request it is about to
+ * build (`dsh-agent-loop`: `const route = { provider: this.options.provider,
+ * model: this.options.model }`).
+ *
+ * WHY NOT `agent/request` ALONE: the loop calls `preStep()` BEFORE
+ * `buildRequest()` on every iteration, so on the FIRST step no `agent/request`
+ * has fired yet and a request-driven cache is empty exactly when the first
+ * (often only) step needs it. That ordering is why an earlier build of this
+ * feature silently injected nothing for single-step subagents. Reading
+ * `agent.options` here is earlier and just as authoritative.
+ *
+ * @param {object} agent - the loop agent for this step.
+ * @returns {{provider: string, model: string}|undefined} the route, when known.
+ */
+function routeOfAgent(agent) {
+	const options = agent?.options;
+	if (options === void 0 || options === null) return void 0;
+	const provider = typeof options.provider === "string" ? options.provider : "";
+	const model = typeof options.model === "string" ? options.model : "";
+	if (provider === "" && model === "") return void 0;
+	return { provider, model };
+}
+
+/**
  * Install the subagent route-context injector.
  *
  * WHY THIS EXISTS: the route is chosen by the PARENT (this plugin's dispatch
@@ -413,13 +440,13 @@ function isRouteContextMessage(message) {
  * conversation. This injects one line stating the route the child is ACTUALLY
  * using.
  *
- * SOURCE OF TRUTH: the resolved seed returned by the `agent/request` waterfall
- * is authoritative — it is the final provider/model after this plugin's own
- * failover rewrite and after every other plugin's waterfall. We therefore
- * observe the settled value there (via `next()`), cache it per agent, and
- * inject it on the FOLLOWING `agent/pre-step`, which is the seam that can still
- * modify the message list for the step about to run (the same seam the host's
- * own `dsh-agent-instructions` uses).
+ * SOURCE OF TRUTH: two sources, in priority order.
+ *   1. `agent.options` at pre-step time (see `routeOfAgent`) — always available,
+ *      including the very first step.
+ *   2. The SETTLED seed from the `agent/request` waterfall, once a request has
+ *      been built. It reflects every listener's rewrite (including this
+ *      plugin's own failover swap), so after a mid-run switch the injected line
+ *      follows the new route rather than the one the agent started on.
  *
  * Injected on every step whose route differs from the line already present, so
  * a failover switch or a route change is reflected immediately; an unchanged
@@ -429,12 +456,12 @@ function isRouteContextMessage(message) {
  * agent's context is never touched.
  */
 function installRouteContextInjector(ctx, state) {
-	/** Last resolved route per agent id, captured from the request waterfall. */
+	/** Settled route per agent id, captured after `agent/request` resolves. */
 	const resolvedRoute = new Map();
 
-	// Capture the AUTHORITATIVE resolved route. This runs AFTER `next()` so it
-	// observes the settled seed — including this plugin's own failover swap,
-	// whichever listener ran last.
+	// Capture the SETTLED route once a request has actually been built. Runs
+	// AFTER `next()` so it observes the final seed — including this plugin's own
+	// failover swap and any other plugin's rewrite.
 	const disposeRequest = ctx.on("agent/request", async (payload, next) => {
 		const seed = await next();
 		const { agent } = payload;
@@ -447,15 +474,17 @@ function installRouteContextInjector(ctx, state) {
 		return seed;
 	});
 
-	// Inject on the following pre-step, where the message list for the step
-	// about to run is still mutable.
+	// Inject on the pre-step, where the message list for the step about to run
+	// is still mutable and the agent's own route is already known.
 	const disposePreStep = ctx.on("agent/pre-step", async ({ agent, messages }, next) => {
 		const decision = await next();
 		if (decision === void 0 || decision === null || decision.kind === "reject") return decision;
 		if (state.getSection()?.injectRouteContext === false) return decision;
 		if (!isSubagentAgent(agent)) return decision;
 
-		const route = resolvedRoute.get(agent.id);
+		// Prefer the settled request route (post-failover); fall back to the
+		// agent's own live route, which is all the first step has.
+		const route = resolvedRoute.get(agent.id) ?? routeOfAgent(agent);
 		if (route === void 0) return decision;
 		// Defensive: only the loop's live Agent exposes an inbox. A test double
 		// or a future agent shape without one must not break the step.

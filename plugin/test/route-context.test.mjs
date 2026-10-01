@@ -328,11 +328,35 @@ test("the injector does not disturb the loop's own assembled messages", async ()
 	await disposeHarness(harness);
 });
 
-test("no route resolved yet injects nothing (no empty/placeholder line)", async () => {
+test("the FIRST step injects, with no prior agent/request (regression)", async () => {
+	// The loop calls preStep() BEFORE buildRequest() on every iteration, so on
+	// the first step no `agent/request` has fired. An implementation that only
+	// reads a request-driven cache injects NOTHING for a single-step subagent —
+	// which is exactly how this feature silently no-opped in a real host. The
+	// injector must therefore read the agent's own live route too.
+	const harness = await createHarness(ENABLED);
+	const agent = makeAgent("sub-first-step");
+	agent.options = { provider: "workbuddy", model: "deepseek-v4.1-flash" };
+
+	// NO dispatchRequest call at all.
+	await dispatchPreStep(harness.root, agent);
+
+	const injected = injectedRouteMessages(agent);
+	assert.equal(injected.length, 1, "the very first step must already carry the route line");
+	assert.ok(
+		injected[0].content[0].text.includes("workbuddy/deepseek-v4.1-flash"),
+		"the first-step line must state the agent's own route"
+	);
+	await disposeHarness(harness);
+});
+
+test("no route at all injects nothing (no empty/placeholder line)", async () => {
 	const harness = await createHarness(ENABLED);
 	const agent = makeAgent("sub-9");
+	// An agent whose route is genuinely unknown: nothing to report, so the
+	// injector must stay silent rather than write a placeholder.
+	agent.options = { provider: "", model: "" };
 
-	// pre-step before any request has resolved a route
 	await dispatchPreStep(harness.root, agent);
 
 	assert.equal(injectedRouteMessages(agent).length, 0, "must not inject a placeholder route");
