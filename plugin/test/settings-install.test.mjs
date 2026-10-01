@@ -108,7 +108,7 @@ test("every declared Config field carries a schema default", () => {
 	assert.equal(dict.reasoningEffort.meta.default, "", "reasoningEffort defaults to the empty (unset) value");
 });
 
-test("the resolved section exposes all six fields (none resolved away)", () => {
+test("the resolved section exposes all seven fields (none resolved away)", () => {
 	// Direct guard on the failure above: resolve the schema the way an empty
 	// stored section does, unwrap the volatile references, and require every key
 	// to be PRESENT. This is exactly what `projectForm` filters on, so a field
@@ -124,7 +124,7 @@ test("the resolved section exposes all six fields (none resolved away)", () => {
 		.sort();
 	assert.deepEqual(
 		present,
-		["failoverEnabled", "model", "models", "provider", "reasoningEffort", "strategy"],
+		["failoverEnabled", "injectRouteContext", "model", "models", "provider", "reasoningEffort", "strategy"],
 		"a field resolving to undefined is dropped from the settings form altogether"
 	);
 });

@@ -109,7 +109,7 @@ function harness() {
 }
 
 /** Every field the settings card owns and writes on one Save. */
-const CARD_FIELDS = ["provider", "model", "models", "strategy", "failoverEnabled", "reasoningEffort"];
+const CARD_FIELDS = ["provider", "model", "models", "strategy", "failoverEnabled", "injectRouteContext", "reasoningEffort"];
 
 test("the real host settings gate resolves for end-to-end assertions", () => {
 	assert.notEqual(
@@ -150,7 +150,7 @@ test("REGRESSION (2.0.5): every card field is PRESENT and VISIBLE in the real de
 	assert.equal(descriptor.value.reasoningEffort, "", "reasoningEffort defaults to the empty (unset) value");
 });
 
-test("the real gate ACCEPTS the card's one atomic six-field save", async () => {
+test("the real gate ACCEPTS the card's one atomic seven-field save", async () => {
 	// 2.0.5 changed the save from six independent `set()` calls (six Host
 	// transactions, six revision checks) to ONE `mutate(ops)`. This asserts that
 	// the real `SettingsForms.mutate` accepts precisely the op set the card
@@ -164,6 +164,7 @@ test("the real gate ACCEPTS the card's one atomic six-field save", async () => {
 		{ op: "set", path: ["models"], value: [{ provider: "glm", model: "deepseek-v4.1-flash", reasoningEffort: "max" }] },
 		{ op: "set", path: ["strategy"], value: "round-robin" },
 		{ op: "set", path: ["failoverEnabled"], value: true },
+		{ op: "set", path: ["injectRouteContext"], value: true },
 		{ op: "set", path: ["reasoningEffort"], value: "max" }
 	];
 
@@ -175,6 +176,7 @@ test("the real gate ACCEPTS the card's one atomic six-field save", async () => {
 	const landed = stored();
 	assert.equal(landed.provider, "glm", "provider landed in the profile patch");
 	assert.equal(landed.reasoningEffort, "max", "reasoningEffort landed (the key that once failed every save)");
+	assert.equal(landed.injectRouteContext, true, "injectRouteContext landed (the prompt-injection toggle)");
 	assert.deepEqual(
 		landed.models,
 		[{ provider: "glm", model: "deepseek-v4.1-flash", reasoningEffort: "max" }],

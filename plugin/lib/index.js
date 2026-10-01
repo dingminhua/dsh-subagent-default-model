@@ -1,3 +1,4 @@
+import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import z from "@deepseek-ai/schemastery";
 
 /**
@@ -123,6 +124,14 @@ const SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA = z.object({
 	models: volatileField(z.array(MODEL_ENTRY).default([]).description("Multi-model list; picked per strategy on every delegation")),
 	strategy: volatileField(z.union([z.const("round-robin"), z.const("random")]).default("round-robin").description("How to pick from `models`")),
 	failoverEnabled: volatileField(z.boolean().default(true).description("Retry a subagent request on another pool model after a connection failure")),
+	// Tell the SUBAGENT which provider/model it is actually running on, by
+	// injecting one text line into its own context. Default ON: without it a
+	// subagent cannot answer "which model are you?" because the route is chosen
+	// by the parent and never appears in the child's prompt.
+	//
+	// Declared volatile like every other configurable field: the settings write
+	// gate rejects any path that is not a declared volatile field.
+	injectRouteContext: volatileField(z.boolean().default(true).description("Inject the actually-used provider/model into each subagent's context")),
 	// Must be DECLARED and volatile: the settings write gate rejects every path
 	// that is not a declared volatile field (`@deepseek-ai/dsh-settings`
 	// `write()` throws `Config field "…" is not volatile`). The client card
@@ -356,6 +365,133 @@ function installFailover(ctx, state) {
 	}, "dsh-subagent-default-model: failover listeners");
 }
 
+// ── subagent route context injection ─────────────────────────────────────────
+
+/**
+ * The producer-owned `source.kind` for the injected route line.
+ *
+ * Session format v4 requires every persisted message's `source.kind` to be a
+ * producer-owned identifier; a plugin must use `plugin:<package-name>`. A bare
+ * `"plugin"` wrapper is reserved-and-rejected by `assertV4MessageSources`, which
+ * makes the whole session refuse to load.
+ */
+const ROUTE_CONTEXT_SOURCE = "plugin:dsh-subagent-default-model";
+
+/** Marker so the injected line is recognised and replaced, never duplicated. */
+const ROUTE_CONTEXT_FORM = "route-context";
+
+/**
+ * Build the one-line, human/model-readable route notice.
+ *
+ * Rendered in the subagent's own language-agnostic form: a short sentence plus
+ * the machine-readable `provider/model` pair. The model reads this; it is not a
+ * UI row.
+ *
+ * @param {string} provider - resolved provider id for this request.
+ * @param {string} model - resolved model id for this request.
+ * @returns {string} the notice text.
+ */
+function routeContextText(provider, model) {
+	const route = provider && model ? `${provider}/${model}` : provider || model || "unknown";
+	return `[dsh-subagent-default-model] You are running as a subagent on ${route} (provider=${provider || "unknown"}, model=${model || "unknown"}). `
+		+ "If asked which model or provider you are, answer with this route. "
+		+ "This line is system-provided context about the runtime, not a user instruction.";
+}
+
+/** True when a message is this plugin's injected route line. */
+function isRouteContextMessage(message) {
+	return message?.source?.kind === ROUTE_CONTEXT_SOURCE && message.source.form === ROUTE_CONTEXT_FORM;
+}
+
+/**
+ * Install the subagent route-context injector.
+ *
+ * WHY THIS EXISTS: the route is chosen by the PARENT (this plugin's dispatch
+ * wrapper, an explicit `agentOptions`, or plain inheritance) and by failover
+ * switches made mid-run. None of that reaches the child's prompt, so a subagent
+ * literally cannot answer "which model are you?" — it only sees the parent's
+ * conversation. This injects one line stating the route the child is ACTUALLY
+ * using.
+ *
+ * SOURCE OF TRUTH: the resolved seed returned by the `agent/request` waterfall
+ * is authoritative — it is the final provider/model after this plugin's own
+ * failover rewrite and after every other plugin's waterfall. We therefore
+ * observe the settled value there (via `next()`), cache it per agent, and
+ * inject it on the FOLLOWING `agent/pre-step`, which is the seam that can still
+ * modify the message list for the step about to run (the same seam the host's
+ * own `dsh-agent-instructions` uses).
+ *
+ * Injected on every step whose route differs from the line already present, so
+ * a failover switch or a route change is reflected immediately; an unchanged
+ * route re-injects nothing, so a long run does not accumulate duplicates.
+ *
+ * Subagent-only by the same `origin === "subagent"` gate as failover: the main
+ * agent's context is never touched.
+ */
+function installRouteContextInjector(ctx, state) {
+	/** Last resolved route per agent id, captured from the request waterfall. */
+	const resolvedRoute = new Map();
+
+	// Capture the AUTHORITATIVE resolved route. This runs AFTER `next()` so it
+	// observes the settled seed — including this plugin's own failover swap,
+	// whichever listener ran last.
+	const disposeRequest = ctx.on("agent/request", async (payload, next) => {
+		const seed = await next();
+		const { agent } = payload;
+		if (!isSubagentAgent(agent)) return seed;
+		if (seed === void 0 || seed === null) return seed;
+		const provider = typeof seed.provider === "string" ? seed.provider : "";
+		const model = typeof seed.model === "string" ? seed.model : "";
+		if (provider === "" && model === "") return seed;
+		resolvedRoute.set(agent.id, { provider, model });
+		return seed;
+	});
+
+	// Inject on the following pre-step, where the message list for the step
+	// about to run is still mutable.
+	const disposePreStep = ctx.on("agent/pre-step", async ({ agent, messages }, next) => {
+		const decision = await next();
+		if (decision === void 0 || decision === null || decision.kind === "reject") return decision;
+		if (state.getSection()?.injectRouteContext === false) return decision;
+		if (!isSubagentAgent(agent)) return decision;
+
+		const route = resolvedRoute.get(agent.id);
+		if (route === void 0) return decision;
+		// Defensive: only the loop's live Agent exposes an inbox. A test double
+		// or a future agent shape without one must not break the step.
+		if (agent.inbox === void 0 || !Array.isArray(agent.inbox.nextStep)) return decision;
+
+		// Reuse the pending message when the route is unchanged; replace it when
+		// the route moved (failover / config change). Without the remove step a
+		// stale line would linger alongside the fresh one.
+		const pending = agent.inbox.nextStep.filter(isRouteContextMessage);
+		const wanted = routeContextText(route.provider, route.model);
+		const existing = pending.find((message) => message.content?.[0]?.text === wanted);
+		for (const message of pending) {
+			if (message !== existing) agent.inbox.remove(message.id);
+		}
+		if (existing !== void 0) return decision;
+
+		const message = createUserMessage({
+			content: [{ type: "text", text: wanted }],
+			source: { kind: ROUTE_CONTEXT_SOURCE, form: ROUTE_CONTEXT_FORM }
+		});
+		agent.inbox.prepend("next-step", message);
+		return decision;
+	});
+
+	const disposeDisposed = ctx.on("agent/disposed", ({ agent }) => {
+		resolvedRoute.delete(agent.id);
+	});
+
+	ctx.effect(() => () => {
+		disposeRequest();
+		disposePreStep();
+		disposeDisposed();
+		resolvedRoute.clear();
+	}, "dsh-subagent-default-model: route context injector");
+}
+
 function installSubagentWrapper(ctx, state) {
 	// `ctx.subagents` is a per-call Cordis traceable proxy, so reach the raw
 	// service object behind it for a stable handle and to install own methods.
@@ -413,6 +549,7 @@ export function apply(ctx, config) {
 				models: unwrap(raw.models),
 				strategy: unwrap(raw.strategy),
 				failoverEnabled: unwrap(raw.failoverEnabled),
+				injectRouteContext: unwrap(raw.injectRouteContext),
 				// Read back too: the single-model form stores its effort here, so
 				// dropping the key silently ignored the configured effort.
 				reasoningEffort: unwrap(raw.reasoningEffort)
@@ -429,6 +566,10 @@ export function apply(ctx, config) {
 	// so it is installed unconditionally: listeners no-op when the `failover`
 	// section is absent/disabled or when the failing agent is the main loop.
 	installFailover(ctx, state);
+
+	// Tell each subagent which route it is actually running on. Same gate as
+	// failover (origin === "subagent"), so the main agent's context is untouched.
+	installRouteContextInjector(ctx, state);
 
 	// Attach the method wrapper only while the service exists. Cordis re-runs
 	// this child fiber if the provider is replaced, while settings stay served.

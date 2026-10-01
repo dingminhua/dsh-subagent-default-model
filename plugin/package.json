@@ -1,7 +1,7 @@
 {
   "name": "dsh-subagent-default-model",
-  "version": "2.0.8",
-  "description": "为 DeepSeek Harness 子代理配置默认模型路由：支持单模型、轮询、随机，以及按路由设置推理强度（reasoning effort）。",
+  "version": "2.1.0",
+  "description": "为 DeepSeek Harness 子代理配置默认模型：多模型顺序/随机分配、跨供应商连接失败故障转移，并在轨迹/对话视图显示当前供应商与模型，同时以一行真实提示词把当前路由注入子代理上下文。",
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -9,7 +9,11 @@
     "subagent",
     "agent",
     "model-routing",
-    "round-robin"
+    "round-robin",
+    "failover",
+    "provider-failover",
+    "route-visibility",
+    "prompt-injection"
   ],
   "author": "dingminhua",
   "license": "MIT",
@@ -70,6 +74,7 @@
   "peerDependencies": {
     "@deepseek-ai/dsh-settings": ">=0.1.7-rc.1 <0.3.0-0",
     "@deepseek-ai/dsh-subagent": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-llm": ">=0.1.7-rc.1 <0.3.0-0",
     "@deepseek-ai/dsh-client-connection": ">=0.1.7-rc.1 <0.3.0-0",
     "@deepseek-ai/dsh-client-locale": ">=0.1.7-rc.1 <0.3.0-0",
     "@deepseek-ai/dsh-client-ui-slots": ">=0.1.7-rc.1 <0.3.0-0",

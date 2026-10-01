@@ -27,9 +27,19 @@ A standalone [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-ha
 
 ## Features
 
+### Three core capabilities
+
+1. **Multi-model distribution (`round-robin` sequential / `random`)** — with 2+ routes configured, decide how parallel subagents are spread: round-robin takes routes in list order and is predictable (10 subagents over 2 routes reliably yields 5/5); random has no fixed pattern. Distribution happens at **delegation time**; a single subagent never switches models mid-run because of the strategy.
+2. **Cross-provider failover** — when a subagent hits a **connection-class failure** (rate limit / quota / server / timeout / transport / empty response), it retries on another route from this plugin's `models` list. Candidates come from the whole list, so it **can fail over to a different vendor's model** rather than only another model ID from the same vendor. Non-connection failures such as auth errors do not trigger it, so a misconfiguration is never masked. Exhaustion passes the real error through, and the main agent loop is never affected.
+3. **Route visibility (for you *and* the subagent)** — two independent channels:
+   - **UI rows (for you)**: the trajectory view and conversation view show "Current provider/model: `provider/model`"; a failover switch shows "Switched to", and a resumed session shows "Resumed on".
+   - **Prompt injection (for the subagent)**: one real prompt line is injected into the subagent's **own context** stating the live provider and model, so it can truthfully answer which model it is running on; when failover changes the route, that line follows on the next step. On by default, and can be switched off.
+
+   > Neither replaces the other: UI rows never enter the model's context, and the prompt injection never appears in your UI.
+
+### Other features
+
 - **Single-model default route**: all subagents without an explicit model use one configured route.
-- **Multi-model scheduling**: distribute across provider/model routes with `round-robin` or `random`.
-- **Connection-failure failover**: when a subagent request hits rate-limit/quota/server errors, it automatically switches to another model in the `models` list by queue or at random and retries; the main agent loop is never affected.
 - **Per-route reasoning effort**: each model entry can set its own `reasoningEffort`.
 - **Full dispatch coverage**: wraps both `start()` and `startContinuable()`, covering `subagent`, `subagent_fork`, and any other caller of `ctx.subagents`.
 - **Hot settings reload**: the next delegation picks up edited settings immediately.
@@ -62,6 +72,12 @@ Configure one or more model routes, the distribution strategy, and per-route rea
 10 subagents split 5/5 between `deepseek-v4-flash` and `Kimi-k3` with the round-robin strategy.
 
 ![Subagent default model distribution](assets/pic_02.png)
+
+### Route visibility (Capability 3)
+
+The "Current provider/model: `workbuddy/deepseek-v4.1-flash`" row as it appears in the conversation stream — **rendered for you**, and not put into the model's context.
+
+![Current provider/model row in the conversation stream](assets/pic_03.png)
 
 ## Install
 

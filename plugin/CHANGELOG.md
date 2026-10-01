@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.1.0 (2026-10-01)
+
+### Added
+
+- **子代理现在知道自己跑在哪个供应商/模型上（真实提示词注入，功能三通路二）**。此前功能三只有**界面行**——轨迹视图与对话视图会渲染「当前供应商/模型」，但那只是**画给用户看的**，**不进入模型上下文**，因此子代理**无法回答**「你现在用的什么模型」。本版新增一条**真正的提示词注入**：向子代理**自己的上下文**写入一行，内容形如
+  `[dsh-subagent-default-model] You are running as a subagent on workbuddy/deepseek-v4.1-flash (provider=workbuddy, model=deepseek-v4.1-flash). If asked which model or provider you are, answer with this route.`
+  实现要点：
+  - **取值来源是「结算后的真实路由」**：注入内容取自 `agent/request` 瀑布 **`await next()` 之后**返回的 `{provider, model}`，即**包含本插件自身故障转移改写结果在内**的最终值。这一点是可验证的关键差异——用「插件打算切到哪个模型」当来源会在切换后写出与实际不符的一行，回归用例（把来源替换成硬编码路由）当场失败 3 项。
+  - **注入时机是下一步的 `agent/pre-step`**：这是仍能修改「即将执行的那一步」消息列表的接缝（宿主自带的 `dsh-agent-instructions` 用的同一接缝）。`agent/request` 阶段消息已冻结，故采用「请求阶段缓存 → 下一步注入」两步式。
+  - **去重与替换**：路由未变则不重复注入；路由变化（故障转移切换 / 配置变更）则**移除旧行再写新行**，长时间运行不会堆积重复行。
+  - **仅对子代理生效**：与故障转移同一道 `agent.session.header.origin === "subagent"` 门禁，**主代理上下文永不被触碰**。该门禁在 `agent/request` 与 `agent/pre-step` **两条瀑布上都必须存在**，并新增静态护栏用例钉住（变异验证：仅删 pre-step 侧门禁会因缓存未被写入而「静默不注入」，单靠行为用例抓不到，故补静态断言）。
+  - **消息来源合规**：`source.kind` 使用生产者自有标识 `plugin:dsh-subagent-default-model` 并带 `form: "route-context"` 标记。会话格式 v4 通过 `assertV4MessageSources` 硬校验，裸 `{kind:"plugin"}` 包装会导致**整个会话拒绝加载**，故有专项用例断言该形状。
+  - **可关闭**：新增配置项 `injectRouteContext`（boolean，**默认 `true`**），设置卡片新增「把当前模型与供应商写进子代理上下文」勾选项及中英文案。默认开启的理由：不开则子代理仍无法回答自身路由，而这正是本功能的目的。
+  - **新增依赖声明**：注入需要 `createUserMessage`，故新增 peer `@deepseek-ai/dsh-llm`（`>=0.1.7-rc.1 <0.3.0-0`，与其余 8 个 peer 同区间）。已验证宿主侧（profile 目录）与该包一致解析同一实例。
+
+- **`plugin/test/route-context.test.mjs`：注入行为的 12 项回归用例**。以 `dsh-agent-loop` 的真实 `Inbox` 语义驱动（`prepend(target,message)` / `remove(messageId)` / `nextStep` 为 getter），覆盖：注入到达子代理上下文、报告**结算后**的路由（被后续 listener 改写仍以最终值为准）、主代理不被注入（含多步）、路由变化**替换**而非堆积、路由不变不重复、开关关闭即停止注入、缺省即为开启、`source` 形状合规（生产者自有 + form 标记）、不干扰循环自身消息、未解析出路由时不写占位行、销毁后不再注入。
+
+- **真实宿主对象的一次性集成验证**：以 `@deepseek-ai/cordis` 真实 `Context` + 真实 `createUserMessage` + 真实两条瀑布跑通，打印出子代理实际收到的那一行与 `source`，确认 `role: "user"`、`source.kind` 与 `form` 均符合预期。（该验证同时纠正了一处测试夹具错误：`inbox.nextStep` 在宿主中是 **getter**，早期夹具用普通属性写，导致夹具与真实契约不符。）
+
+### Changed
+
+- **文档口径修正（中/英、README 四处 + 市场描述）**：功能三由「界面行，**不**注入提示词」改为**两条独立通路的准确描述**——通路一（界面行，给用户）与通路二（提示词注入，给子代理），并明确**两者互不替代**。此前的措辞会让读者（以及模型自己）误以为子代理知道自己的模型，与实际行为不符。
+- **写明与宿主 `{{model}}` 变量的关系**：DSH 宿主 `system-prompt` 行的 persona 已能把 `{{model}}` 解析进提示词（`You are a coding agent powered by the {{model}} model.`，变量由 `dsh-agent-loop` 按 `context.agent.options` 注册），但**只覆盖 `model`、不含 `provider`**，且取派发时 `options` 的值。本插件注入**额外给出 provider**，并以请求级结算值为准（含故障转移），故两者互补而非重复。该结论已逐行核对宿主源码后写入文档。
+- **`settings-install` / `settings-write-gate` 两处契约同步扩充**：字段数由六增至七（`injectRouteContext`），原子保存用例与描述符可见性断言同步更新——这两处是**刻意的契约钉子**，新增字段必须显式改它们，避免字段被静默丢弃。
+
+### Fixed
+
+- **CHANGELOG 2.0.8 条目中的锁文件同步说明**，本版同步 `package-lock.json` 根条目版本至 2.1.0 并纳入新增 peer `@deepseek-ai/dsh-llm`。
+
 ## 2.0.8 (2026-09-29)
 
 ### Fixed

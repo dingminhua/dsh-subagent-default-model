@@ -2,5 +2,5 @@ url: https://github.com/dingminhua/dsh-subagent-default-model/tree/main/plugin
 name: dingminhua/dsh-subagent-default-model#plugin
 category: model
 description:
-  en: Configurable default model for subagent delegations via settings.yaml, with single-model and multi-model round-robin or random strategies.
-  zh: 通过 settings.yaml 为子代理派发配置默认模型，支持单模型与多模型轮换/随机分配策略。
+  en: 'Default model for subagent delegations, with three capabilities: multi-model distribution by sequential round-robin or random strategy; cross-provider failover that retries on another model — including a different vendor''s — when a subagent hits a connection-class failure; and route visibility that shows in the trajectory and conversation views which provider/model was actually used, updating on failover, plus a real one-line prompt injection telling each subagent which provider and model it runs on so it can answer for itself.'
+  zh: '为子代理派发选择默认模型，提供三项能力：多模型分配（顺序轮换或随机策略）；跨供应商故障转移（子代理遇到连接类失败时改换 models 列表里的另一个模型重试，可以是另一家供应商）；当前路由可见（轨迹与对话视图显示本次实际使用的供应商与模型，故障转移切换时同步更新），并以一行真实提示词把当前供应商与模型注入子代理自己的上下文，使其能自行回答所用模型。'

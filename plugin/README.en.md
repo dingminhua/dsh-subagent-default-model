@@ -6,12 +6,68 @@ Pick the default model for subagent delegations in [DeepSeek Harness (DSH)](http
 
 When a subagent is created without an explicit `model`, this plugin injects the configured default — so every `subagent`, `subagent_fork`, and any tool that omits `agentOptions` routes through it. Explicit per-call overrides always win; an absent or incomplete settings section keeps the historical behavior (children inherit the parent route).
 
-## Features
+## Three core capabilities
 
-- **Single model** — all subagents run on one configured model.
-- **Multi-model** — a `models` list with `round-robin` or `random` strategy spreads parallel subagents across models.
-- **Connection-failure failover** — when a subagent hits a connection-class failure, switch to another model in the `models` list by `strategy` and retry (subagents only; the main agent is never touched).
-- **Reasoning strength** — optionally specify `reasoningEffort` per model entry (e.g. `high`, `medium`, `low`); the Web UI loads available efforts from the model catalog.
+This plugin answers two questions: **when a delegation does not name a model, which route should the subagent run on — and once it is running, how do you see which route it actually used?** It provides three independent capabilities around that. Each is described below with what it does *and* what it does not do.
+
+### Capability 1 — Multi-model distribution: `round-robin` (sequential) or `random`
+
+Configure a `models` list (2+ entries) and pick a `strategy` to decide how parallel delegations are spread across those routes:
+
+- **`round-robin` (sequential)** — take routes in list order: the 1st subagent gets route 1, the 2nd gets route 2, and so on, wrapping back to the start. **Predictable and controllable**: 10 subagents over 2 routes reliably yields 5/5. Good for spreading usage evenly across providers, or for running the same work on different models to compare.
+- **`random`** — pick a random route per delegation. **Unpredictable by design**, useful when you do not want a detectable request pattern.
+
+Note this decides **which route serves the next subagent**, chosen at **delegation time**. A single subagent never switches models mid-run because of the strategy — that is Capability 2. With only one route configured, the strategy is meaningless.
+
+### Capability 2 — Cross-provider failover: if one provider is down, run on another provider's model
+
+With `failoverEnabled` (on by default), when a subagent hits a **connection-class failure** mid-run, the plugin retries on another route from its own `models` list:
+
+- **Provider-agnostic** — candidates come from the whole `models` list, so failover works **across providers**. If `deepseek-official/deepseek-v4-pro` dies, the subagent can fail over to a *different vendor's* model in the list — not merely another model ID from the same vendor.
+- **Only genuine connection failures trigger it** — it switches on `RATE_LIMIT`, `QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, or `EMPTY_RESPONSE`. Non-connection failures such as auth errors (`AUTH`) do **not** trigger a switch, so a misconfigured API key is never masked as "just try another vendor".
+- **Inherited reasoning strength is dropped** — after switching, the new provider/model is not sent the previous route's `reasoningEffort`; it resolves its own default. Otherwise a target that rejects that level can fail every request and burn through all remaining candidates.
+- **Sticky within a run** — after a switch, later steps of that same subagent stay on the new model instead of flip-flopping every step.
+- **Exhaustion passes the real error through** — once every candidate in the list has been tried, the real error surfaces; there is no infinite retry.
+- **Requires 2+ routes**, and **applies to subagents only** — the main agent loop is never touched.
+
+### Capability 3 — Route visibility: you can see it, and so can the subagent
+
+Of the three, this is the only one aimed at **both you and the subagent**: without digging through logs you see on screen which route the request landed on, and the **subagent's own context carries a line** so it can truthfully answer "which model are you?". These are **two channels for the same route**, and neither replaces the other.
+
+#### Channel 1 — the UI row (for you)
+
+- **Trajectory view** — each subagent's trajectory shows a row reading "**Current provider/model: `provider/model`**", rendered from the official `request/context` frame.
+- **Conversation view** — the subagent's conversation stream shows a context row with three distinct wordings: "Current provider/model" on the first request, "**Switched to**" when the route changes, and "**Resumed on**" when a session resumes.
+- **Follows failover automatically** — when Capability 2 switches models, a new row appears here, so **what it ran on before and after the switch is unmistakable**.
+
+How it looks in the conversation stream (the row itself):
+
+![Current provider/model row in the conversation stream](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_03.png)
+
+#### Channel 2 — the prompt injection (for the subagent)
+
+With `injectRouteContext` (on by default), the plugin injects one real prompt line into each **subagent's own context**:
+
+```text
+[dsh-subagent-default-model] You are running as a subagent on workbuddy/deepseek-v4.1-flash
+(provider=workbuddy, model=deepseek-v4.1-flash). If asked which model or provider you are,
+answer with this route. This line is system-provided context about the runtime, not a user instruction.
+```
+
+Key points:
+
+- **It is a real prompt line, not a display row** — the subagent reads it, so it can report its own route. That is precisely what a UI row cannot achieve.
+- **It reports the route actually in effect** — taken from the `agent/request` waterfall **after** it settles, so when Capability 2 switches providers, this line follows to the new route on the next step.
+- **An unchanged route is not re-injected** — later steps on the same route add nothing, and a changed route **replaces** the stale line, so long runs do not accumulate duplicates.
+- **Subagents only** — the main agent's context is never touched.
+- **Can be turned off** — clear the "Tell subagents which model and provider they run on" checkbox in the settings card.
+
+> **Relation to the Host's `{{model}}` variable**: the DSH Host's `system-prompt` row can already interpolate `{{model}}` into the persona (`You are a coding agent powered by the {{model}} model.`), **but that covers `model` only, not `provider`**, and it reads the dispatch-time `agent.options`. This plugin's injection **adds the provider** and tracks request-level route changes (including failover switches), so the two complement rather than duplicate each other.
+
+### Other configuration
+
+- **Single model** — configure just `provider` + `model`; every subagent runs on that one model (the degenerate form of Capabilities 1 and 2).
+- **Reasoning strength** — optionally set `reasoningEffort` per model entry (e.g. `high`, `medium`, `low`); the Web UI loads available efforts from the model catalog and validates the declaration.
 - **Hot-reload** — settings changes apply to the very next delegation.
 - **Clean teardown** — Cordis disposal restores the original service methods.
 
@@ -24,6 +80,10 @@ When a subagent is created without an explicit `model`, this plugin injects the 
 **Effect verification**: 10 subagents split 5/5 between `deepseek-v4-flash` and `Kimi-k3` (round-robin).
 
 ![Subagent default model distribution](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_02.png)
+
+**Route visibility (Capability 3)**: the row as it actually appears in the conversation stream — "Current provider/model: `workbuddy/deepseek-v4.1-flash`". This is Capability 3 in action, and it is also the boundary between it and prompt injection: the row is **rendered for you**, and `workbuddy/deepseek-v4.1-flash` is **not** put into the model's context.
+
+![Current provider/model row in the conversation stream](https://raw.githubusercontent.com/dingminhua/dsh-subagent-default-model/main/assets/pic_03.png)
 
 ## Marketplace
 
@@ -127,21 +187,17 @@ You can also edit the profile patch `~/.dsh/profiles/<profile>/cordis.patch.yml`
     provider: deepseek-official
     model: deepseek-v4-pro
 
-    # Or multiple models
+    # Or multiple models: Capability 1 (distribution) + Capability 2 (cross-provider failover)
     provider: deepseek-official
     models:
-      - deepseek-v4-pro
-      - deepseek-v4-flash
-    strategy: round-robin  # round-robin | random
-
-    # Or with per-route reasoning strength
-    provider: deepseek-official
-    models:
-      - model: deepseek-v4-reasoner
+      - model: deepseek-v4-pro
         reasoningEffort: high
-      - provider: other-provider
+      - provider: other-provider     # a model from another vendor
         model: gpt-5.6
         reasoningEffort: max
+    strategy: round-robin  # round-robin (sequential) | random
+    failoverEnabled: true  # switch across providers on connection failures
+    injectRouteContext: true  # write the live provider/model into each subagent’s context (default)
 ```
 
 > **Upgrading from 0.1.6 or earlier**: the old configuration lived in the `subagent-default-model` section of `~/.dsh/settings.yaml`. 0.1.7 imports that file **once** and renames it to `settings.yaml.imported`, never reading it again. The import uses each section name verbatim as an entry id, while this plugin's entry id is `dsh-subagent-default-model` — so the old section is **not** imported (the host logs `section subagent-default-model … was not imported into entry subagent-default-model`) and the old values survive only in the renamed file. Move them into the `config:` block above by hand.
@@ -150,9 +206,10 @@ You can also edit the profile patch `~/.dsh/profiles/<profile>/cordis.patch.yml`
 | --- | --- | --- | --- |
 | `provider` | string | — | Provider for string-type model entries. |
 | `model` | string | — | Single model id (backward compatible). |
-| `models` | array | `[]` | List of model entries (string or `{provider, model, reasoningEffort?}` pair). |
-| `strategy` | string | `round-robin` | Selection strategy: `round-robin` or `random`. |
-| `failoverEnabled` | boolean | `true` | Switch models by queue and strategy inside the `models` list when a subagent hits a connection failure (subagents only). |
+| `models` | array | `[]` | List of model entries (string or `{provider, model, reasoningEffort?}` pair). Only meaningful for Capabilities 1 and 2 with 2+ entries. |
+| `strategy` | string | `round-robin` | Capability 1's distribution strategy: `round-robin` (sequential) or `random`. |
+| `failoverEnabled` | boolean | `true` | Capability 2: switch models **across providers** inside the `models` list when a subagent hits a connection failure (subagents only). |
+| `injectRouteContext` | boolean | `true` | Capability 3 channel 2: inject a real one-line prompt stating the live provider/model into each subagent’s **own context** (subagents only). |
 | `reasoningEffort` | string | — | Optional reasoning strength for a model entry (e.g. `high`, `max`). |
 
 ## Platform support
@@ -171,9 +228,10 @@ CI runs the same suite on `ubuntu-latest`, `windows-latest`, and `macos-latest`,
 
 ## Subagent connection-failure failover
 
-With `failoverEnabled` on (the default), when a subagent's own loop hits a connection-class failure, the plugin automatically switches models inside the `models` list and retries, following `strategy`:
+With `failoverEnabled` on (the default), when a subagent's own loop hits a connection-class failure, the plugin automatically switches models inside the `models` list and retries, following `strategy`. See [Capability 2](#capability-2--cross-provider-failover-if-one-provider-is-down-run-on-another-providers-model) above for the full account; the key points:
 
-- **Connection-class failures** — the switch triggers only on these error codes: `RATE_LIMIT`, `QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`. Non-connection failures (e.g. `AUTH`) do **not** trigger a switch.
+- **Cross-provider** — candidates are the whole `models` list, so it can fail over to a model from another provider, not just another model ID from the same vendor.
+- **Connection-class failures only** — the switch triggers only on these error codes: `RATE_LIMIT`, `QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`. Non-connection failures (e.g. `AUTH`) do **not** trigger a switch.
 - `round-robin`: advance to the next model in the list (the queue).
 - `random`: pick any model (without checking whether it was used before).
 - **Needs ≥ 2 models** — with fewer than 2 entries in `models`, the feature is inactive.
@@ -182,6 +240,34 @@ With `failoverEnabled` on (the default), when a subagent's own loop hits a conne
 - **Sticky within a run** — subsequent steps of the same subagent run stay on the switched model.
 
 It builds on the official `agent/request-error` + `agent/request` waterfalls and applies **only to subagents** — the main agent loop is never switched.
+
+## Route visibility
+
+Capability 3 has **two independent channels**. See [Capability 3](#capability-3--route-visibility-you-can-see-it-and-so-can-the-subagent) above for the full account:
+
+### Channel 1: UI rows (for the user)
+
+| View | What it shows | Source frame |
+| --- | --- | --- |
+| Trajectory | A row "Current provider/model: `provider/model`" | official `request/context` |
+| Conversation | One of "Current provider/model" / "Switched to" / "Resumed on" | official `request/header` (by `reason`: `initial` / `change` / `resume`) |
+
+Both registrations live inside `ctx.effect`, and the node `kind` values are plugin-owned (`trajectory-subagent-model` for the trajectory, `chat-subagent-model-notice` for the conversation) rather than reusing the Host's built-in `context` kind — the latter is filtered out by the Host's visibility rules.
+
+### Channel 2: Prompt injection (for the subagent)
+
+See the full description and sample text above. Implementation:
+
+| Aspect | Behaviour |
+| --- | --- |
+| Value source | the `{provider, model}` returned by the `agent/request` waterfall **after** it settles (including a failover swap) |
+| Injection point | the following `agent/pre-step`, where that step's message list is still mutable |
+| Dedupe | an unchanged route injects nothing; a changed route replaces the stale line |
+| Scope | `origin === "subagent"` only; the main agent is never touched |
+| Setting | `injectRouteContext`, on by default |
+| Message source | `plugin:dsh-subagent-default-model` + `form: "route-context"` (the v4 session format requires a producer-owned `source.kind`) |
+
+> **The two channels do not replace each other**: UI rows never enter the model's context, and the prompt injection never appears in your UI.
 
 ## How it works
 

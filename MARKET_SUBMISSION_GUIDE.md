@@ -203,6 +203,11 @@ CI 绿是**前置条件，不是结论**。CI 只校验形式（manifest、仓�
 - PR #1767（2026-08-18 合并）→ 条目 `data/plugins/dingminhua__dsh-subagent-default-model--plugin.yml`
 - **采用 monorepo 子包格式**（因为插件在 `plugin/` 子目录）：
   ```yaml
+  # ⚠️ 这段是 PR #1767 当时的原文，**已过时**：写作时插件只讲了「单模型 + 轮换」，
+  #    漏掉跨供应商故障转移与当前路由可见两项能力，配置位置也误写成 settings.yaml。
+  #    现行权威文本见 awesome-dsh-plugin-submission/
+  #    dingminhua__dsh-subagent-default-model--plugin.yml（已按三大功能重写，并更正为
+  #    cordis.patch.yml）。更新注册表时以该文件为准，切勿复制下面这段。
   url: https://github.com/dingminhua/dsh-subagent-default-model/tree/main/plugin
   name: dingminhua/dsh-subagent-default-model#plugin
   category: model
