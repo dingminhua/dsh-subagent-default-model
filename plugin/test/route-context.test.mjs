@@ -55,13 +55,29 @@ function makeInbox() {
 				}
 			}
 			return false;
+		},
+		/**
+		 * Drain the pending lists, as the REAL loop does at the top of
+		 * `preStep()` — BEFORE the `agent/pre-step` waterfall runs
+		 * (`mutate("next-step", 0, this.nextStep.length, [], false)`).
+		 *
+		 * Modelling this is essential: without it a fixture leaves the previous
+		 * step's messages sitting in `nextStep`, which makes an inbox-based
+		 * "already injected?" check look like it works. In the real host that
+		 * list is always empty by then, and an earlier build re-injected the
+		 * route line on EVERY step (28 duplicates in a 29-step subagent).
+		 */
+		claim() {
+			const claimed = state["next-step"].slice();
+			state["next-step"].length = 0;
+			return claimed;
 		}
 	};
 }
 
 let messageSeq = 0;
 function makeAgent(id, { origin = "subagent" } = {}) {
-	return {
+	return recordInjections({
 		id,
 		inbox: makeInbox(),
 		options: { provider: "deepseek-official", model: "deepseek-v4-pro" },
@@ -70,7 +86,7 @@ function makeAgent(id, { origin = "subagent" } = {}) {
 			header: { origin },
 			requestContext: () => ({ provider: "deepseek-official", model: "deepseek-v4-pro" })
 		}
-	};
+	});
 }
 
 async function createHarness(config = undefined) {
@@ -112,21 +128,43 @@ function dispatchRequest(ctx, agent, seed, { turn = 1, step = 1 } = {}) {
  *   (it must not disturb the messages the loop itself assembled).
  */
 function dispatchPreStep(ctx, agent, messages = [], { turn = 1, step = 1 } = {}) {
+	// Faithful ordering: the real loop CLAIMS (drains) the inbox at the top of
+	// `preStep()`, then runs this waterfall. Skipping the claim is what hid the
+	// duplicate-injection bug, so it is modelled here by default.
+	const claimed = agent.inbox.claim();
 	return ctx.waterfall("agent/pre-step", {
 		agent,
-		messages,
+		messages: [...claimed, ...messages],
 		turn,
 		step,
 		signal: new AbortController().signal
-	}, () => Promise.resolve({ messages, kind: "continue" }));
+	}, () => Promise.resolve({ messages: [...claimed, ...messages], kind: "continue" }));
 }
 
-/** The route line this plugin injected for an agent, if any. */
+/**
+ * Every route line the plugin has PLACED INTO this agent so far.
+ *
+ * Records at placement time rather than reading `inbox.nextStep` afterwards,
+ * because the real loop drains that list at the top of every `preStep()`. A
+ * post-hoc read therefore sees only the current step's line — which is exactly
+ * the blind spot that let the duplicate-injection bug ship (28 copies in a
+ * 29-step run all looked like "exactly one").
+ */
 function injectedRouteMessages(agent) {
-	return agent.inbox.nextStep.filter(
-		(message) => message?.source?.kind === "plugin:dsh-subagent-default-model"
-			&& message.source.form === "route-context"
-	);
+	return agent.injectedRouteLog ?? [];
+}
+
+/** Wrap an agent so every route line it receives is recorded. */
+function recordInjections(agent) {
+	const log = [];
+	agent.injectedRouteLog = log;
+	const originalPrepend = agent.inbox.prepend.bind(agent.inbox);
+	agent.inbox.prepend = (target, message) => {
+		if (message?.source?.kind === "plugin:dsh-subagent-default-model"
+			&& message.source.form === "route-context") log.push(message);
+		return originalPrepend(target, message);
+	};
+	return agent;
 }
 
 const ENABLED = { injectRouteContext: true };
@@ -230,17 +268,19 @@ test("a route change REPLACES the stale line instead of accumulating", async () 
 
 	await dispatchRequest(harness.root, agent, { provider: "workbuddy", model: "deepseek-v4.1-flash" });
 	await dispatchPreStep(harness.root, agent);
-	assert.equal(injectedRouteMessages(agent).length, 1);
+	assert.equal(injectedRouteMessages(agent).length, 1, "first route injected once");
 
 	// Failover switches the route and the loop runs another step.
 	await dispatchRequest(harness.root, agent, { provider: "other-provider", model: "gpt-5.6" }, { turn: 1, step: 2 });
 	await dispatchPreStep(harness.root, agent, [], { turn: 1, step: 2 });
 
+	// The change legitimately places a SECOND line (the first described a route
+	// that is no longer in use). What must NOT happen is an unbounded pile-up.
 	const injected = injectedRouteMessages(agent);
-	assert.equal(injected.length, 1, "still exactly one route line after a switch (no duplicates)");
+	assert.equal(injected.length, 2, "one line per distinct route, not one per step");
 	assert.ok(
-		injected[0].content[0].text.includes("other-provider/gpt-5.6"),
-		"the surviving line is the CURRENT route"
+		injected.at(-1).content[0].text.includes("other-provider/gpt-5.6"),
+		"the newest line states the CURRENT route"
 	);
 	await disposeHarness(harness);
 });
@@ -257,10 +297,59 @@ test("an UNCHANGED route does not re-inject on the next step", async () => {
 	await dispatchPreStep(harness.root, agent, [], { step: 2 });
 
 	const injected = injectedRouteMessages(agent);
-	assert.ok(
-		injected.length <= 1,
-		`an unchanged route must not stack copies, got ${injected.length}`
+	assert.equal(
+		injected.length,
+		1,
+		`an unchanged route must inject exactly once across steps, got ${injected.length}`
 	);
+	await disposeHarness(harness);
+});
+
+test("REGRESSION: a long single-route run injects exactly once (no per-step pile-up)", async () => {
+	// Observed in a REAL host: a 29-step subagent received 28 copies of the same
+	// route line. Root cause — the loop's `inbox.claim()` drains `next-step`
+	// BEFORE the pre-step waterfall, so an "is a copy still pending?" dedupe is
+	// always false and re-injects every step. The dedupe must be out-of-band.
+	const harness = await createHarness(ENABLED);
+	const agent = makeAgent("sub-long-run");
+	const ROUTE = { provider: "workbuddy", model: "deepseek-v4.1-flash" };
+
+	for (let step = 1; step <= 30; step += 1) {
+		await dispatchRequest(harness.root, agent, ROUTE, { step });
+		await dispatchPreStep(harness.root, agent, [], { step });
+	}
+
+	const injected = injectedRouteMessages(agent);
+	assert.equal(
+		injected.length,
+		1,
+		`30 steps on one unchanged route must inject ONCE, got ${injected.length} (the shipped bug gave 28/29)`
+	);
+	await disposeHarness(harness);
+});
+
+test("REGRESSION: a mid-run provider switch injects once per route, not per step", async () => {
+	// The other half of the same bug: because every step re-injected, the route
+	// reported to the model also appeared to churn. Distinct routes must each
+	// produce exactly ONE line, and the count must not scale with step count.
+	const harness = await createHarness(ENABLED);
+	const agent = makeAgent("sub-switch-run");
+
+	// 10 steps on route A.
+	for (let step = 1; step <= 10; step += 1) {
+		await dispatchRequest(harness.root, agent, { provider: "ds41", model: "deepseek-v4.1-flash" }, { step });
+		await dispatchPreStep(harness.root, agent, [], { step });
+	}
+	// A provider switch, then 10 more steps on route B.
+	for (let step = 11; step <= 20; step += 1) {
+		await dispatchRequest(harness.root, agent, { provider: "workbuddy-global", model: "deepseek-v4.1-flash" }, { step });
+		await dispatchPreStep(harness.root, agent, [], { step });
+	}
+
+	const injected = injectedRouteMessages(agent);
+	assert.equal(injected.length, 2, `two distinct routes must give two lines, got ${injected.length}`);
+	assert.match(injected[0].content[0].text, /ds41\/deepseek-v4\.1-flash/);
+	assert.match(injected[1].content[0].text, /workbuddy-global\/deepseek-v4\.1-flash/);
 	await disposeHarness(harness);
 });
 

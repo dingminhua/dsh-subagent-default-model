@@ -476,6 +476,19 @@ function installRouteContextInjector(ctx, state) {
 
 	// Inject on the pre-step, where the message list for the step about to run
 	// is still mutable and the agent's own route is already known.
+	//
+	// DEDUPE MUST BE OUT-OF-BAND, NOT "is a copy still pending?".
+	// The loop calls `inbox.claim()` at the TOP of `preStep()` — BEFORE this
+	// waterfall — and `claim()` DRAINS `next-step`
+	// (`mutate("next-step", 0, this.nextStep.length, [], false)`). So by the time
+	// this listener runs, the pending list is always empty and a "does a route
+	// line already exist in the inbox?" test is structurally always false. An
+	// earlier build did exactly that and re-injected on EVERY step: a real
+	// 29-step subagent ended up with 28 identical route lines, which also made
+	// the reported route churn between turns. Track what was last injected for
+	// this agent instead.
+	const injectedRoute = new Map();
+
 	const disposePreStep = ctx.on("agent/pre-step", async ({ agent, messages }, next) => {
 		const decision = await next();
 		if (decision === void 0 || decision === null || decision.kind === "reject") return decision;
@@ -490,27 +503,29 @@ function installRouteContextInjector(ctx, state) {
 		// or a future agent shape without one must not break the step.
 		if (agent.inbox === void 0 || !Array.isArray(agent.inbox.nextStep)) return decision;
 
-		// Reuse the pending message when the route is unchanged; replace it when
-		// the route moved (failover / config change). Without the remove step a
-		// stale line would linger alongside the fresh one.
-		const pending = agent.inbox.nextStep.filter(isRouteContextMessage);
 		const wanted = routeContextText(route.provider, route.model);
-		const existing = pending.find((message) => message.content?.[0]?.text === wanted);
-		for (const message of pending) {
-			if (message !== existing) agent.inbox.remove(message.id);
+		// Same route as last time => the line already placed in this session is
+		// still accurate; inject nothing (no duplicate, no churn).
+		if (injectedRoute.get(agent.id)?.text === wanted) return decision;
+
+		// Route moved (failover / config change): drop any not-yet-claimed copy so
+		// the stale route does not linger beside the fresh one.
+		for (const message of agent.inbox.nextStep.filter(isRouteContextMessage)) {
+			agent.inbox.remove(message.id);
 		}
-		if (existing !== void 0) return decision;
 
 		const message = createUserMessage({
 			content: [{ type: "text", text: wanted }],
 			source: { kind: ROUTE_CONTEXT_SOURCE, form: ROUTE_CONTEXT_FORM }
 		});
 		agent.inbox.prepend("next-step", message);
+		injectedRoute.set(agent.id, { text: wanted });
 		return decision;
 	});
 
 	const disposeDisposed = ctx.on("agent/disposed", ({ agent }) => {
 		resolvedRoute.delete(agent.id);
+		injectedRoute.delete(agent.id);
 	});
 
 	ctx.effect(() => () => {
@@ -518,6 +533,7 @@ function installRouteContextInjector(ctx, state) {
 		disposePreStep();
 		disposeDisposed();
 		resolvedRoute.clear();
+		injectedRoute.clear();
 	}, "dsh-subagent-default-model: route context injector");
 }
 
