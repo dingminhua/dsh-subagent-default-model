@@ -123,12 +123,98 @@ node plugin/scripts/verify-mock-failover.mjs   # 需先起 mock：真实 429 →
 
 三个平台上的等价执行由 CI 保证；本地在 Windows 上开发时，上述命令在 PowerShell / cmd 中同样可用（不依赖 shell 展开）。
 
+## 测试夹具必须忠于宿主语义（三个真实教训）
+
+**这一节是本仓最贵的一课。** 2.1.1–2.1.4 期间连续三个 P0 缺陷**全都通过全部测试**、却只有**真实运行**才暴露，根因是同一个：**夹具比宿主「宽松」**。夹具是代码，它读起来像在验证真实行为，但它验证的其实是「我理解的宿主」。
+
+规则：**夹具只能在「无法真实构造」的地方替身服务；凡是有明确语义的宿主行为（事件顺序、API 的可变性、生命周期），必须逐条照抄，并注明出处。**
+
+### 案例一：`inbox.claim()` 抽干 inbox，去重判断恒为 false
+
+**缺陷**：每个 step 都重复注入一次路由行。真实会话实测 **1228 步注入 1227 次**（累计 368,052 字符 ≈ 12 万 token）。
+
+**夹具的错**：`makeInbox()` 只实现了 `prepend` / `remove`，**没有 `claim()`**。于是上一步的消息一直躺在 `nextStep` 里，让「inbox 里是否已有同样一行」这个去重判断**看起来有效**。
+
+**宿主的真相**（`dsh-agent-loop`）：`preStep()` 的**第一件事**就是 `inbox.claim()`，而它会**整表抽干**：
+
+```js
+claim(target, turn) {
+  const claimed = this.mutate("next-step", 0, this.nextStep.length, [], false);
+  //                                         ^^^ 全删
+```
+
+且这一步发生在 `agent/pre-step` 瀑布**之前** —— 轮到我方监听器时，待处理列表**必然是空的**，去重判断**结构上恒为 false**。
+
+**修法**：去重改为**带外状态**（按 `agent.id` 记录上次注入的文本），不再依赖 inbox 内容；夹具补上 `claim()`，并让 `dispatchPreStep()` 在瀑布前先调用它。
+
+### 案例二：`requestContext()` 是「折叠最新帧」，不是常量
+
+**缺陷**：注入的路由**滞后一步**，模型上下文里出现**互相矛盾的两行**（一行 `glm`、一行 `ds41`）。
+
+**夹具的错**：`makeAgent()` 把 `session.requestContext()` 固化成**常量**：
+
+```js
+requestContext: () => ({ provider: "deepseek-official", model: "deepseek-v4-pro" })  // ❌
+```
+
+常量意味着**夹具里根本没有路由变化**，注入器读到什么都「对」。
+
+**宿主的真相**（`dsh-session`）：它**折叠**最新一条 `request/context` 事件，文档原文即 *"the latest resolved route metadata"*：
+
+```js
+requestContext() {
+  if (this.contextFoldSeq < this.log.length) {
+    for (const event of this.log.slice(this.contextFoldSeq))
+      if (event.type === "request/context") this.contextFold = deepFreeze({ ...event.data })
+```
+
+**修法**：夹具改为**可变状态** + `commitRoute()`，由 `dispatchRequest()` 在瀑布结算后提交，与宿主一致。
+
+### 案例三：瀑布顺序就是语义 —— `preStep` 先于 `buildRequest`
+
+**缺陷**：首步读不到路由，回落 `agent.options`（**派发时的意图值**）写成一行猜测，而真实路由当场就变了。
+
+**夹具的错**：驱动顺序是「先 `agent/request`，再 `agent/pre-step`」—— **与宿主相反**。夹具因此永远看不到「请求尚未构建」这个状态。
+
+**宿主的真相**（`dsh-agent-loop`）：每轮迭代是
+
+```text
+preStep()       ← :954   本插件的注入点
+buildRequest()  ← :1063  → 这里才触发 agent/request
+```
+
+所以**第一步的 pre-step 执行时，`request/context` 帧尚不存在**。
+
+**修法**：注入只报告**已知为真**的路由，优先级为 ① `session.requestContext()` → ② `agent/request` 瀑布结算后的种子 → ③ **不回落** `agent.options`。第 ③ 条是取舍：**注入行只是对现实的陈述，立刻被推翻的猜测比不说更糟**，故路由已知前保持沉默。
+
+### 复盘：为什么三次都没被测试拦住
+
+| 案例 | 夹具缺了什么 | 宿主中的对应语义 |
+| --- | --- | --- |
+| 一 | 没有 `claim()` | `preStep` 开头抽干 inbox |
+| 二 | `requestContext` 是常量 | 折叠最新 `request/context` 的可变值 |
+| 三 | 瀑布顺序与宿主相反 | `preStep` 先于 `buildRequest` |
+
+三者是同一个错误的三种形态：**夹具在「宿主会拒绝/会变化/会有序」的地方一律放行**。
+
+### 因此，每个注入/拦截类用例都应回答三个问题
+
+1. **顺序**：宿主在哪一刻调到我？我之前之后各发生了什么？（去读宿主源码行号，别凭印象）
+2. **可变性**：我依赖的那个值，宿主中是**常量还是会被改写**？改写者是谁？
+3. **边界**：宿主会不会**先清空 / 先消费**我要读的东西？
+
+> 判据：**「若把宿主换成夹具，行为会不同吗？」** 若会，夹具就不合格。
+> 三个案例的修正方式都遵循同一条：**不再让代码依赖「夹具恰好保留了什么」，而是让夹具如实复现宿主会做什么。**
+
 ## 验证清单（修改后）
 
 1. 重启 DSH Desktop
 2. 打开 **设置 → 插件 → dsh-subagent-default-model**，确认设置卡出现（`view: 'page'` 默认展开）
 3. 保存后确认 `~/.dsh/profiles/desktop/cordis.patch.yml` 里 `id: dsh-subagent-default-model` 条目的 `config:` 更新
 4. 创建一个不带显式 `agentOptions` 的子代理，确认其路由到配置的默认模型
+
+> **宿主只在启动时加载插件一次。** 改动 `lib/` 后必须重启 DSH 才生效 —— 改文件不等于改正在运行的程序。
+> 排查时先核对**进程启动时间 vs 文件修改时间**，否则会把「旧代码的行为」误判为新缺陷（本仓实际发生过两次）。
 
 ## 历史遗留：旧 settings.yaml 不会被导入
 
