@@ -156,6 +156,35 @@ const WRAPPED = Symbol.for("dsh-subagent-default-model.wrapped");
  */
 const FAILOVER_TRIGGER_CODES = ["RATE_LIMIT", "QUOTA", "SERVER", "TIMEOUT", "TRANSPORT", "EMPTY_RESPONSE"];
 
+/**
+ * Auth failures, handled SEPARATELY from the connection codes above.
+ *
+ * `AUTH` (HTTP 401/403 — a bad, expired, or unauthorised key) is not a
+ * connectivity problem, so switching on it is only right when the pool entries
+ * hold INDEPENDENT credentials. With per-provider keys — the normal setup — one
+ * provider's key going bad must not kill the whole delegation while healthy
+ * providers sit unused, which is what excluding AUTH entirely used to do.
+ *
+ * The reason AUTH was originally excluded still stands, though: silently
+ * rerouting around a broken key HIDES a misconfiguration. So an AUTH switch is
+ * always accompanied by a loud warning naming the provider whose credentials
+ * were refused, and pool exhaustion still passes the real error through.
+ * Observability replaces suppression.
+ *
+ * When several entries share ONE credential (e.g. the same env var), switching
+ * cannot help — but it also cannot loop: every candidate is tried at most once
+ * per run, and exhaustion surfaces the real error.
+ */
+const AUTH_FAILURE_CODES = ["AUTH", "INVALID_CREDENTIAL"];
+
+/** Every failure code that may trigger a switch. */
+const FAILOVER_ELIGIBLE_CODES = [...FAILOVER_TRIGGER_CODES, ...AUTH_FAILURE_CODES];
+
+/** True when a failure code is an auth-class failure (picks the log wording). */
+function isAuthFailure(code) {
+	return AUTH_FAILURE_CODES.includes(code);
+}
+
 /** Resolve one model entry to `{provider, model}`, or undefined. */
 function resolveEntry(section, entry) {
 	if (typeof entry === "string") {
@@ -288,7 +317,7 @@ function installFailover(ctx, state) {
 		const { agent, turn, step, failure, signal } = payload;
 		if (signal?.aborted) return next();
 		if (!isSubagentAgent(agent)) return next();
-		if (failure === void 0 || !FAILOVER_TRIGGER_CODES.includes(failure.code)) return next();
+		if (failure === void 0 || !FAILOVER_ELIGIBLE_CODES.includes(failure.code)) return next();
 		const current = pending.get(agent.id);
 		// The primary already failed (that triggered the first switch), so the
 		// remaining candidates are the other pool entries: at most
@@ -316,6 +345,18 @@ function installFailover(ctx, state) {
 			view.entries.length,
 			view.strategy
 		);
+		// An auth switch is called out explicitly: the point of allowing it is
+		// resilience, and the risk it introduces is that a broken credential
+		// becomes invisible. This line is what keeps it visible — without it,
+		// silently rerouting around a bad key would hide a real misconfiguration.
+		if (isAuthFailure(failure.code)) {
+			ctx.logger.warn(
+				`[dsh-subagent-default-model] the credentials for the failing provider ${payload.provider ?? "(unknown)"} were refused (%s). This is NOT a connection problem: that provider's API key is likely invalid, expired, or unauthorised. Failover is switching the subagent to %s/%s — verify that provider's key, because the failure will keep recurring until it is fixed.`,
+				failure.code,
+				view.entries[index].provider,
+				view.entries[index].model
+			);
+		}
 		return { kind: "retry" };
 	});
 

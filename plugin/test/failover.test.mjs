@@ -18,11 +18,21 @@ async function createHarness(config = undefined) {
 	};
 	root.provide("subagents", subagents);
 
+	// Capture warnings so the AUTH contract can be asserted, not merely implied.
+	// Allowing an AUTH switch is only acceptable because it stays VISIBLE: a
+	// silent reroute around a broken key would hide a real misconfiguration.
+	const warnings = [];
+	if (root.logger !== undefined) {
+		root.logger.warn = (...args) => {
+			warnings.push(args.map((a) => String(a)).join(" "));
+		};
+	}
+
 	await root[Symbol.for("cordis.init")]?.();
 	const fiber = root.registry.plugin(defaultModelPlugin, config);
 	await fiber;
 
-	return { root, config, subagents, fiber };
+	return { root, config, subagents, fiber, warnings };
 }
 
 async function disposeHarness(harness) {
@@ -169,21 +179,51 @@ test("failover is inert when the failoverEnabled field is absent (defaults to tr
 
 // ── error-code matching ─────────────────────────────────────────────────────
 
-test("only connection-failure codes trigger the switch", async () => {
+test("connection codes AND auth codes trigger the switch; other codes do not", async () => {
 	const harness = await createHarness(SECTION_WITH_MODELS);
 	try {
-		const agent = makeAgent("sub-code");
-		const ignored = await dispatchRequestError(harness.root, agent, {
-			failure: { message: "bad key", code: "AUTH" }
-		});
-		assert.strictEqual(ignored, undefined);
+		// AUTH now switches: with per-provider keys, one bad key must not kill the
+		// delegation while healthy providers sit unused. (It used to be excluded.)
+		const authAgent = makeAgent("sub-code-auth");
+		assert.deepEqual(
+			await dispatchRequestError(harness.root, authAgent, {
+				failure: { message: "bad key", code: "AUTH" }
+			}),
+			{ kind: "retry" },
+			"AUTH must switch (a broken key on one provider is not fatal to the pool)"
+		);
+		// And the switch must be LOUD: silently rerouting around a bad key would
+		// hide the real, fixable misconfiguration.
+		const authWarning = harness.warnings.find((w) => w.includes("credentials"));
+		assert.ok(authWarning, "an AUTH switch must emit the credentials warning");
+		assert.match(authWarning, /API key is likely invalid/, "the warning must name the likely cause");
+		assert.match(authWarning, /ds41|deepseek-official|workbuddy/, "the warning must name the failing provider");
 
-		// No pending switch → next request stays on the primary.
-		const config = await dispatchRequest(harness.root, agent, {
-			provider: "deepseek-official",
-			model: "deepseek-v4-pro"
-		});
-		assert.deepEqual(config, { provider: "deepseek-official", model: "deepseek-v4-pro" });
+		// INVALID_CREDENTIAL is the host's own code for the same class.
+		const credAgent = makeAgent("sub-code-cred");
+		assert.deepEqual(
+			await dispatchRequestError(harness.root, credAgent, {
+				failure: { message: "blank key", code: "INVALID_CREDENTIAL" }
+			}),
+			{ kind: "retry" },
+			"INVALID_CREDENTIAL must switch too"
+		);
+
+		// Codes that are genuinely NOT ours to route around stay untouched: they
+		// are not transport/credential problems, so another provider would fail
+		// identically and switching would only bury the error.
+		for (const code of ["NO_ADAPTER", "CONTEXT_WINDOW_EXCEEDED", "IMAGE_OFFLOAD_REQUIRED"]) {
+			const agent = makeAgent(`sub-code-${code}`);
+			const ignored = await dispatchRequestError(harness.root, agent, {
+				failure: { message: "nope", code }
+			});
+			assert.strictEqual(ignored, undefined, `${code} must NOT trigger a switch`);
+			// No pending switch → the next request stays on the primary.
+			assert.deepEqual(
+				await dispatchRequest(harness.root, agent, { provider: "deepseek-official", model: "deepseek-v4-pro" }),
+				{ provider: "deepseek-official", model: "deepseek-v4-pro" }
+			);
+		}
 	} finally {
 		await disposeHarness(harness);
 	}
