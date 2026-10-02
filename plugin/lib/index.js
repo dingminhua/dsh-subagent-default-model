@@ -445,30 +445,46 @@ function isRouteContextMessage(message) {
 }
 
 /**
- * Read the route an agent's loop will actually request, at PRE-STEP time.
+ * Resolve the route the agent is ACTUALLY using, or `undefined` when that is
+ * not yet knowable.
  *
- * This is the loop's own resolved route (`agent.options.provider` / `.model`) —
- * the exact pair `prepareRequest()` copies into the request it is about to
- * build (`dsh-agent-loop`: `const route = { provider: this.options.provider,
- * model: this.options.model }`).
+ * The FIRST step is the hard case. `preStep()` runs BEFORE `buildRequest()`, so
+ * on step 1 no `request/context` frame exists and no `agent/request` waterfall
+ * has settled. The only value available is `agent.options` — the DISPATCH-TIME
+ * seed, which the parent may already have superseded (a switch during dispatch,
+ * or a route chosen after this agent was created).
  *
- * WHY NOT `agent/request` ALONE: the loop calls `preStep()` BEFORE
- * `buildRequest()` on every iteration, so on the FIRST step no `agent/request`
- * has fired yet and a request-driven cache is empty exactly when the first
- * (often only) step needs it. That ordering is why an earlier build of this
- * feature silently injected nothing for single-step subagents. Reading
- * `agent.options` here is earlier and just as authoritative.
+ * Guessing from `agent.options` is what produced the reported contradiction: a
+ * subagent whose real route was `ds41` got a step-1 line saying `glm` (the
+ * dispatch seed), queued into the inbox, claimed on step 2 — so the model saw
+ * `glm` and `ds41` side by side. Since the line is only a report about reality,
+ * a guess that is immediately contradicted is worse than saying nothing.
  *
- * @param {object} agent - the loop agent for this step.
- * @returns {{provider: string, model: string}|undefined} the route, when known.
+ * Therefore: report only what is KNOWN, and stay silent otherwise. The route
+ * becomes knowable one step later (the session fold updates as soon as the
+ * first request commits), so the line still lands early in the run.
+ *
+ * @param {object} agent - the loop agent.
+ * @param {Map} settled - per-agent settled-seed cache.
+ * @returns {{provider: string, model: string}|undefined} the known route.
  */
-function routeOfAgent(agent) {
-	const options = agent?.options;
-	if (options === void 0 || options === null) return void 0;
-	const provider = typeof options.provider === "string" ? options.provider : "";
-	const model = typeof options.model === "string" ? options.model : "";
-	if (provider === "" && model === "") return void 0;
-	return { provider, model };
+function routeForInjection(agent, settled) {
+	// The session's fold of the latest `request/context` — authoritative and
+	// current, and what the host itself treats as "the latest resolved route".
+	const live = agent?.session?.requestContext?.();
+	if (live !== void 0 && live !== null) {
+		const provider = typeof live.provider === "string" ? live.provider : "";
+		const model = typeof live.model === "string" ? live.model : "";
+		if (provider !== "" || model !== "") return { provider, model };
+	}
+	// A request already built by this plugin's own waterfall: still authoritative
+	// for that request, and normally identical to the fold above.
+	const captured = settled.get(agent.id);
+	if (captured !== void 0) return captured;
+	// Nothing has committed yet. Deliberately do NOT fall back to
+	// `agent.options`: that is the dispatch seed and is exactly the stale guess
+	// this function exists to avoid.
+	return void 0;
 }
 
 /**
@@ -481,13 +497,7 @@ function routeOfAgent(agent) {
  * conversation. This injects one line stating the route the child is ACTUALLY
  * using.
  *
- * SOURCE OF TRUTH: two sources, in priority order.
- *   1. `agent.options` at pre-step time (see `routeOfAgent`) — always available,
- *      including the very first step.
- *   2. The SETTLED seed from the `agent/request` waterfall, once a request has
- *      been built. It reflects every listener's rewrite (including this
- *      plugin's own failover swap), so after a mid-run switch the injected line
- *      follows the new route rather than the one the agent started on.
+ * SOURCE OF TRUTH: see `routeForInjection` — the session's own live route first.
  *
  * Injected on every step whose route differs from the line already present, so
  * a failover switch or a route change is reflected immediately; an unchanged
@@ -536,9 +546,9 @@ function installRouteContextInjector(ctx, state) {
 		if (state.getSection()?.injectRouteContext === false) return decision;
 		if (!isSubagentAgent(agent)) return decision;
 
-		// Prefer the settled request route (post-failover); fall back to the
-		// agent's own live route, which is all the first step has.
-		const route = resolvedRoute.get(agent.id) ?? routeOfAgent(agent);
+		// The live session route wins; see `routeForInjection` for why the
+		// dispatch-time `agent.options` must NOT be preferred.
+		const route = routeForInjection(agent, resolvedRoute);
 		if (route === void 0) return decision;
 		// Defensive: only the loop's live Agent exposes an inbox. A test double
 		// or a future agent shape without one must not break the step.

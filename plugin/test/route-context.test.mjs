@@ -77,16 +77,27 @@ function makeInbox() {
 
 let messageSeq = 0;
 function makeAgent(id, { origin = "subagent" } = {}) {
-	return recordInjections({
+	// `session.requestContext()` folds the latest committed `request/context`,
+	// exactly as the Host session does. The injector treats it as the
+	// authoritative LIVE route, so the fixture must model it as a mutable value
+	// that `dispatchRequest` advances — a fixed stub would hide route changes
+	// (and did hide the stale-route bug this suite now guards).
+	let live;
+	const agent = recordInjections({
 		id,
 		inbox: makeInbox(),
 		options: { provider: "deepseek-official", model: "deepseek-v4-pro" },
 		session: {
 			id,
 			header: { origin },
-			requestContext: () => ({ provider: "deepseek-official", model: "deepseek-v4-pro" })
+			requestContext: () => live
 		}
 	});
+	/** Commit a `request/context` frame, as the loop does after building one. */
+	agent.commitRoute = (route) => {
+		live = { provider: route.provider, model: route.model };
+	};
+	return agent;
 }
 
 async function createHarness(config = undefined) {
@@ -111,14 +122,24 @@ async function disposeHarness(harness) {
 	await harness.root.fiber.dispose();
 }
 
-/** Drive one `agent/request` waterfall and return the settled seed. */
-function dispatchRequest(ctx, agent, seed, { turn = 1, step = 1 } = {}) {
-	return ctx.waterfall("agent/request", {
+/**
+ * Drive one `agent/request` waterfall and return the settled seed.
+ *
+ * Also commits the settled route to the session, because the real loop appends
+ * a `request/context` frame for exactly that value — and the injector reads it
+ * as the authoritative live route.
+ */
+async function dispatchRequest(ctx, agent, seed, { turn = 1, step = 1 } = {}) {
+	const settled = await ctx.waterfall("agent/request", {
 		agent,
 		turn,
 		step,
 		signal: new AbortController().signal
 	}, () => Promise.resolve(seed));
+	if (settled !== void 0 && settled !== null && typeof settled.provider === "string") {
+		agent.commitRoute(settled);
+	}
+	return settled;
 }
 
 /**
@@ -417,24 +438,69 @@ test("the injector does not disturb the loop's own assembled messages", async ()
 	await disposeHarness(harness);
 });
 
-test("the FIRST step injects, with no prior agent/request (regression)", async () => {
-	// The loop calls preStep() BEFORE buildRequest() on every iteration, so on
-	// the first step no `agent/request` has fired. An implementation that only
-	// reads a request-driven cache injects NOTHING for a single-step subagent —
-	// which is exactly how this feature silently no-opped in a real host. The
-	// injector must therefore read the agent's own live route too.
+test("the FIRST step with no committed route stays SILENT (no stale guess)", async () => {
+	// The loop calls preStep() BEFORE buildRequest(), so on step 1 nothing has
+	// resolved yet. The ONLY other value available is `agent.options` — the
+	// DISPATCH-TIME seed, which the parent may have already superseded.
+	//
+	// Reporting it is what produced the live contradiction this test guards: a
+	// subagent really on `ds41` got a step-1 line saying `glm` (the dispatch
+	// seed). Since the line is only a report about reality, a guess that is
+	// immediately contradicted is worse than saying nothing — so the injector
+	// must stay silent until the route is KNOWN, then inject on the next step.
 	const harness = await createHarness(ENABLED);
 	const agent = makeAgent("sub-first-step");
 	agent.options = { provider: "workbuddy", model: "deepseek-v4.1-flash" };
 
-	// NO dispatchRequest call at all.
+	// NO dispatchRequest call at all: nothing has committed yet.
 	await dispatchPreStep(harness.root, agent);
 
+	assert.equal(
+		injectedRouteMessages(agent).length,
+		0,
+		"an uncommitted route must NOT be guessed from the dispatch-time agent.options"
+	);
+
+	// One step later the route is known, and the line lands.
+	await dispatchRequest(harness.root, agent, { provider: "workbuddy", model: "deepseek-v4.1-flash" });
+	await dispatchPreStep(harness.root, agent, [], { step: 2 });
 	const injected = injectedRouteMessages(agent);
-	assert.equal(injected.length, 1, "the very first step must already carry the route line");
+	assert.equal(injected.length, 1, "the line lands as soon as the route is known");
+	assert.ok(injected[0].content[0].text.includes("workbuddy/deepseek-v4.1-flash"));
+	await disposeHarness(harness);
+});
+
+test("REGRESSION: a route switched before the next step is reported correctly, never stale", async () => {
+	// The live defect: step 1 built a request on `glm`, the loop then switched
+	// to `ds41` in the same step, and step 2 was labelled `glm` — because the
+	// injector preferred a lagging source over the session's live fold. The
+	// model then saw `glm` and `ds41` side by side, contradicting each other.
+	//
+	// `agent.options` is deliberately left at the dispatch seed (`glm`) here, to
+	// prove the injector ignores it once reality has moved on.
+	const harness = await createHarness(ENABLED);
+	const agent = makeAgent("sub-stale-route");
+	agent.options = { provider: "glm", model: "deepseek-v4.1-flash" };
+
+	// Step 1: two requests — the first on glm, then a switch to ds41.
+	await dispatchPreStep(harness.root, agent, [], { step: 1 });
+	await dispatchRequest(harness.root, agent, { provider: "glm", model: "deepseek-v4.1-flash" }, { step: 1 });
+	await dispatchRequest(harness.root, agent, { provider: "ds41", model: "deepseek-v4.1-flash" }, { step: 1 });
+
+	// Step 2 onward: reality is ds41.
+	await dispatchPreStep(harness.root, agent, [], { step: 2 });
+	await dispatchPreStep(harness.root, agent, [], { step: 3 });
+	await dispatchPreStep(harness.root, agent, [], { step: 4 });
+
+	const injected = injectedRouteMessages(agent);
+	assert.equal(injected.length, 1, `exactly one line for one real route, got ${injected.length}`);
 	assert.ok(
-		injected[0].content[0].text.includes("workbuddy/deepseek-v4.1-flash"),
-		"the first-step line must state the agent's own route"
+		injected[0].content[0].text.includes("ds41/deepseek-v4.1-flash"),
+		"the line must state the route actually in use"
+	);
+	assert.ok(
+		!injected[0].content[0].text.includes("glm"),
+		"the stale dispatch seed must never appear"
 	);
 	await disposeHarness(harness);
 });
