@@ -49,9 +49,10 @@
 ## 工作原理
 
 ```text
-显式请求 agentOptions
-  → subagent-default-model 设置
-  → 继承父会话路由
+派发请求已带 agentOptions        → 原样放行，完全不碰（不读本插件设置）
+否则 models[] 有 ≥1 条有效条目    → 按 strategy 从 models[] 里取一条（round-robin / random）
+否则 model（+ provider）非空      → 就用这一条路由
+否则                            → 不注入；由宿主自行继承父会话路由
 ```
 
 - 显式提供的 `agentOptions` 对象不会被修改。
@@ -168,7 +169,9 @@ CI 在 `ubuntu-latest` / `windows-latest` / `macos-latest` 三个平台同时跑
 
 当子代理（subagent）自身的循环遇到连接类失败时，插件会自动在 `models` 列表内切换模型并按 `strategy` 规则重试——**仅对 subagent 生效，主代理循环不受影响**。
 
-- **触发码**：命中以下任一错误码才切换——`RATE_LIMIT`、`QUOTA`、`SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE`。认证错误（如 `AUTH`）不会触发切换。
+- **触发码**：分两类，命中任一即切换。
+  - **连接类**：`RATE_LIMIT`、`QUOTA`、`SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE`。
+  - **认证类**：`AUTH`、`INVALID_CREDENTIAL`。各家密钥独立，一家密钥坏不该让整个任务死掉，因此**也会切换**；但每次认证类切换都会打一条 **warn** 日志，说明该供应商的密钥可能无效，避免静默掩盖配置问题。
 - **队列**：`round-robin` 策略下按列表顺序切到下一个模型。
 - **随机**：`random` 策略下随机挑一个模型（不判断之前是否用过）。
 - **需要 ≥ 2 个模型**：`models` 少于 2 项时本功能不生效。
@@ -196,6 +199,7 @@ CI 在 `ubuntu-latest` / `windows-latest` / `macos-latest` 三个平台同时跑
 | `models` | array | `[]` | 字符串或 `{ provider, model, reasoningEffort? }` 条目列表。 |
 | `strategy` | string | `round-robin` | 多模型分配策略。 |
 | `failoverEnabled` | boolean | `true` | 连接失败时在 `models` 列表内按队列与策略切换模型（仅 subagent）。 |
+| `injectRouteContext` | boolean | `true` | 把当前真实的 provider/model 以一行提示词注入子代理上下文（仅 subagent；路由已知后才注入）。 |
 | `reasoningEffort` | string | — | 可选的逐路由推理强度。设置面板会校验它是否被目标模型声明，不匹配时给出警告（不阻止保存）。 |
 
 ## 市场收录与展示

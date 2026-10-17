@@ -4,7 +4,7 @@ English | [中文](README.md)
 
 Pick the default model for subagent delegations in [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness), configured through the plugin's own settings card (its Cordis `Config`), stored in the profile's `cordis.patch.yml`.
 
-When a subagent is created without an explicit `model`, this plugin injects the configured default — so every `subagent`, `subagent_fork`, and any tool that omits `agentOptions` routes through it. Explicit per-call overrides always win; an absent or incomplete settings section keeps the historical behavior (children inherit the parent route).
+When a delegation request carries **no `agentOptions` at all**, this plugin supplies a default route from your settings before the host creates the subagent — so every `subagent`, `subagent_fork`, and any tool that omits `agentOptions` routes through it. Explicit per-call overrides always win; an absent or incomplete settings section keeps the historical behaviour (children inherit the parent route).
 
 ## Three core capabilities
 
@@ -185,24 +185,29 @@ Use the Web settings card (**Settings → Plugins → dsh-subagent-default-model
 You can also edit the profile patch `~/.dsh/profiles/<profile>/cordis.patch.yml` directly: since DSH 0.1.7 that is where settings live, keyed by this plugin's Loader entry id `dsh-subagent-default-model`:
 
 ```yaml
+# Multiple models (recommended): Capability 1 (distribution) + Capability 2 (cross-provider failover)
 - id: dsh-subagent-default-model
   name: dsh-subagent-default-model
   config:
-    # Single model
-    provider: deepseek-official
-    model: deepseek-v4-pro
-
-    # Or multiple models: Capability 1 (distribution) + Capability 2 (cross-provider failover)
-    provider: deepseek-official
+    provider: deepseek-official        # entries in models[] without a provider inherit this
     models:
       - model: deepseek-v4-pro
         reasoningEffort: high
       - provider: other-provider     # a model from another vendor
         model: gpt-5.6
-        reasoningEffort: max
-    strategy: round-robin  # round-robin (sequential) | random
-    failoverEnabled: true  # switch across providers on connection failures
-    injectRouteContext: true  # write the live provider/model into each subagent’s context (default)
+    strategy: round-robin              # round-robin (sequential) | random
+    failoverEnabled: true              # switch across providers on connection failures
+    injectRouteContext: true           # write the live provider/model into each subagent's context
+```
+
+To pin a **single** model, use `model` instead of `models` (never both in the same `config:`):
+
+```yaml
+- id: dsh-subagent-default-model
+  name: dsh-subagent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-pro
 ```
 
 > **Upgrading from 0.1.6 or earlier**: the old configuration lived in the `subagent-default-model` section of `~/.dsh/settings.yaml`. 0.1.7 imports that file **once** and renames it to `settings.yaml.imported`, never reading it again. The import uses each section name verbatim as an entry id, while this plugin's entry id is `dsh-subagent-default-model` — so the old section is **not** imported (the host logs `section subagent-default-model … was not imported into entry subagent-default-model`) and the old values survive only in the renamed file. Move them into the `config:` block above by hand.
@@ -272,14 +277,26 @@ See the full description and sample text above. Implementation:
 | Setting | `injectRouteContext`, on by default |
 | Message source | `plugin:dsh-subagent-default-model` + `form: "route-context"` (the v4 session format requires a producer-owned `source.kind`) |
 
+> **The line only appears once the route is known.**
+>
+> | Situation | Behaviour | Why |
+> | --- | --- | --- |
+> | Step 1 (no request settled yet) | **silent, nothing injected** | `preStep()` runs before `buildRequest()`, so no settled route exists yet. Guessing from the dispatch-time seed produced labels that did not match reality — saying nothing is better |
+> | A **single-step** subagent | **may receive no line at all** | The direct consequence above. This is deliberate, not a fault |
+> | Only half the route is known (provider but no model) | not rendered | Avoids emitting `model=unknown`, which a model may repeat back as fact |
+> | A **resumed** session, before this run requests | does not reuse the previous run's route | At that moment the session fold describes the **previous** run — older than the dispatch seed |
+>
+> From step 2 onward (once the route settles) the line appears normally and updates when the route changes.
+
 > **The two channels do not replace each other**: UI rows never enter the model's context, and the prompt injection never appears in your UI.
 
 ## How it works
 
 ```text
-Explicit agentOptions on the request
-  → subagent-default-model settings
-  → inherit parent session route
+request already carries agentOptions  → passed through untouched (this plugin never reads its settings)
+else models[] has >=1 valid entry     → pick one from models[] by strategy (round-robin / random)
+else model (+ provider) is non-empty  → use that single route
+else                                  → no injection; the host inherits the parent-session route
 ```
 
 The plugin wraps the host `ctx.subagents` service (`start` / `startContinuable`), so it covers every delegation path — built-in `subagent` / `subagent_fork` tools and any custom tool that calls the service without providing `agentOptions`.

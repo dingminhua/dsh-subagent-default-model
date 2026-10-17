@@ -49,9 +49,10 @@ A standalone [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-ha
 ## How it works
 
 ```text
-explicit request agentOptions
-  → subagent-default-model settings
-  → inherit parent-session route
+request already carries agentOptions  → passed through untouched (this plugin never reads its settings)
+else models[] has >=1 valid entry     → pick one from models[] by strategy (round-robin / random)
+else model (+ provider) is non-empty  → use that single route
+else                                  → no injection; the host inherits the parent-session route
 ```
 
 - An explicitly provided `agentOptions` object is never modified.
@@ -168,7 +169,9 @@ While you pick a provider / model / reasoning effort, the panel validates the co
 
 When a subagent loop hits a connection-class failure, the plugin automatically switches to another model in the `models` list and retries by `strategy` — **subagents only; the main agent loop is never affected**.
 
-- **Trigger codes**: switching only happens on `RATE_LIMIT`, `QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, or `EMPTY_RESPONSE`. Authentication errors (e.g. `AUTH`) do not trigger a switch.
+- **Trigger codes**: two families, either one switches.
+  - **Connection**: `RATE_LIMIT`, `QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`.
+  - **Authentication**: `AUTH`, `INVALID_CREDENTIAL`. API keys are independent per provider, so one bad key must not kill the whole task — these **do** switch. Every authentication switch logs a **warn**, flagging that the provider's key may be invalid rather than silently hiding a misconfiguration.
 - **Queue**: with `round-robin`, switch to the next model in list order.
 - **Random**: with `random`, pick any model (without checking whether it was used before).
 - **Needs ≥ 2 models**: the feature is inert when `models` has fewer than 2 entries.
@@ -196,6 +199,7 @@ When a subagent loop hits a connection-class failure, the plugin automatically s
 | `models` | array | `[]` | List of string or `{ provider, model, reasoningEffort? }` entries. |
 | `strategy` | string | `round-robin` | Multi-model distribution strategy. |
 | `failoverEnabled` | boolean | `true` | Switch model by queue/strategy inside `models` on connection failure (subagents only). |
+| `injectRouteContext` | boolean | `true` | Inject one prompt line naming the live provider/model into the subagent's own context (subagents only; injected once the route is known). |
 | `reasoningEffort` | string | — | Optional per-route reasoning effort. The panel warns (without blocking the save) when the target model does not declare it. |
 
 ## Marketplace

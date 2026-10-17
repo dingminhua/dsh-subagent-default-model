@@ -4,7 +4,7 @@
 
 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 中的子代理（subagent）派发选择默认模型，可通过插件自己的设置卡片（其 Cordis `Config`）配置，存在 profile 的 `cordis.patch.yml`。
 
-当创建子代理时未显式指定 `model`，本插件注入配置的默认模型 —— 因此所有 `subagent`、`subagent_fork` 以及任何省略 `agentOptions` 的工具调用都会经过它。显式传参的覆盖始终生效；配置段缺失或不完整时保持原有行为（子代理继承父会话路由）。
+当派发请求**完全没有 `agentOptions`** 时，本插件注入配置的默认路由 —— 因此所有 `subagent`、`subagent_fork` 以及任何省略 `agentOptions` 的工具调用都会经过它。显式传参的覆盖始终生效；配置段缺失或不完整时保持原有行为（子代理继承父会话路由）。
 
 ## 三个核心功能
 
@@ -185,24 +185,29 @@ semver.satisfies(runtimeVersion, range, { includePrerelease: true })
 也可以直接编辑 profile 的 patch 文件 `~/.dsh/profiles/<profile>/cordis.patch.yml`：DSH 0.1.7 起设置就存在这里，段名是本插件的 Loader 条目 id `dsh-subagent-default-model`：
 
 ```yaml
+# 多模型（推荐）：功能一（分配策略）+ 功能二（跨供应商故障转移）
 - id: dsh-subagent-default-model
   name: dsh-subagent-default-model
   config:
-    # 单模型
-    provider: deepseek-official
-    model: deepseek-v4-pro
-
-    # 或多模型：功能一（分配策略）+ 功能二（跨供应商故障转移）
-    provider: deepseek-official
+    provider: deepseek-official   # models 里未写 provider 的条目沿用这个
     models:
       - model: deepseek-v4-pro
         reasoningEffort: high
-      - provider: other-provider     # 换一个供应商的模型
+      - provider: other-provider  # 换一个供应商的模型
         model: gpt-5.6
-        reasoningEffort: max
-    strategy: round-robin  # round-robin（顺序） | random（随机）
-    failoverEnabled: true  # 连接类失败时跨供应商切换
-    injectRouteContext: true  # 把当前 provider/model 写进子代理上下文（默认开）
+    strategy: round-robin         # round-robin（顺序） | random（随机）
+    failoverEnabled: true         # 连接类失败时跨供应商切换
+    injectRouteContext: true      # 把当前 provider/model 写进子代理上下文
+```
+
+若只想固定**一个**模型，改用 `model` 而不是 `models`（二者不要同时写在同一个 `config:` 里）：
+
+```yaml
+- id: dsh-subagent-default-model
+  name: dsh-subagent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-pro
 ```
 
 > **从 0.1.6 及更早版本升级**：旧版把配置写在 `~/.dsh/settings.yaml` 的 `subagent-default-model` 段。0.1.7 会在启动时把该文件**一次性导入并改名**为 `settings.yaml.imported`，改名后不再回读。导入按段名直接当条目 id 用，而本插件的条目 id 是 `dsh-subagent-default-model`，因此旧段**不会被导入**（宿主日志留一条 `section subagent-default-model … was not imported into entry subagent-default-model`），旧值只留在改名后的文件里——需要手工搬到上面的 `config:` 里。
@@ -272,14 +277,26 @@ CI 在 `ubuntu-latest`、`windows-latest`、`macos-latest` 三个平台上同时
 | 开关 | `injectRouteContext`，默认开启 |
 | 消息来源 | `plugin:dsh-subagent-default-model` + `form: "route-context"`（v4 会话格式要求生产者自有 `source.kind`） |
 
+> **注入是有前提的：路由已知才会注入。**
+>
+> | 情形 | 行为 | 为什么 |
+> | --- | --- | --- |
+> | 第 1 步（本轮还没结算任何请求） | **静默，不注入** | `preStep()` 早于 `buildRequest()`，此时没有任何已结算的真实路由。拿派发时的旧种子去猜，会造成「标注与实际不符」——宁可不说 |
+> | **单步子代理** | **可能完全收不到这一行** | 上面那条的直接后果。这是**刻意**的设计，不是故障 |
+> | 路由只知一半（如只有 provider 没有 model） | 不渲染 | 避免输出 `model=unknown` 之类的占位符，被模型当事实复述 |
+> | 恢复（resume）的会话，本轮尚未请求 | 不沿用上一轮的路由 | 会话折叠值此刻描述的是**上一轮**，比派发种子更旧 |
+>
+> 从第 2 步起（路由结算后），注入行会正常出现并在路由变化时更新。
+
 > **两条通路互不替代**：界面行不会进入模型上下文；提示词注入也不会显示在你的界面上。
 
 ## 工作原理
 
 ```text
-请求携带显式 agentOptions
-  → subagent-default-model 设置
-  → 继承父会话路由
+派发请求已带 agentOptions        → 原样放行，完全不碰（不读本插件设置）
+否则 models[] 有 ≥1 条有效条目    → 按 strategy 从 models[] 里取一条（round-robin / random）
+否则 model（+ provider）非空      → 就用这一条路由
+否则                            → 不注入；由宿主自行继承父会话路由
 ```
 
 插件包装宿主 `ctx.subagents` 服务（`start` / `startContinuable`），覆盖所有派发路径 —— 内置的 `subagent` / `subagent_fork` 工具，以及任何调用该服务但未提供 `agentOptions` 的自定义工具。
