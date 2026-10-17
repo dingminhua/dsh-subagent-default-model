@@ -89,7 +89,7 @@ semver.satisfies(runtimeVersion, range, { includePrerelease: true })
 - **不要为了「只支持 0.1.7」而写 `<0.2.0`**——它挡不住 `0.2.0-rc.1`，却挡住正式的 `0.2.0`。
 - 上界写错时宿主**不降级**：`loadProfileDirectory()` 抛错 → 该 bundle 进 `skippedBundles` → stderr 输出 `skipping profile bundle "dsh-subagent-default-model"`，插件本体与设置卡片一起消失。
 - `plugin/test/peer-range.test.mjs` 是护栏，**必须与 `package.json` 同步改**；它调用宿主同款的 `semver.satisfies(..., { includePrerelease: true })`，并用手写回退实现做交叉验证（不支持的 `^` / `~` 语法会抛错而非静默返回 `false`）。
-- **「应当通过」的版本清单必须对预发布显式列举**：`includePrerelease: true` 让区间放行整条 `0.2.x`，但清单若只写 `0.2.0-rc.2` 与稳定的 `0.2.1`，那么 **真实运行中的 `0.2.1-rc.1` 从未被断言过**。DSH Desktop 0.2.1-rc.1 正是这样的运行时。清单里已补 `0.2.1-rc.1`。
+- **「应当通过」的版本清单必须对预发布显式列举**：`includePrerelease: true` 让区间放行整条 `0.2.x`，但清单若只写 `0.2.0-rc.2` 与稳定的 `0.2.1`，那么 **真实运行中的 `0.2.1-rc.1` 从未被断言过**。DSH Desktop 0.2.1-rc.1 正是这样的运行时。清单里已补 `0.2.1-rc.1`。**每换一次宿主版本就补一行**——`0.2.1-rc.2` 已经这样补过一次，规则与代价完全相同。
 - 想诚实表达「仅 0.1.7 线」时，正确写法是 `>=0.1.7-rc.1 <0.2.0-0`（同时挡住 `0.2.0-rc.1` 与 `0.2.0`），而不是 `<0.2.0`。
 
 ### `peerDependenciesMeta: { optional: true }` 不参与宿主校验
@@ -118,6 +118,26 @@ for (const [name, range] of Object.entries(dependencies)) {   // ← 只有 peer
 而同一轮还发现了一个**真实**缺口：版本清单漏了 `0.2.1-rc.1`。
 
 > 判据：**宿主语义要用宿主的调用方式去问**。拿不准就 `import` 宿主真实的那个函数来断言 —— `peer-range.test.mjs` 已加入 `evaluatePluginCompatibility` 直连用例（环境无 DSH 时自动跳过，不成为硬依赖）。
+
+#### 这个「直连用例」曾经又空转了一次（0.2.1-rc.2 排查）
+
+上面那条用例最初用一个**未安装的 npm 包**去读 `app.asar`：
+
+```js
+createRequire(import.meta.url).resolve("asar")   // ❌ 本仓没有 asar 依赖
+```
+
+`require.resolve` 的 `MODULE_NOT_FOUND` 被外层 `catch` 吞掉，于是**每台机器、每次运行都走 `t.skip`**。这已经修过一轮「静默 `return` 被记为 pass」的陷阱，却漏了同一件事的另一半：**报告为 skip、但从没真正跑过，同样等于没有护栏**——只是它比 pass 更显眼。
+
+现在改为**纯 Node 手写读取 asar**（零依赖）：16 字节前言 + JSON 目录树 + 载荷偏移。
+
+```text
+uint32le 4 | uint32le payloadSize | uint32le paddedJsonSize | uint32le jsonLength
+```
+
+**第四个字段（未补零的 JSON 长度）才是要 `JSON.parse` 的那个**，第三个字段包含尾部补零，直接解析会抛 `Unexpected non-whitespace character after JSON`。这个错在修复过程中真实发生过一次，别凭直觉改回去。
+
+> 判据：**「跳过」不是「通过」，也不是「验证过」。** 每次看测试结果都要确认那个本该执行的用例出现在 `✔` 而不是 `﹣` 里；它一旦变成 `﹣`，就意味着宿主契约当前**无人在看**。
 
 ## 不要做的事
 
@@ -207,11 +227,13 @@ requestContext() {
 **宿主的真相**（`dsh-agent-loop`）：每轮迭代是
 
 ```text
-preStep()       ← 0.2.1-rc.1: :956   本插件的注入点
-buildRequest()  ← 0.2.1-rc.1: :1075  → 这里才触发 agent/request
+preStep()       ← 0.2.1-rc.2: :902   （:956 调用本插件的注入点）
+buildRequest()  ← 0.2.1-rc.2: :1214  （:1075 调用点；:1271 才 append request/context）
 ```
 
 所以**第一步的 pre-step 执行时，`request/context` 帧尚不存在**。
+
+> 行号是**核对时的快照**，不是契约：它在 0.2.1-rc.1 → rc.2 之间已经整体下移过（`preStep` 定义 `:902`，`buildRequest` 定义 `:1214`）。每次升级都重新 `grep` 一遍，别照抄上一版。
 
 **修法**：注入只报告**已知为真**的路由，优先级为 ① `session.requestContext()` → ② `agent/request` 瀑布结算后的种子 → ③ **不回落** `agent.options`。第 ③ 条是取舍：**注入行只是对现实的陈述，立刻被推翻的猜测比不说更糟**，故路由已知前保持沉默。
 
@@ -232,6 +254,14 @@ requestContext() {
 于是「折叠出旧值」这个状态在夹具里**根本不存在**。实测确认：恢复会话在未发请求前就返回 `{"provider":"glm","model":"old-model"}`。
 
 **修法**：只在**本会话确实被恢复**（`session.header.isSeeded === true`）**且本轮尚未结算过请求**时，不采信折叠值；本轮请求结算后折叠重新可信。夹具增加 `seededFrom` 选项建模恢复会话。
+
+**0.2.1-rc.2 复核**：`isSeeded` 的**含义被放宽了**。宿主的内存内「独占」构造路径（`Session.inner`，`isSeeded: true`）也会置位，而 `Session.fromRestore` 现在**要求** `isSeeded` 必须带显式 seed：
+
+```js
+if (this.header.isSeeded && seed === void 0) throw new Error("seeded session requires an explicit constructor seed");
+```
+
+所以这个标志不再是「上一轮发过请求」，而是「**本会话继承了一段前缀**」（含显式为空的前缀）。`isStaleFold()` 只看这个标志、不假设上一轮一定请求过——正是这个写法让它在含义放宽后**依然正确**：标志为真就保守地视折叠值为历史。`route-context.test.mjs` 里新增了对应的回归用例，防止有人把标志改严（要求上一轮必须有 `request/context`）或改松。
 
 ### 复盘：为什么这些都没被测试拦住
 

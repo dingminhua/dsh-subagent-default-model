@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.1.6 (2026-10-17)
+
+### 兼容性核查：DSH Desktop 0.2.1-rc.2
+
+当前宿主由 `0.2.1-rc.1` 升到 **`0.2.1-rc.2`**。逐项对照宿主源码（从 `app.asar` 解出 `dsh-agent-loop` / `dsh-session` / `dsh-subagent` / `dsh-app-boot`）核查，**插件行为无需改动**，但核查暴露了两个**与本插件逻辑无关、却会让护栏形同虚设**的问题，已一并修复。
+
+| 检查项 | 结论 |
+| --- | --- |
+| 插件加载与注入 | ✅ 派发子代理实测注入正常 |
+| 4 个事件钩子 | ✅ `agent/pre-step`、`agent/request`、`agent/request-error`、`agent/disposed` 全部仍在 |
+| `preStep()` → `buildRequest()` 时序 | ✅ 未变（定义在 `:902` / `:1214`；`request/context` 仍在 `buildRequest` 内 `:1271` 才 append） |
+| `inbox.claim()` 先抽干 | ✅ 未变（`preStep` 首行 `:906`） |
+| `session.requestContext()` 语义 | ⚠️ 折叠逻辑未变，但 **`isSeeded` 的含义被放宽** —— 见下 |
+| `agent/pre-step` 决策契约 | ✅ 未变：默认分支仍返回 `{kind:"enter", messages}`，`kind:"reject"` 仍短路 |
+| 子代理提示词提交方式 | ✅ 仍以 `{kind:"user"}` 入队，`republish` 视为 `firstAttempt` 重新提交，注入行不会被跳过 |
+| peer 区间覆盖 | ✅ 宿主 `unmetRequirements()` 对 `0.2.1-rc.2` 返回「无未满足要求」 |
+
+宿主的 `{{provider}}` / `{{model}}` 系统提示词变量依旧读 `agent.options`（派发时值），不含实时路由 —— 本插件注入行的价值不受影响。
+
+### Fixed
+
+- **「直连宿主评估器」用例其实从未真正执行过（第二次）**。2.1.5 修掉了它的「静默 `return` 被记为 pass」，但漏了另一半：它用 `require.resolve("asar")` 读 `app.asar`，而本仓**根本没有 `asar` 依赖**，`MODULE_NOT_FOUND` 被 `catch` 吞掉 → **每台机器都走 `t.skip`**。结果是一个被报告为「已覆盖」、实际上从未断言过任何东西的用例。修法：改为**零依赖手写解析 asar**（16 字节前言 + JSON 目录树 + 载荷偏移），现在该用例在 `macOS` 上真实读取宿主源码并执行宿主的 `unmetRequirements`，测试统计为 `skip 0`。
+
+  > 手写解析时踩到一次真实陷阱：目录树 JSON 的长度是**第 4 个** uint32（未补零），第 3 个含尾部补零，直接喂给 `JSON.parse` 会抛 `Unexpected non-whitespace character after JSON`。
+
+- **「应当通过」的宿主版本清单再次滞后**：清单停在 `0.2.1-rc.1`，而真实运行的宿主已是 `0.2.1-rc.2`。已补入清单（`semver` 护栏 + 宿主评估器护栏两处）。这正是 2.1.5 记录过的同一类回归，说明「宿主升级时必须补一行」需要按流程执行，而不是当次偶然发现。
+
+### Tests
+
+- **新增回归用例**：`isSeeded` 含义放宽后，恢复会话在**本轮尚未结算请求**时必须保持沉默，结算后只报告**本轮**路由、绝不出现上一轮的 provider。变异验证：去掉 `isStaleFold()` 判定 → 2 项失败（新用例 + 原恢复会话用例）。
+- **`peer-range.test.mjs` 现在真的会跑**：`tests 149 / pass 149 / fail 0 / skip 0`。变异验证：把 `dsh-llm` 单独改成 `>=0.1.7-rc.1 <0.2.1-0` → 2 项失败（区间护栏 + 宿主评估器护栏）。
+
+### Docs
+
+`DEVELOPMENT.md`：
+
+1. 记录 `isSeeded` 在 0.2.1-rc.2 中**语义放宽**（`fromRestore` 现在要求显式 seed），并说明 `isStaleFold()` 为何在该含义下依然正确。
+2. 新增「这个『直连用例』曾经又空转了一次」一节：**「跳过」不是「通过」，也不是「验证过」**；并记录 asar 头部的字段顺序陷阱。
+3. 流程时序图的行号更新到 0.2.1-rc.2，并明确标注**行号是快照、不是契约**，每次升级重新 `grep`。
+
 ## 2.1.5 (2026-10-17)
 
 ### 兼容性核查：DSH Desktop 0.2.1-rc.1

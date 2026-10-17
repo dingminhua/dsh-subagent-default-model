@@ -590,3 +590,45 @@ test("a partially known route is NOT rendered (no `model=unknown` placeholder)",
 	);
 	await disposeHarness(harness);
 });
+
+test("REGRESSION (host 0.2.1-rc.2): a restored session whose PREVIOUS run requested never re-announces its route", async () => {
+	// The host widened what `isSeeded` MEANS. In 0.2.1-rc.2 the exclusive
+	// in-memory constructor's seed path marks the header `isSeeded: true`, and
+	// `Session.fromRestore` now REQUIRES an explicit seed whenever `isSeeded` is
+	// set ("seeded session requires an explicit constructor seed"). So the flag
+	// no longer implies "the previous run requested": it means "this session
+	// inherits a prefix".
+	//
+	// The plugin's stale-fold guard keys on exactly that flag. Under the widened
+	// meaning it must still be correct: step 1 of the new run folds the OLD run's
+	// `request/context`, so it must stay SILENT; after this run settles a request
+	// the fold belongs to this run again and the NEW route is reported — never
+	// the old one.
+	//
+	// Mutation check: dropping the `isStaleFold` guard reports `old-provider` on
+	// step 1 and fails the first assertion; making the guard unconditional
+	// (never trusting a restored session) fails the second.
+	const harness = await createHarness(ENABLED);
+	const agent = makeAgent("sub-exclusive-restore", {
+		seededFrom: { provider: "old-provider", model: "old-model" }
+	});
+	assert.equal(agent.session.header.isSeeded, true, "fixture must model a seeded header");
+
+	await dispatchPreStep(harness.root, agent, [], { step: 1 });
+	assert.equal(
+		injectedRouteMessages(agent).length,
+		0,
+		"a restore whose previous run requested must not be re-announced"
+	);
+
+	await dispatchRequest(harness.root, agent, { provider: "new-provider", model: "new-model" }, { step: 1 });
+	await dispatchPreStep(harness.root, agent, [], { step: 2 });
+	const injected = injectedRouteMessages(agent);
+	assert.equal(injected.length, 1);
+	assert.ok(injected[0].content[0].text.includes("new-provider/new-model"));
+	assert.ok(
+		!injected[0].content[0].text.includes("old-provider"),
+		"the previous run's route must never surface"
+	);
+	await disposeHarness(harness);
+});

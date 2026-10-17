@@ -36,10 +36,9 @@
 // options, and prefers the real `semver` package when it resolves.
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import test from "node:test";
 import vm from "node:vm";
 
@@ -278,10 +277,14 @@ test("REGRESSION: the whole 0.2.x line is admitted, stable release included", ()
 	// `0.2.0-rc.2` straight to the stable `0.2.1`, so the exact spelling of a
 	// real, running host was never asserted — a regression that rejected only
 	// `0.2.1-rc.1` would have left this guard green.
+	//
+	// `0.2.1-rc.2` was added after DSH Desktop moved to it: the same lesson,
+	// re-learned. Every host version this plugin is actually developed against
+	// belongs in this list the moment it becomes the running host.
 	const range = pkg.peerDependencies["@deepseek-ai/dsh-settings"];
 	for (const version of [
 		"0.2.0-rc.1", "0.2.0-rc.2", "0.2.0",
-		"0.2.1-rc.1", "0.2.1", "0.2.5-rc.1"
+		"0.2.1-rc.1", "0.2.1-rc.2", "0.2.1", "0.2.5-rc.1"
 	]) {
 		assert.equal(
 			satisfies(range, version),
@@ -335,8 +338,11 @@ test("the HOST's own evaluator accepts this manifest, when its source is readabl
 
 	// `unmetRequirements` is the host's judgement. `engines.dsh` wins when
 	// present; otherwise every dsh peer must satisfy the runtime version.
+	// The list must contain the version this plugin is ACTUALLY developed
+	// against: `0.2.1-rc.2` is the shipping DSH Desktop at the time of writing,
+	// and asserting only "some 0.2.x" is what let the list go stale before.
 	const unmetRequirements = evaluator;
-	for (const runtime of ["0.1.7-rc.1", "0.2.0-rc.2", "0.2.1-rc.1", "0.2.1"]) {
+	for (const runtime of ["0.1.7-rc.1", "0.2.0-rc.2", "0.2.1-rc.1", "0.2.1-rc.2", "0.2.1"]) {
 		const unmet = unmetRequirements(pkg, runtime);
 		assert.deepEqual(
 			unmet,
@@ -362,33 +368,37 @@ test("the HOST's own evaluator accepts this manifest, when its source is readabl
 /**
  * Locate and extract the host's `unmetRequirements` implementation.
  *
- * Reads `dsh-app-boot` out of the shim's extracted tree when present, else out of
- * an app.asar via `asar`. Returns a `(manifest, runtime) => unmet` function
- * evaluated in a `vm` sandbox, or `undefined` when the host is unavailable.
+ * Reads `dsh-app-boot` out of an already-extracted tree when present, else
+ * straight out of an `app.asar`. The asar is parsed HERE, by hand, because the
+ * previous version shelled out to the `asar` npm package — which is not a
+ * dependency of this repo, so `require.resolve("asar")` always threw, the catch
+ * swallowed it, and this test silently skipped on every machine. That is the
+ * same "passes while asserting nothing" failure the skip-not-return fix was
+ * supposed to end, one layer down. An asar header is trivial to read: a 16-byte
+ * preamble, then a UTF-8 JSON directory tree, then the raw file bytes.
+ *
+ * Returns a `(manifest, runtime) => unmet` function evaluated in a `vm`
+ * sandbox, or `undefined` when no host source can be read at all.
  *
  * @param {readonly string[]} homes - candidate app.asar paths, or a plugin dir.
  * @returns {((manifest: object, runtime: string) => object)|undefined} the evaluator.
  */
 function findHostEvaluator(homes) {
+	const relative = join("dsh", "node_modules", "@deepseek-ai", "dsh-app-boot", "lib", "index.js");
 	const sources = [];
 	for (const home of homes) {
 		try {
-			// An already-extracted tree (the review workflow uses these).
-			const direct = join(home, "dsh", "node_modules", "@deepseek-ai", "dsh-app-boot", "lib", "index.js");
-			if (existsSync(direct)) sources.push(readFileSync(direct, "utf8"));
-		} catch {
-			// Different layout; keep looking.
-		}
-		try {
-			if (home.endsWith(".asar") && existsSync(home)) {
-				const out = execFileSync(process.execPath, [
-					createRequire(import.meta.url).resolve("asar"),
-					"extract-file", home, "dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js"
-				], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-				if (out.trim() !== "") sources.push(out);
+			if (existsSync(home) && statSync(home).isDirectory()) {
+				// An already-extracted tree (the review workflow uses these).
+				const direct = join(home, relative);
+				if (existsSync(direct)) sources.push(readFileSync(direct, "utf8"));
+				continue;
 			}
+			if (!home.endsWith(".asar")) continue;
+			const source = readFileFromAsar(home, relative.split(sep).join("/"));
+			if (source !== undefined) sources.push(source);
 		} catch {
-			// No `asar` CLI, or the file is absent.
+			// Different layout, corrupt archive, or unreadable file; keep looking.
 		}
 	}
 	for (const source of sources) {
@@ -396,6 +406,47 @@ function findHostEvaluator(homes) {
 		if (fn !== void 0) return fn;
 	}
 	return undefined;
+}
+
+/**
+ * Read one file's bytes out of an `app.asar` archive, without any dependency.
+ *
+ * Layout: four little-endian uint32s — `4` (pickle header) | payload size |
+ * padded JSON string size | UNPADDED JSON length — then the JSON directory
+ * tree, then a payload whose file offsets are relative to the end of the
+ * preamble + header. The third and fourth words look interchangeable and are
+ * not: the third is padded to 4 bytes and includes the trailing padding, so
+ * parsing it yields `Unexpected non-whitespace character after JSON`.
+ *
+ * @param {string} archive - path to the `.asar` file.
+ * @param {string} archivePath - POSIX-style path inside the archive.
+ * @returns {string|undefined} UTF-8 contents, or `undefined` when absent/unpacked.
+ */
+function readFileFromAsar(archive, archivePath) {
+	const fd = openSync(archive, "r");
+	try {
+		const preamble = Buffer.alloc(16);
+		if (readSync(fd, preamble, 0, 16, 0) !== 16) return undefined;
+		if (preamble.readUInt32LE(0) !== 4) return undefined;
+		const headerSize = preamble.readUInt32LE(4);
+		const jsonSize = preamble.readUInt32LE(12);
+		if (jsonSize === 0 || jsonSize > headerSize) return undefined;
+		const header = Buffer.alloc(headerSize);
+		if (readSync(fd, header, 0, headerSize, 16) !== headerSize) return undefined;
+		let node = JSON.parse(header.subarray(0, jsonSize).toString("utf8"));
+		for (const segment of archivePath.split("/")) {
+			node = node?.files?.[segment];
+			if (node === void 0) return undefined;
+		}
+		// An unpacked entry lives in `app.asar.unpacked/`, not in the archive.
+		if (node.files !== void 0 || node.unpacked === true) return undefined;
+		const bytes = Buffer.alloc(Number(node.size));
+		const at = 16 + headerSize + Number(node.offset);
+		if (readSync(fd, bytes, 0, bytes.length, at) !== bytes.length) return undefined;
+		return bytes.toString("utf8");
+	} finally {
+		closeSync(fd);
+	}
 }
 
 /**
