@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### 兼容性核查：DSH Desktop 0.2.1-rc.1
+
+当前宿主为 `0.2.1-rc.1`（此前为 `0.2.0-rc.2`）。逐项核查结论：**插件功能正常，无需改动运行时代码**。
+
+| 检查项 | 结论 |
+| --- | --- |
+| 插件加载与注入 | ✅ 真实子代理实测，注入生效 |
+| 4 个事件钩子 | ✅ `agent/pre-step`、`agent/request`、`agent/request-error`、`agent/disposed` 全部仍在 |
+| `preStep()` → `buildRequest()` 时序 | ✅ 未变（`:956` → `:1075`） |
+| `inbox.claim()` 先抽干 | ✅ 未变 |
+| `session.requestContext()` 语义 | ✅ 未变 |
+| peer 区间覆盖 | ✅ 宿主 `evaluatePluginCompatibility()` 返回「无未满足要求」 |
+
+宿主的 `{{provider}}` / `{{model}}` 系统提示词变量仍读 `agent.options`（派发时值），会在路由切换后滞后 —— 这正是本插件注入行与它们并存的价值所在，详见 README「为什么还需要本插件」。
+
+### Tests
+
+- **补上 `0.2.1-rc.1` 到「应当通过」的版本清单**。原先该清单从 `0.2.0-rc.2` 直接跳到稳定的 `0.2.1`，**真实在运行的 `0.2.1-rc.1` 从未被断言过**；一个只拒绝 `0.2.1-rc.1` 的区间回归会让护栏保持全绿。
+- **新增直连宿主 `evaluatePluginCompatibility()` 的用例**：不再靠本地模型复述宿主规则，而是直接 `import` 宿主那个函数来断言 `0.2.1-rc.1` / `0.2.0-rc.2` / `0.2.1` / `0.1.7-rc.1` 均被接受。环境无 DSH 时自动跳过，不构成硬依赖。
+- 变异验证：把上界改回 `<0.2.0-0` → 2 项失败；只让 `dsh-llm` 单独偏离区间 → 「every declared peer」用例失败。
+
+### Docs
+
+`DEVELOPMENT.md` 补充两条实测结论：
+
+1. **`peerDependenciesMeta` 不参与宿主校验** —— `unmetRequirements()` 只遍历 `peerDependencies`。标了 `optional: true` 的 peer 区间不匹配时**照样挡住整个插件**。
+2. **校验必须用宿主的调用方式** —— 用 `semver.satisfies` 时漏掉 `{ includePrerelease: true }`，会把 `0.2.1-rc.1` 误判为不满足，从而得出「peer 区间坏了」的错误结论（本次排查即发生过）。
+
 ## 2.1.4 (2026-10-02)
 
 ### Fixed

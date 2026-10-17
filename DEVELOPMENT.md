@@ -89,7 +89,35 @@ semver.satisfies(runtimeVersion, range, { includePrerelease: true })
 - **不要为了「只支持 0.1.7」而写 `<0.2.0`**——它挡不住 `0.2.0-rc.1`，却挡住正式的 `0.2.0`。
 - 上界写错时宿主**不降级**：`loadProfileDirectory()` 抛错 → 该 bundle 进 `skippedBundles` → stderr 输出 `skipping profile bundle "dsh-subagent-default-model"`，插件本体与设置卡片一起消失。
 - `plugin/test/peer-range.test.mjs` 是护栏，**必须与 `package.json` 同步改**；它调用宿主同款的 `semver.satisfies(..., { includePrerelease: true })`，并用手写回退实现做交叉验证（不支持的 `^` / `~` 语法会抛错而非静默返回 `false`）。
+- **「应当通过」的版本清单必须对预发布显式列举**：`includePrerelease: true` 让区间放行整条 `0.2.x`，但清单若只写 `0.2.0-rc.2` 与稳定的 `0.2.1`，那么 **真实运行中的 `0.2.1-rc.1` 从未被断言过**。DSH Desktop 0.2.1-rc.1 正是这样的运行时。清单里已补 `0.2.1-rc.1`。
 - 想诚实表达「仅 0.1.7 线」时，正确写法是 `>=0.1.7-rc.1 <0.2.0-0`（同时挡住 `0.2.0-rc.1` 与 `0.2.0`），而不是 `<0.2.0`。
+
+### `peerDependenciesMeta: { optional: true }` 不参与宿主校验
+
+`dsh-app-boot` 的 `unmetRequirements()` **只遍历 `peerDependencies`**，完全忽略 `peerDependenciesMeta`：
+
+```js
+for (const [name, range] of Object.entries(dependencies)) {   // ← 只有 peerDependencies
+  if (name !== "@deepseek-ai/dsh" && !name.startsWith("@deepseek-ai/dsh-")) continue;
+  if (!satisfies(runtimeVersion, range)) unmet[name] = range;
+}
+```
+
+**含义**：哪怕标了 `optional: true`，client peer 的区间一旦不匹配，**照样挡住整个插件**（bundle 进 `skippedBundles`，设置卡片一起消失）。`optional` 只影响包管理器「是否需要安装」，不影响宿主的版本判定。
+
+因此：
+
+- 想「尽力而为、缺了就降级」的依赖，**不要**放进 `peerDependencies` —— 放进去就等于声明「版本必须匹配」。
+- `dsh.client.inject` 已经表达「我需要这些 client 模块」，那才是虚模块（`dsh-client-ui-slots` / `ui-primitives`）的正确声明位置。
+- 本插件保留了 client peers（区间覆盖 0.2.x 全线，当前无害），但**新增 client peer 前先想清楚：它真的必须与宿主同版本吗？**
+
+### 校验必须用宿主的调用方式，不是「看起来对」的调用
+
+排查 0.2.1-rc.1 时曾据此得出**错误结论**：用 `semver.satisfies('0.2.1-rc.1', range)`（**漏了** `includePrerelease`）判断得到 `false`，于是误判「peer 区间不匹配、从 npm 安装会被拒」。补上该选项后为 `true`，宿主真实的 `evaluatePluginCompatibility()` 也返回「无未满足要求」。
+
+而同一轮还发现了一个**真实**缺口：版本清单漏了 `0.2.1-rc.1`。
+
+> 判据：**宿主语义要用宿主的调用方式去问**。拿不准就 `import` 宿主真实的那个函数来断言 —— `peer-range.test.mjs` 已加入 `evaluatePluginCompatibility` 直连用例（环境无 DSH 时自动跳过，不成为硬依赖）。
 
 ## 不要做的事
 

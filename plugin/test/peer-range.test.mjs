@@ -269,8 +269,17 @@ test("REGRESSION: the whole 0.2.x line is admitted, stable release included", ()
 	// PRERELEASES but rejected the stable `0.2.0`, so shipping 0.2.0 would have
 	// dropped this bundle into `skippedBundles`. Every 0.2.x spelling that can
 	// become the running host version must be admitted.
+	//
+	// `0.2.1-rc.1` is listed explicitly because it IS a shippable runtime: DSH
+	// Desktop 0.2.1-rc.1 ran this plugin in the field. The older list jumped from
+	// `0.2.0-rc.2` straight to the stable `0.2.1`, so the exact spelling of a
+	// real, running host was never asserted — a regression that rejected only
+	// `0.2.1-rc.1` would have left this guard green.
 	const range = pkg.peerDependencies["@deepseek-ai/dsh-settings"];
-	for (const version of ["0.2.0-rc.1", "0.2.0-rc.2", "0.2.0", "0.2.1", "0.2.5-rc.1"]) {
+	for (const version of [
+		"0.2.0-rc.1", "0.2.0-rc.2", "0.2.0",
+		"0.2.1-rc.1", "0.2.1", "0.2.5-rc.1"
+	]) {
 		assert.equal(
 			satisfies(range, version),
 			true,
@@ -285,6 +294,45 @@ test("the range excludes the next major line, prereleases included", () => {
 	// it under `includePrerelease`, silently widening support to an unreviewed line.
 	for (const version of ["0.3.0-rc.1", "0.3.0", "0.3.1", "1.0.0"]) {
 		assert.equal(satisfies(range, version), false, `expected ${version} to be excluded`);
+	}
+});
+
+test("the HOST's own evaluator accepts this manifest for a real 0.2.x runtime", async () => {
+	// The strongest guard available: rather than modelling the host's rule, run
+	// the host's actual `evaluatePluginCompatibility`. It is skipped when the
+	// package cannot be imported (it ships inside the DSH app, not on this
+	// plugin's dependency tree), so this never becomes a hard local requirement —
+	// but on a machine that has DSH installed it pins the real gate.
+	//
+	// This is what caught the earlier review's FALSE ALARM: `semver.satisfies`
+	// called WITHOUT `{ includePrerelease: true }` reports `0.2.1-rc.1` as
+	// unsatisfied, which looks like a broken peer range. The host passes that
+	// option, so the range was fine and no change was needed. Asserting against
+	// the real evaluator makes that distinction impossible to get wrong again.
+	const candidates = [
+		"/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js"
+	];
+	let host;
+	for (const candidate of candidates) {
+		try {
+			host = await import(candidate);
+			break;
+		} catch {
+			// Not on this machine, or a different install layout: fall through.
+		}
+	}
+	if (host?.evaluatePluginCompatibility === void 0) {
+		// Nothing to assert against; the fallback-model tests above still guard
+		// the range itself.
+		return;
+	}
+	for (const runtime of ["0.2.1-rc.1", "0.2.0-rc.2", "0.2.1", "0.1.7-rc.1"]) {
+		const unmet = host.evaluatePluginCompatibility(pkg, {}, runtime);
+		assert.equal(
+			unmet,
+			void 0,
+			`the host evaluator must accept this manifest on ${runtime}, got ${JSON.stringify(unmet)}`
+		);
 	}
 });
 

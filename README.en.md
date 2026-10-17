@@ -97,7 +97,7 @@ After installing, updating, or removing the bundle, restart the corresponding DS
 
 ### Host version requirement
 
-All eight `@deepseek-ai/*` peers are declared as **`>=0.1.7-rc.1 <0.3.0-0`**: the 0.1.7 line and the **entire 0.2.x line** (prereleases and stable releases alike) are supported; 0.3.0 and later are not declared.
+All nine `@deepseek-ai/*` peers are declared as **`>=0.1.7-rc.1 <0.3.0-0`**: the 0.1.7 line and the **entire 0.2.x line** (prereleases and stable releases alike) are supported; 0.3.0 and later are not declared.
 
 > ⚠️ The ceiling must carry the `-0` suffix (`<0.3.0-0`, not `<0.3.0`). DSH validates peers with
 > `semver.satisfies(runtime, range, { includePrerelease: true })`, and that option **disables the

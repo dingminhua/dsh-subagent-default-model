@@ -158,7 +158,7 @@ npm install dsh-subagent-default-model
 
 ## 宿主版本要求
 
-全部 8 个 `@deepseek-ai/*` peer 声明为 **`>=0.1.7-rc.1 <0.3.0-0`**：支持 0.1.7 线及其后的**整个 0.2.x 线**（prerelease 与正式版都放行），0.3.0 起不再声明支持。
+全部 9 个 `@deepseek-ai/*` peer 声明为 **`>=0.1.7-rc.1 <0.3.0-0`**：支持 0.1.7 线及其后的**整个 0.2.x 线**（prerelease 与正式版都放行），0.3.0 起不再声明支持。
 
 要理解这个区间为什么长这样，得先知道 DSH **怎么校验**它。`@deepseek-ai/dsh-app-boot` 对每个 `@deepseek-ai/dsh` / `dsh-*` peer 执行：
 

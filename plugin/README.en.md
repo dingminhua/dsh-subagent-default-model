@@ -158,7 +158,7 @@ Notes:
 
 ## Host version requirement
 
-All eight `@deepseek-ai/*` peers are declared as **`>=0.1.7-rc.1 <0.3.0-0`**: the 0.1.7 line and the **entire 0.2.x line** (prereleases and stable releases alike) are supported; 0.3.0 and later are not declared.
+All nine `@deepseek-ai/*` peers are declared as **`>=0.1.7-rc.1 <0.3.0-0`**: the 0.1.7 line and the **entire 0.2.x line** (prereleases and stable releases alike) are supported; 0.3.0 and later are not declared.
 
 To see why the range has this shape, look at how DSH **validates** it. For every `@deepseek-ai/dsh` / `dsh-*` peer, `@deepseek-ai/dsh-app-boot` runs:
 

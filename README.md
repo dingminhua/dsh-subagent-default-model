@@ -97,7 +97,7 @@ npm install dsh-subagent-default-model
 
 ### 宿主版本要求
 
-本插件声明全部 8 个 `@deepseek-ai/*` peer 为 **`>=0.1.7-rc.1 <0.3.0-0`**：支持 0.1.7 线及其后的**整个 0.2.x 线**（含 prerelease 与正式版），0.3.0 起不再声明支持。
+本插件声明全部 9 个 `@deepseek-ai/*` peer 为 **`>=0.1.7-rc.1 <0.3.0-0`**：支持 0.1.7 线及其后的**整个 0.2.x 线**（含 prerelease 与正式版），0.3.0 起不再声明支持。
 
 > ⚠️ 上界必须带 `-0`（`<0.3.0-0` 而非 `<0.3.0`）。DSH 用
 > `semver.satisfies(runtime, range, { includePrerelease: true })` 校验 peer，
