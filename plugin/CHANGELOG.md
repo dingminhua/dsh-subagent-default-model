@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.1.5 (2026-10-17)
 
 ### 兼容性核查：DSH Desktop 0.2.1-rc.1
 
