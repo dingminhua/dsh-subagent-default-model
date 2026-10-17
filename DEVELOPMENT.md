@@ -128,7 +128,7 @@ for (const [name, range] of Object.entries(dependencies)) {   // ← 只有 peer
 
 ## 设置命名空间白名单（当前版本已不需要）
 
-旧文档提到需要把 `subagent-default-model` 加入 `WEB_SETTINGS_NAMESPACES` 白名单。当前 DSH 版本（dsh 0.1.1-rc.2）的 `dsh-host-apiproxy` 已移除该白名单机制，`settings.describe` 直接返回全部已注册 namespace，**无需任何 patch**。
+旧文档提到需要把 `subagent-default-model` 加入 `WEB_SETTINGS_NAMESPACES` 白名单。较新 DSH 版本（已验证 0.2.1-rc.1）的 `dsh-host-apiproxy` 已移除该白名单机制，`settings.describe` 直接返回全部已注册 namespace，**无需任何 patch**。
 
 ## 测试
 
@@ -207,8 +207,8 @@ requestContext() {
 **宿主的真相**（`dsh-agent-loop`）：每轮迭代是
 
 ```text
-preStep()       ← :954   本插件的注入点
-buildRequest()  ← :1063  → 这里才触发 agent/request
+preStep()       ← 0.2.1-rc.1: :956   本插件的注入点
+buildRequest()  ← 0.2.1-rc.1: :1075  → 这里才触发 agent/request
 ```
 
 所以**第一步的 pre-step 执行时，`request/context` 帧尚不存在**。

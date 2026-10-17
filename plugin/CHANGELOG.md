@@ -8,14 +8,14 @@
 
 | 检查项 | 结论 |
 | --- | --- |
-| 插件加载与注入 | ✅ 真实子代理实测，注入生效 |
+| 插件加载与注入 | ✅ 派发子代理实测，注入行内容与实际路由一致（会话 `be5bae6b` / `b7df5721`） |
 | 4 个事件钩子 | ✅ `agent/pre-step`、`agent/request`、`agent/request-error`、`agent/disposed` 全部仍在 |
-| `preStep()` → `buildRequest()` 时序 | ✅ 未变（`:956` → `:1075`） |
+| `preStep()` → `buildRequest()` 时序 | ✅ 未变（0.2.1-rc.1 中 `:956` → `:1075`） |
 | `inbox.claim()` 先抽干 | ✅ 未变 |
 | `session.requestContext()` 语义 | ⚠️ 未变 —— 但复核发现它在**恢复会话**下返回上一轮的路由，已修 |
 | peer 区间覆盖 | ✅ 宿主 `evaluatePluginCompatibility()` 返回「无未满足要求」 |
 
-宿主的 `{{provider}}` / `{{model}}` 系统提示词变量仍读 `agent.options`（派发时值），会在路由切换后滞后 —— 这正是本插件注入行与它们并存的价值所在，详见 README「为什么还需要本插件」。
+宿主的 `{{provider}}` / `{{model}}` 系统提示词变量仍读 `agent.options`（派发时值，`dsh-agent-loop` 注册处即 `context.agent?.options.provider`），不含 provider 的实时性 —— 这正是本插件注入行仍有价值的原因。
 
 ### Fixed（独立评审发现）
 
