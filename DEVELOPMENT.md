@@ -151,7 +151,7 @@ node plugin/scripts/verify-mock-failover.mjs   # 需先起 mock：真实 429 →
 
 三个平台上的等价执行由 CI 保证；本地在 Windows 上开发时，上述命令在 PowerShell / cmd 中同样可用（不依赖 shell 展开）。
 
-## 测试夹具必须忠于宿主语义（三个真实教训）
+## 测试夹具必须忠于宿主语义（四个真实教训）
 
 **这一节是本仓最贵的一课。** 2.1.1–2.1.4 期间连续三个 P0 缺陷**全都通过全部测试**、却只有**真实运行**才暴露，根因是同一个：**夹具比宿主「宽松」**。夹具是代码，它读起来像在验证真实行为，但它验证的其实是「我理解的宿主」。
 
@@ -215,15 +215,36 @@ buildRequest()  ← :1063  → 这里才触发 agent/request
 
 **修法**：注入只报告**已知为真**的路由，优先级为 ① `session.requestContext()` → ② `agent/request` 瀑布结算后的种子 → ③ **不回落** `agent.options`。第 ③ 条是取舍：**注入行只是对现实的陈述，立刻被推翻的猜测比不说更糟**，故路由已知前保持沉默。
 
-### 复盘：为什么三次都没被测试拦住
+### 案例四：`requestContext()` 在**恢复的会话**上返回上一轮的路由
+
+**缺陷**：子代理被 resume 时，第 1 步（本轮尚未发出任何请求）就被标上**上一轮**的 provider/model。这比被它替换掉的 `agent.options` 种子**更旧** —— 后者至少是本轮的派发意图。
+
+**夹具的错**：`makeAgent()` 造的是**全新会话**，`requestContext()` 初始为 `undefined`。真实宿主恢复会话时（`Session.fromRestore`）把**上一轮的日志当作种子**，而 `requestContext()` 折叠整段日志：
+
+```js
+// dsh-session
+contextFoldSeq = 0;                       // 从头开始折叠整段 log
+requestContext() {
+  for (const event of this.log.slice(this.contextFoldSeq))
+    if (event.type === "request/context") this.contextFold = deepFreeze({ ...event.data });
+```
+
+于是「折叠出旧值」这个状态在夹具里**根本不存在**。实测确认：恢复会话在未发请求前就返回 `{"provider":"glm","model":"old-model"}`。
+
+**修法**：只在**本会话确实被恢复**（`session.header.isSeeded === true`）**且本轮尚未结算过请求**时，不采信折叠值；本轮请求结算后折叠重新可信。夹具增加 `seededFrom` 选项建模恢复会话。
+
+### 复盘：为什么这些都没被测试拦住
 
 | 案例 | 夹具缺了什么 | 宿主中的对应语义 |
 | --- | --- | --- |
 | 一 | 没有 `claim()` | `preStep` 开头抽干 inbox |
 | 二 | `requestContext` 是常量 | 折叠最新 `request/context` 的可变值 |
 | 三 | 瀑布顺序与宿主相反 | `preStep` 先于 `buildRequest` |
+| 四 | 只造全新会话 | `Session.fromRestore` 带着上一轮日志回来 |
 
-三者是同一个错误的三种形态：**夹具在「宿主会拒绝/会变化/会有序」的地方一律放行**。
+四者是同一个错误的四种形态：**夹具在「宿主会拒绝 / 会变化 / 会有序 / 会带着历史回来」的地方一律放行**。
+
+> 案例四尤其值得记住：它是在**修复完成、测试全绿、已经发布**之后，由独立评审根据「宿主会不会带着历史回来」这一问才发现的。前三个案例的修法把「取值的来源」换成了折叠值，但没有问**这个折叠值属于哪一轮**。
 
 ### 因此，每个注入/拦截类用例都应回答三个问题
 

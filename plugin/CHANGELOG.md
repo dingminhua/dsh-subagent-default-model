@@ -4,7 +4,7 @@
 
 ### 兼容性核查：DSH Desktop 0.2.1-rc.1
 
-当前宿主为 `0.2.1-rc.1`（此前为 `0.2.0-rc.2`）。逐项核查结论：**插件功能正常，无需改动运行时代码**。
+当前宿主为 `0.2.1-rc.1`（此前为 `0.2.0-rc.2`）。逐项核查的结论是**插件仍可正常运行**，但独立评审在复核中发现两个**与版本升级无关的既有缺陷**（恢复会话误报、半知路径渲染），已一并修复，见下节。
 
 | 检查项 | 结论 |
 | --- | --- |
@@ -12,10 +12,16 @@
 | 4 个事件钩子 | ✅ `agent/pre-step`、`agent/request`、`agent/request-error`、`agent/disposed` 全部仍在 |
 | `preStep()` → `buildRequest()` 时序 | ✅ 未变（`:956` → `:1075`） |
 | `inbox.claim()` 先抽干 | ✅ 未变 |
-| `session.requestContext()` 语义 | ✅ 未变 |
+| `session.requestContext()` 语义 | ⚠️ 未变 —— 但复核发现它在**恢复会话**下返回上一轮的路由，已修 |
 | peer 区间覆盖 | ✅ 宿主 `evaluatePluginCompatibility()` 返回「无未满足要求」 |
 
 宿主的 `{{provider}}` / `{{model}}` 系统提示词变量仍读 `agent.options`（派发时值），会在路由切换后滞后 —— 这正是本插件注入行与它们并存的价值所在，详见 README「为什么还需要本插件」。
+
+### Fixed（独立评审发现）
+
+- **恢复（resume）的子代理会被标上「上一轮」的路由**。`Session.fromRestore` 用上一轮的日志做种子，而 `requestContext()` 折叠的是**整段日志** —— 于是新一轮第 1 步、还没发出任何请求时，折叠结果就已经是旧路由。此时注入等于把一个**比派发种子更旧**的值当成现状。修法：仅当会话被恢复（`header.isSeeded`）**且**本轮尚未结算过请求时，不采信折叠值，保持沉默；本轮请求结算后折叠重新可信。
+- **半知的路径被渲染成 `model=unknown`**。原先判定是「provider 或 model 有一个非空即采用」，于是 `{provider:"workbuddy", model:""}` 会输出 `model=unknown`，而模型可能把它当事实复述。改为**两半都已知才报告**，与服务端（`agent/request` 侧）的判定口径一致。
+- **上一轮补的「直连宿主评估器」用例其实从未执行**。它 `import` 了 `app.asar` 内的路径 —— 普通 Node ESM 无法导入 asar（`ERR_MODULE_NOT_FOUND`，asar 是单个归档文件不是目录），于是走 `return` 分支**被计为 pass**，且是静默的。修法：改为**读取宿主源码文本**，在 `vm` 沙箱里用真实 `semver` 运行宿主的 `unmetRequirements`；找不到宿主时用 `t.skip` **显式跳过**，不再伪装成通过。同时该用例现在会断言「一个只拒绝 `0.2.1-rc.1` 的区间必须被宿主判为不满足」，即它要防的那个回归。
 
 ### Tests
 

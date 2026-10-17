@@ -76,20 +76,25 @@ function makeInbox() {
 }
 
 let messageSeq = 0;
-function makeAgent(id, { origin = "subagent" } = {}) {
+function makeAgent(id, { origin = "subagent", seededFrom = void 0 } = {}) {
 	// `session.requestContext()` folds the latest committed `request/context`,
 	// exactly as the Host session does. The injector treats it as the
 	// authoritative LIVE route, so the fixture must model it as a mutable value
 	// that `dispatchRequest` advances — a fixed stub would hide route changes
 	// (and did hide the stale-route bug this suite now guards).
-	let live;
+	//
+	// `seededFrom` models a RESTORED session: `Session.fromRestore` starts with
+	// the PREVIOUS run's log as its seed, so the fold already answers — with the
+	// OLD run's route — before this run has requested anything. The header's
+	// `isSeeded` flag is what the injector keys on to distrust that answer.
+	let live = seededFrom;
 	const agent = recordInjections({
 		id,
 		inbox: makeInbox(),
 		options: { provider: "deepseek-official", model: "deepseek-v4-pro" },
 		session: {
 			id,
-			header: { origin },
+			header: seededFrom === void 0 ? { origin } : { origin, isSeeded: true },
 			requestContext: () => live
 		}
 	});
@@ -534,4 +539,54 @@ test("disposal removes the injector (no listener leak)", async () => {
 	const before = injectedRouteMessages(agent).length;
 	await dispatchPreStep(harness.root, agent, [], { step: 2 });
 	assert.equal(injectedRouteMessages(agent).length, before, "a disposed plugin must not inject");
+});
+
+test("REGRESSION: a RESUMED session must not label step 1 with the PREVIOUS run's route", async () => {
+	// `Session.fromRestore` seeds the log with the previous run, and
+	// `requestContext()` folds that whole log — so before this run requests
+	// anything, the fold already returns the OLD route. Trusting it labels the
+	// new run with a route it is not using, which is exactly the class of bug
+	// the live-route fix was meant to end (only older than the dispatch seed).
+	const harness = await createHarness(ENABLED);
+	const agent = makeAgent("sub-resumed", {
+		seededFrom: { provider: "old-provider", model: "old-model" }
+	});
+
+	// Step 1: nothing requested in THIS run yet.
+	await dispatchPreStep(harness.root, agent, [], { step: 1 });
+	assert.equal(
+		injectedRouteMessages(agent).length,
+		0,
+		"the previous run's folded route must not be reported as this run's"
+	);
+
+	// This run then commits its own route: now the fold is evidence again.
+	await dispatchRequest(harness.root, agent, { provider: "new-provider", model: "new-model" }, { step: 1 });
+	await dispatchPreStep(harness.root, agent, [], { step: 2 });
+	const injected = injectedRouteMessages(agent);
+	assert.equal(injected.length, 1);
+	assert.ok(injected[0].content[0].text.includes("new-provider/new-model"));
+	assert.ok(
+		!injected[0].content[0].text.includes("old-provider"),
+		"the previous run's route must never surface"
+	);
+	await disposeHarness(harness);
+});
+
+test("a partially known route is NOT rendered (no `model=unknown` placeholder)", async () => {
+	// A half-filled fold used to pass the "either half is non-empty" test and
+	// render `model=unknown`, which the model could then repeat as fact. A route
+	// is either fully known or not reported.
+	const harness = await createHarness(ENABLED);
+	const agent = makeAgent("sub-partial");
+	// A fold with a provider but no model.
+	agent.commitRoute({ provider: "workbuddy", model: "" });
+
+	await dispatchPreStep(harness.root, agent, [], { step: 1 });
+	assert.equal(
+		injectedRouteMessages(agent).length,
+		0,
+		"a partial route must stay silent, not render a placeholder"
+	);
+	await disposeHarness(harness);
 });

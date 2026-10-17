@@ -36,9 +36,12 @@
 // options, and prefers the real `semver` package when it resolves.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import test from "node:test";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
+import test from "node:test";
+import vm from "node:vm";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const PEERS = Object.keys(pkg.peerDependencies ?? {});
@@ -297,44 +300,150 @@ test("the range excludes the next major line, prereleases included", () => {
 	}
 });
 
-test("the HOST's own evaluator accepts this manifest for a real 0.2.x runtime", async () => {
-	// The strongest guard available: rather than modelling the host's rule, run
-	// the host's actual `evaluatePluginCompatibility`. It is skipped when the
-	// package cannot be imported (it ships inside the DSH app, not on this
-	// plugin's dependency tree), so this never becomes a hard local requirement —
-	// but on a machine that has DSH installed it pins the real gate.
+test("the HOST's own evaluator accepts this manifest, when its source is readable", async (t) => {
+	// Run the HOST's real `evaluatePluginCompatibility` rather than re-modelling
+	// its rule. Two things must be handled honestly, because an earlier version
+	// of this test got BOTH wrong and passed while asserting nothing:
 	//
-	// This is what caught the earlier review's FALSE ALARM: `semver.satisfies`
-	// called WITHOUT `{ includePrerelease: true }` reports `0.2.1-rc.1` as
-	// unsatisfied, which looks like a broken peer range. The host passes that
-	// option, so the range was fine and no change was needed. Asserting against
-	// the real evaluator makes that distinction impossible to get wrong again.
-	const candidates = [
-		"/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js"
-	];
-	let host;
-	for (const candidate of candidates) {
-		try {
-			host = await import(candidate);
-			break;
-		} catch {
-			// Not on this machine, or a different install layout: fall through.
-		}
-	}
-	if (host?.evaluatePluginCompatibility === void 0) {
-		// Nothing to assert against; the fallback-model tests above still guard
-		// the range itself.
+	//   1. READING THE SOURCE. The host lives inside `app.asar`, which plain Node
+	//      ESM cannot import (`ERR_MODULE_NOT_FOUND` — an asar is one archive file,
+	//      not a directory). Worse, the module's own bare imports (`semver`, …)
+	//      would not resolve even from an extracted copy. So rather than import
+	//      it, READ THE TEXT of the evaluator and exercise it with a tiny
+	//      `vm` sandbox whose imports we satisfy ourselves.
+	//   2. REPORTING THE SKIP. If the host cannot be found, the test must SKIP
+	//      LOUDLY (`t.skip`), never `return` — a silent return is counted as a
+	//      pass and inflates the suite's apparent coverage.
+	//
+	// The host's own gate is what rejected the earlier review's false alarm:
+	// `semver.satisfies(v, range)` WITHOUT `{ includePrerelease: true }` says
+	// `0.2.1-rc.1` is unsatisfied, which reads as a broken peer range. The host
+	// passes that option, so the range was fine.
+	const homes = [
+		process.env.DSH_APP_BOOT,
+		"/Applications/DeepSeek Harness.app/Contents/Resources/app.asar",
+		"/Applications/DSH Desktop.app/Contents/Resources/app.asar",
+		"/Applications/DSH NEXT.app/Contents/Resources/app.asar"
+	].filter((value) => typeof value === "string" && value !== "");
+
+	const evaluator = findHostEvaluator(homes);
+	if (evaluator === void 0) {
+		// Loud, not silent: the skip is visible in the test name output.
+		t.skip("no DSH installation found (set DSH_APP_BOOT to an app.asar to enable this check)");
 		return;
 	}
-	for (const runtime of ["0.2.1-rc.1", "0.2.0-rc.2", "0.2.1", "0.1.7-rc.1"]) {
-		const unmet = host.evaluatePluginCompatibility(pkg, {}, runtime);
-		assert.equal(
+
+	// `unmetRequirements` is the host's judgement. `engines.dsh` wins when
+	// present; otherwise every dsh peer must satisfy the runtime version.
+	const unmetRequirements = evaluator;
+	for (const runtime of ["0.1.7-rc.1", "0.2.0-rc.2", "0.2.1-rc.1", "0.2.1"]) {
+		const unmet = unmetRequirements(pkg, runtime);
+		assert.deepEqual(
 			unmet,
-			void 0,
-			`the host evaluator must accept this manifest on ${runtime}, got ${JSON.stringify(unmet)}`
+			{},
+			`the host must accept this manifest on ${runtime}, got ${JSON.stringify(unmet)}`
 		);
 	}
+
+	// And it must still REJECT the shape this guard exists to prevent: a range
+	// that drops exactly one 0.2.x spelling.
+	const narrow = {
+		name: pkg.name,
+		version: pkg.version,
+		peerDependencies: { "@deepseek-ai/dsh-settings": ">=0.1.7-rc.1 <0.2.0 || >=0.2.0 <0.2.1-0 || >=0.2.1 <0.3.0-0" }
+	};
+	assert.notDeepEqual(
+		unmetRequirements(narrow, "0.2.1-rc.1"),
+		{},
+		"a range that rejects 0.2.1-rc.1 must be reported as unmet"
+	);
 });
+
+/**
+ * Locate and extract the host's `unmetRequirements` implementation.
+ *
+ * Reads `dsh-app-boot` out of the shim's extracted tree when present, else out of
+ * an app.asar via `asar`. Returns a `(manifest, runtime) => unmet` function
+ * evaluated in a `vm` sandbox, or `undefined` when the host is unavailable.
+ *
+ * @param {readonly string[]} homes - candidate app.asar paths, or a plugin dir.
+ * @returns {((manifest: object, runtime: string) => object)|undefined} the evaluator.
+ */
+function findHostEvaluator(homes) {
+	const sources = [];
+	for (const home of homes) {
+		try {
+			// An already-extracted tree (the review workflow uses these).
+			const direct = join(home, "dsh", "node_modules", "@deepseek-ai", "dsh-app-boot", "lib", "index.js");
+			if (existsSync(direct)) sources.push(readFileSync(direct, "utf8"));
+		} catch {
+			// Different layout; keep looking.
+		}
+		try {
+			if (home.endsWith(".asar") && existsSync(home)) {
+				const out = execFileSync(process.execPath, [
+					createRequire(import.meta.url).resolve("asar"),
+					"extract-file", home, "dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js"
+				], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+				if (out.trim() !== "") sources.push(out);
+			}
+		} catch {
+			// No `asar` CLI, or the file is absent.
+		}
+	}
+	for (const source of sources) {
+		const fn = extractUnmetRequirements(source);
+		if (fn !== void 0) return fn;
+	}
+	return undefined;
+}
+
+/**
+ * Pull `unmetRequirements` out of the host bundle and wire it to the real semver.
+ *
+ * The host bundles that function together with its helpers; rather than
+ * re-implement the rule, take the function's own source text and run it in a
+ * sandbox that supplies exactly the names it closes over.
+ *
+ * @param {string} source - `dsh-app-boot/lib/index.js` text.
+ * @returns {((manifest: object, runtime: string) => object)|undefined} evaluator.
+ */
+function extractUnmetRequirements(source) {
+	const start = source.indexOf("function unmetRequirements(");
+	if (start < 0) return undefined;
+	// Brace-match to the end of the function body.
+	let depth = 0;
+	let index = source.indexOf("{", start);
+	const from = index;
+	for (; index < source.length; index += 1) {
+		if (source[index] === "{") depth += 1;
+		else if (source[index] === "}") {
+			depth -= 1;
+			if (depth === 0) break;
+		}
+	}
+	const body = source.slice(start, index + 1);
+	const helpers = ["objectOf$1", "satisfies"].map((name) => {
+		const at = source.indexOf(`function ${name}(`);
+		if (at < 0) return "";
+		let d = 0;
+		let i = source.indexOf("{", at);
+		for (; i < source.length; i += 1) {
+			if (source[i] === "{") d += 1;
+			else if (source[i] === "}") {
+				d -= 1;
+				if (d === 0) break;
+			}
+		}
+		return source.slice(at, i + 1);
+	});
+	if (helpers.some((text) => text === "")) return undefined;
+	const sandbox = vm.createContext({ semver: createRequire(import.meta.url)("semver") });
+	vm.runInContext(`${helpers.join("\n")}\n${body}\n`, sandbox);
+	const candidate = sandbox.unmetRequirements;
+	if (typeof candidate !== "function") return undefined;
+	return (manifest, runtime) => JSON.parse(JSON.stringify(candidate(manifest, runtime)));
+}
 
 test("pre-floor 0.1.7 prereleases are excluded (alpha < rc.1)", () => {
 	// The pin is `>=0.1.7-rc.1`, so earlier prereleases of the SAME tuple are

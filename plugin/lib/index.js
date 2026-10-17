@@ -445,6 +445,32 @@ function isRouteContextMessage(message) {
 }
 
 /**
+ * Has this agent built a request yet in the CURRENT run?
+ *
+ * `session.requestContext()` folds over the session's whole event log, and a
+ * RESTORED session (`Session.fromRestore`) starts with the PREVIOUS run's log as
+ * its seed. So on step 1 of a resumed subagent the fold already returns the old
+ * run's route — before this run has chosen anything. Trusting it would label the
+ * new run with the previous run's provider/model: the same "authoritative but
+ * wrong" failure as the dispatch-seed bug, only older.
+ *
+ * The plugin's own `agent/request` listener records a route only once a request
+ * settles, so a per-agent "has requested" flag separates "this run has chosen"
+ * from "history says something".
+ *
+ * @param {object} agent - the loop agent.
+ * @param {Map} settled - per-agent settled-seed cache (its key presence is the flag).
+ * @returns {boolean} true when the fold can only be describing an earlier run.
+ */
+function isStaleFold(agent, settled) {
+	// Only a actually-restored session can carry another run's log. A fresh
+	// session's fold is always produced by this run, so never second-guess it.
+	const seeded = agent?.session?.header?.isSeeded;
+	if (seeded !== true) return false;
+	return settled.has(agent?.id) === false;
+}
+
+/**
  * Resolve the route the agent is ACTUALLY using, or `undefined` when that is
  * not yet knowable.
  *
@@ -470,12 +496,18 @@ function isRouteContextMessage(message) {
  */
 function routeForInjection(agent, settled) {
 	// The session's fold of the latest `request/context` — authoritative and
-	// current, and what the host itself treats as "the latest resolved route".
+	// current FOR THE RUN THAT PRODUCED IT, and what the host itself treats as
+	// "the latest resolved route".
+	//
+	// BOTH halves must be known: a half-filled fold (`{provider:"workbuddy",
+	// model:""}`) used to render as `model=unknown`, which is exactly the
+	// "report a guess" failure this function exists to avoid. The request side
+	// rejects the same shape, so both ends agree on what a route is.
 	const live = agent?.session?.requestContext?.();
 	if (live !== void 0 && live !== null) {
 		const provider = typeof live.provider === "string" ? live.provider : "";
 		const model = typeof live.model === "string" ? live.model : "";
-		if (provider !== "" || model !== "") return { provider, model };
+		if (provider !== "" && model !== "" && !isStaleFold(agent, settled)) return { provider, model };
 	}
 	// A request already built by this plugin's own waterfall: still authoritative
 	// for that request, and normally identical to the fold above.
