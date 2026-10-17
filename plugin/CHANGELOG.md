@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.1.7 (2026-10-18)
+
+### Fixed
+
+- **DSH 0.2.x 上「多模型分配」整体空转**。宿主把派发入口从 `ctx.subagents.start(name, request)` / `startContinuable(spec)` 改成了 **`startActivation(spec)`**，而 `subagent` / `subagent_fork` 工具与 agent-team 的 `spawn_teammate` **都只调 `startActivation`**——旧的两个方法在服务上已无任何调用方。插件仍只包装旧方法，于是 `applyDefaultModel()` 从未执行，子代理静默继承父会话路由：配置 `workbuddy/space-bunny`，实际却跑在父会话的 `deepseek-flash` 上。
+
+  这就是「设置看起来生效、行为却是父路由」的隐蔽失败：面板显示正确、日志无异常、子代理照常工作，只是没走配置的路由。
+
+  修法：`installSubagentWrapper` 同时包装 `startActivation(spec)`，在 `spec.request` 上注入默认模型；`start` / `startContinuable` 继续包装以兼容旧宿主。未注入时**保持原 spec 引用**（不克隆），避免宿主侧的身份比较出现无意义差异。
+
+  > 现场取证方式：子代理会话首事件 `subagent/descriptor` 里固化了 `agentProvider` / `agentModel` / `agentReasoningEffort`，与插件配置对比即可判定注入是否发生——比读设置面板可靠。
+
+### Notes
+
+- **预检错误不触发故障转移**。像 `MISSING_CREDENTIAL`（provider 的路由凭据缺失）这类错误发生在请求发出之前，不在切换名单内，插件会原样放行。名单仍然只包含运行期的连接类与认证类错误码。
+
+### Tests
+
+- 新增 3 个用例：`legacy: false` 的主机（只有 `startActivation`）必须注入、显式 `agentOptions` 不被覆盖且 spec 引用不变、无配置时保持继承。
+- 变异验证：把 `startActivation` 的包装赋值去掉 → 2 项失败（注入用例 + 卸载恢复用例）。
+- 全量：`tests 152 / pass 152 / fail 0 / skip 0`。
+
 ## 2.1.6 (2026-10-17)
 
 ### 兼容性核查：DSH Desktop 0.2.1-rc.2

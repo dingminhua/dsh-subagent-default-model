@@ -299,7 +299,7 @@ else model (+ provider) is non-empty  → use that single route
 else                                  → no injection; the host inherits the parent-session route
 ```
 
-The plugin wraps the host `ctx.subagents` service (`start` / `startContinuable`), so it covers every delegation path — built-in `subagent` / `subagent_fork` tools and any custom tool that calls the service without providing `agentOptions`.
+The plugin wraps the host `ctx.subagents` service (`startActivation` on DSH 0.2.x, plus the legacy `start` / `startContinuable`), so it covers every delegation path — built-in `subagent` / `subagent_fork` tools, the agent-team `spawn_teammate` path, and any custom tool that calls the service without providing `agentOptions`.
 
 ## License
 

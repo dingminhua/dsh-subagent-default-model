@@ -41,7 +41,7 @@
 
 - **单模型默认路由**：所有未显式选模型的子代理使用同一条配置路由。
 - **逐路由推理强度**：每个模型条目可独立配置 `reasoningEffort`。
-- **完整覆盖派发入口**：同时包装 `start()` 与 `startContinuable()`，覆盖 `subagent`、`subagent_fork` 以及其他调用 `ctx.subagents` 的发起方。
+- **完整覆盖派发入口**：包装 0.2.x 的 `startActivation()` 与旧版 `start()` / `startContinuable()`，覆盖 `subagent`、`subagent_fork`、`spawn_teammate` 以及其他调用 `ctx.subagents` 的发起方。
 - **设置热更新**：编辑设置后，下一次派发立即采用新配置。
 - **干净卸载**：Cordis 销毁插件时恢复原始服务方法。
 - **原生设置卡片**：可在 `设置 → 插件配置 → 子代理默认模型` 中完成配置。

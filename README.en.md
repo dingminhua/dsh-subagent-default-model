@@ -41,7 +41,7 @@ A standalone [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-ha
 
 - **Single-model default route**: all subagents without an explicit model use one configured route.
 - **Per-route reasoning effort**: each model entry can set its own `reasoningEffort`.
-- **Full dispatch coverage**: wraps both `start()` and `startContinuable()`, covering `subagent`, `subagent_fork`, and any other caller of `ctx.subagents`.
+- **Full dispatch coverage**: wraps the 0.2.x `startActivation()` plus the legacy `start()` / `startContinuable()`, covering `subagent`, `subagent_fork`, `spawn_teammate`, and any other caller of `ctx.subagents`.
 - **Hot settings reload**: the next delegation picks up edited settings immediately.
 - **Clean teardown**: Cordis disposal restores the original service methods.
 - **Native settings card**: configure it under `Settings → Plugins → Subagent default model`.

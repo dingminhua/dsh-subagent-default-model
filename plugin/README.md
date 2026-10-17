@@ -299,7 +299,7 @@ CI 在 `ubuntu-latest`、`windows-latest`、`macos-latest` 三个平台上同时
 否则                            → 不注入；由宿主自行继承父会话路由
 ```
 
-插件包装宿主 `ctx.subagents` 服务（`start` / `startContinuable`），覆盖所有派发路径 —— 内置的 `subagent` / `subagent_fork` 工具，以及任何调用该服务但未提供 `agentOptions` 的自定义工具。
+插件包装宿主 `ctx.subagents` 服务（DSH 0.2.x 的 `startActivation`，以及旧版 `start` / `startContinuable`），覆盖所有派发路径 —— 内置的 `subagent` / `subagent_fork` 工具、agent-team 的 `spawn_teammate`，以及任何调用该服务但未提供 `agentOptions` 的自定义工具。
 
 ## 许可证
 

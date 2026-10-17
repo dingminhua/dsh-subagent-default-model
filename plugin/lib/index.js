@@ -628,6 +628,12 @@ function installSubagentWrapper(ctx, state) {
 
 	const originalStart = raw.start;
 	const originalStartContinuable = raw.startContinuable;
+	// DSH 0.2.x unified every delegation entry point on `startActivation(spec)`:
+	// `subagent` / `subagent_fork` and the agent-team `spawn_teammate` path all
+	// call it directly, and the old `start` / `startContinuable` service methods
+	// no longer have any caller. Wrapping only those two therefore selected no
+	// route at all on 0.2.x (children silently inherited the parent route).
+	const originalStartActivation = raw.startActivation;
 	const wrappedStart = typeof originalStart === "function"
 		? async (name, request) => originalStart.call(raw, name, applyDefaultModel(state, request))
 		: void 0;
@@ -640,10 +646,23 @@ function installSubagentWrapper(ctx, state) {
 			});
 		}
 		: void 0;
+	const wrappedStartActivation = typeof originalStartActivation === "function"
+		? async (spec) => {
+			if (spec === void 0 || spec === null) return originalStartActivation.call(raw, spec);
+			const request = applyDefaultModel(state, spec.request);
+			// Keep the spec reference when nothing was injected: host code compares
+			// identity and a needless clone would be a silent behaviour change.
+			return originalStartActivation.call(raw, request === spec.request ? spec : {
+				...spec,
+				request
+			});
+		}
+		: void 0;
 
-	if (wrappedStart === void 0 && wrappedStartContinuable === void 0) return;
+	if (wrappedStart === void 0 && wrappedStartContinuable === void 0 && wrappedStartActivation === void 0) return;
 	if (wrappedStart !== void 0) raw.start = wrappedStart;
 	if (wrappedStartContinuable !== void 0) raw.startContinuable = wrappedStartContinuable;
+	if (wrappedStartActivation !== void 0) raw.startActivation = wrappedStartActivation;
 	raw[WRAPPED] = state;
 
 	// Service method replacement is not a Cordis-managed contribution by itself.
@@ -651,6 +670,7 @@ function installSubagentWrapper(ctx, state) {
 	ctx.effect(() => () => {
 		if (wrappedStart !== void 0 && raw.start === wrappedStart) raw.start = originalStart;
 		if (wrappedStartContinuable !== void 0 && raw.startContinuable === wrappedStartContinuable) raw.startContinuable = originalStartContinuable;
+		if (wrappedStartActivation !== void 0 && raw.startActivation === wrappedStartActivation) raw.startActivation = originalStartActivation;
 		if (raw[WRAPPED] === state) delete raw[WRAPPED];
 	});
 }
