@@ -48,6 +48,26 @@ const PEERS = Object.keys(pkg.peerDependencies ?? {});
 /** The range every peer must declare: 0.1.7 floor, stop before 0.3.0. */
 const EXPECTED_RANGE = /^>=\s*0\.1\.7-rc\.1\s*<\s*0\.3\.0-0$/;
 
+/**
+ * Every host version this plugin is actually developed against.
+ *
+ * The list MUST spell out each prerelease explicitly. `includePrerelease:
+ * true` lets the range admit the whole `0.2.x` line, so a list that only
+ * names `0.2.0-rc.2` and the stable `0.2.1` never asserts the exact
+ * spelling of a real, running host — and a range that rejected only that one
+ * spelling would still leave every guard here green.
+ *
+ * The list has gone stale twice (2.1.5, 2.1.6): each time a host upgrade
+ * landed and the version was only discovered by reading the app bundle.
+ * `the RUNNING host version must be admitted` below now derives the installed
+ * version from the app bundle itself, so a stale list fails the suite instead
+ * of waiting to be noticed.
+ */
+const ADMITTED_HOST_VERSIONS = [
+	"0.2.0-rc.1", "0.2.0-rc.2", "0.2.0",
+	"0.2.1-rc.1", "0.2.1-rc.2", "0.2.1-rc.3", "0.2.1", "0.2.5-rc.1"
+];
+
 /** The exact options `dsh-app-boot` passes to `semver.satisfies`. */
 const HOST_SEMVER_OPTIONS = { includePrerelease: true };
 
@@ -279,13 +299,12 @@ test("REGRESSION: the whole 0.2.x line is admitted, stable release included", ()
 	// `0.2.1-rc.1` would have left this guard green.
 	//
 	// `0.2.1-rc.2` was added after DSH Desktop moved to it: the same lesson,
-	// re-learned. Every host version this plugin is actually developed against
-	// belongs in this list the moment it becomes the running host.
+	// re-learned. `0.2.1-rc.3` was added after the next host upgrade, and it
+	// is the version this plugin is running against right now. Every host
+	// version this plugin is actually developed against belongs in this list
+	// the moment it becomes the running host.
 	const range = pkg.peerDependencies["@deepseek-ai/dsh-settings"];
-	for (const version of [
-		"0.2.0-rc.1", "0.2.0-rc.2", "0.2.0",
-		"0.2.1-rc.1", "0.2.1-rc.2", "0.2.1", "0.2.5-rc.1"
-	]) {
+	for (const version of ADMITTED_HOST_VERSIONS) {
 		assert.equal(
 			satisfies(range, version),
 			true,
@@ -339,10 +358,11 @@ test("the HOST's own evaluator accepts this manifest, when its source is readabl
 	// `unmetRequirements` is the host's judgement. `engines.dsh` wins when
 	// present; otherwise every dsh peer must satisfy the runtime version.
 	// The list must contain the version this plugin is ACTUALLY developed
-	// against: `0.2.1-rc.2` is the shipping DSH Desktop at the time of writing,
-	// and asserting only "some 0.2.x" is what let the list go stale before.
+	// against: `0.2.1-rc.3` is the shipping DSH Desktop at the time of
+	// writing, and asserting only "some 0.2.x" is what let the list go stale
+	// before.
 	const unmetRequirements = evaluator;
-	for (const runtime of ["0.1.7-rc.1", "0.2.0-rc.2", "0.2.1-rc.1", "0.2.1-rc.2", "0.2.1"]) {
+	for (const runtime of ["0.1.7-rc.1", "0.2.0-rc.2", "0.2.1-rc.1", "0.2.1-rc.2", "0.2.1-rc.3", "0.2.1"]) {
 		const unmet = unmetRequirements(pkg, runtime);
 		assert.deepEqual(
 			unmet,
@@ -364,6 +384,84 @@ test("the HOST's own evaluator accepts this manifest, when its source is readabl
 		"a range that rejects 0.2.1-rc.1 must be reported as unmet"
 	);
 });
+
+test("the RUNNING host version must be admitted by the peer range", async (t) => {
+	// The list of host versions this plugin is developed against has gone stale
+	// TWICE (2.1.5, 2.1.6): a host upgrade landed, the plugin kept working, and
+	// the version nobody had asserted was the version actually running. Both
+	// times the gap was closed by hand, in the same commit as the upgrade — a
+	// ritual, and rituals are exactly what a busy week drops.
+	//
+	// So the running host now CHECKS ITSELF IN. The installed DSH Desktop
+	// version is read out of the app bundle, and two things are asserted:
+	//
+	//   1. the peer range admits it (the host would otherwise drop this bundle
+	//      into `skippedBundles` — the plugin AND its settings card vanish);
+	//   2. it is spelled out in `ADMITTED_HOST_VERSIONS`, so the explicit
+	//      prerelease list cannot drift away from reality either.
+	//
+	// Without a host on this machine the check SKIPS LOUDLY. A silent skip
+	// would be the same "passes while asserting nothing" failure this file has
+	// already fixed twice.
+	const homes = [
+		process.env.DSH_APP_BOOT,
+		"/Applications/DeepSeek Harness.app/Contents/Resources/app.asar",
+		"/Applications/DSH Desktop.app/Contents/Resources/app.asar",
+		"/Applications/DSH NEXT.app/Contents/Resources/app.asar"
+	].filter((value) => typeof value === "string" && value !== "");
+
+	const running = findRunningHostVersion(homes);
+	if (running === undefined) {
+		t.skip("no DSH installation found (set DSH_APP_BOOT to an app.asar to enable this check)");
+		return;
+	}
+
+	const range = pkg.peerDependencies["@deepseek-ai/dsh-settings"];
+	assert.equal(
+		satisfies(range, running),
+		true,
+		`the running host ${running} must satisfy the peer range ${range}`
+	);
+	assert.equal(
+		ADMITTED_HOST_VERSIONS.includes(running),
+		true,
+		`the running host ${running} must be listed in ADMITTED_HOST_VERSIONS (the explicit prerelease list)`
+	);
+});
+
+/**
+ * Read the version of the DSH Desktop installation on this machine.
+ *
+ * The host's own version lives in `dsh/node_modules/@deepseek-ai/dsh/package.json`
+ * inside the app bundle. An already-extracted tree (the review workflow's
+ * layout) is read directly; an `app.asar` is read with the hand-written
+ * reader below.
+ *
+ * @param {readonly string[]} homes - candidate app.asar paths, or a plugin dir.
+ * @returns {string|undefined} the host version, or `undefined` when not found.
+ */
+function findRunningHostVersion(homes) {
+	const relative = join("dsh", "node_modules", "@deepseek-ai", "dsh", "package.json");
+	for (const home of homes) {
+		try {
+			if (existsSync(home) && statSync(home).isDirectory()) {
+				const direct = join(home, relative);
+				if (!existsSync(direct)) continue;
+				const version = JSON.parse(readFileSync(direct, "utf8")).version;
+				if (typeof version === "string") return version;
+				continue;
+			}
+			if (!home.endsWith(".asar")) continue;
+			const source = readFileFromAsar(home, relative.split(sep).join("/"));
+			if (source === undefined) continue;
+			const version = JSON.parse(source).version;
+			if (typeof version === "string") return version;
+		} catch {
+			// Different layout, corrupt archive, or unreadable file; keep looking.
+		}
+	}
+	return undefined;
+}
 
 /**
  * Locate and extract the host's `unmetRequirements` implementation.
@@ -415,8 +513,22 @@ function findHostEvaluator(homes) {
  * padded JSON string size | UNPADDED JSON length — then the JSON directory
  * tree, then a payload whose file offsets are relative to the end of the
  * preamble + header. The third and fourth words look interchangeable and are
- * not: the third is padded to 4 bytes and includes the trailing padding, so
- * parsing it yields `Unexpected non-whitespace character after JSON`.
+ * The third and fourth words look interchangeable and are not: the third is
+ * padded to 4 bytes and includes the trailing padding, so parsing it yields
+ * `Unexpected non-whitespace character after JSON`.
+ *
+ * THE PAYLOAD BASE IS `8 + headerSize`, NOT `16 + headerSize`. The header is
+ * itself a pickle: the four words ARE that pickle's framing, the JSON
+ * directory tree starts at byte 16, and the payload starts at byte
+ * `8 + headerSize`. Reading with `16 + headerSize` lands 8 bytes too far in:
+ * every file comes back with its first 8 bytes REPLACED by the tail of the
+ * previous file and its last 8 bytes cut off.
+ *
+ * That mistake stayed invisible here for years, because the only reader of
+ * this helper searched the text for a substring (`function unmetRequirements(`)
+ * and a shifted copy still contains it. Reading a file AS JSON — which the
+ * running-host-version check does — turns the same shift into a hard parse
+ * error: the text starts mid-token (`e": "@deepseek-ai/dsh", …`).
  *
  * @param {string} archive - path to the `.asar` file.
  * @param {string} archivePath - POSIX-style path inside the archive.
@@ -441,7 +553,7 @@ function readFileFromAsar(archive, archivePath) {
 		// An unpacked entry lives in `app.asar.unpacked/`, not in the archive.
 		if (node.files !== void 0 || node.unpacked === true) return undefined;
 		const bytes = Buffer.alloc(Number(node.size));
-		const at = 16 + headerSize + Number(node.offset);
+		const at = 8 + headerSize + Number(node.offset);
 		if (readSync(fd, bytes, 0, bytes.length, at) !== bytes.length) return undefined;
 		return bytes.toString("utf8");
 	} finally {

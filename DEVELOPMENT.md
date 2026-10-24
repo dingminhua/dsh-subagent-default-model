@@ -89,7 +89,8 @@ semver.satisfies(runtimeVersion, range, { includePrerelease: true })
 - **不要为了「只支持 0.1.7」而写 `<0.2.0`**——它挡不住 `0.2.0-rc.1`，却挡住正式的 `0.2.0`。
 - 上界写错时宿主**不降级**：`loadProfileDirectory()` 抛错 → 该 bundle 进 `skippedBundles` → stderr 输出 `skipping profile bundle "dsh-subagent-default-model"`，插件本体与设置卡片一起消失。
 - `plugin/test/peer-range.test.mjs` 是护栏，**必须与 `package.json` 同步改**；它调用宿主同款的 `semver.satisfies(..., { includePrerelease: true })`，并用手写回退实现做交叉验证（不支持的 `^` / `~` 语法会抛错而非静默返回 `false`）。
-- **「应当通过」的版本清单必须对预发布显式列举**：`includePrerelease: true` 让区间放行整条 `0.2.x`，但清单若只写 `0.2.0-rc.2` 与稳定的 `0.2.1`，那么 **真实运行中的 `0.2.1-rc.1` 从未被断言过**。DSH Desktop 0.2.1-rc.1 正是这样的运行时。清单里已补 `0.2.1-rc.1`。**每换一次宿主版本就补一行**——`0.2.1-rc.2` 已经这样补过一次，规则与代价完全相同。
+- **「应当通过」的版本清单必须对预发布显式列举**：`includePrerelease: true` 让区间放行整条 `0.2.x`，但清单若只写 `0.2.0-rc.2` 与稳定的 `0.2.1`，那么 **真实运行中的 `0.2.1-rc.1` 从未被断言过**。DSH Desktop 0.2.1-rc.1 正是这样的运行时。清单里已补 `0.2.1-rc.1`。**每换一次宿主版本就补一行**——`0.2.1-rc.2`、`0.2.1-rc.3` 已经这样补过两次，规则与代价完全相同。
+  - **这条规则已经靠人执行失效过三次**（2.1.5、2.1.6、2.1.8）。清单现已抽成 `ADMITTED_HOST_VERSIONS` 常量，并新增用例「the RUNNING host version must be admitted by the peer range」：它从本机安装的宿主里读出**实际运行版本**并断言它在清单里。**宿主升级而清单没跟上 → 测试直接失败**，不再依赖记性。
 - 想诚实表达「仅 0.1.7 线」时，正确写法是 `>=0.1.7-rc.1 <0.2.0-0`（同时挡住 `0.2.0-rc.1` 与 `0.2.0`），而不是 `<0.2.0`。
 
 ### `peerDependenciesMeta: { optional: true }` 不参与宿主校验
@@ -132,12 +133,55 @@ createRequire(import.meta.url).resolve("asar")   // ❌ 本仓没有 asar 依赖
 现在改为**纯 Node 手写读取 asar**（零依赖）：16 字节前言 + JSON 目录树 + 载荷偏移。
 
 ```text
-uint32le 4 | uint32le payloadSize | uint32le paddedJsonSize | uint32le jsonLength
+uint32le 4 | uint32le headerSize | uint32le paddedJsonSize | uint32le jsonLength
 ```
 
 **第四个字段（未补零的 JSON 长度）才是要 `JSON.parse` 的那个**，第三个字段包含尾部补零，直接解析会抛 `Unexpected non-whitespace character after JSON`。这个错在修复过程中真实发生过一次，别凭直觉改回去。
 
+#### 载荷基址是 `8 + headerSize`，不是 `16 + headerSize`（0.2.1-rc.3 排查）
+
+这四个 uint32 **本身就是头部 pickle 的框架**：JSON 目录树从第 16 字节开始，而**载荷**从 `8 + headerSize` 开始。原实现按 `16 + headerSize` 取字节，于是**每个文件都被读偏 8 字节**——开头 8 字节被上一个文件的尾部顶替，末尾 8 字节被截断。
+
+这个错长期没被发现，是因为该读取器唯一的用途是**在文本里搜子串**（`function unmetRequirements(`），读偏的副本照样搜得到。**一旦按 JSON 解析就立刻炸**：
+
+```text
+Unexpected token 'e', "e": "@deepseek-ai/dsh", … is not valid JSON
+```
+
+0.2.1-rc.3 排查新增的「运行中的宿主版本」用例是第一个**按 JSON 读**它的用例，一上来就踩中（文件真正的开头是 `{`）。判据：**同一个读取器，换一种用法（搜子串 → 解析结构）就可能暴露旧的偏移错误**；修复后仍应验证两类用法都成立。
+
 > 判据：**「跳过」不是「通过」，也不是「验证过」。** 每次看测试结果都要确认那个本该执行的用例出现在 `✔` 而不是 `﹣` 里；它一旦变成 `﹣`，就意味着宿主契约当前**无人在看**。
+
+## 宿主升级流程（每次换宿主版本都走一遍）
+
+「应当通过」的宿主版本清单**已经滞后过三次**（2.1.5、2.1.6、2.1.8 各一次），每次都是「宿主先升级、清单靠人记得补」。所以现在清单**由宿主自己核对**：
+
+```bash
+# 1. 看宿主当前版本（安装包内 @deepseek-ai/dsh 的 package.json）
+node -e '…手写 asar 读取…'   # 或直接看 app.asar 内该文件的 version
+
+# 2. 补进 ADMITTED_HOST_VERSIONS（plugin/test/peer-range.test.mjs）
+#    —— 漏了的话，「the RUNNING host version must be admitted」用例会直接失败
+
+# 3. 逐项核对插件依赖的宿主契约（行号要重新 grep，别抄上一版）
+grep -n 'preStep\|buildRequest\|inbox.claim\|request/context' app.asar 内 dsh-agent-loop/lib/index.js
+
+# 4. 跑全套测试，确认 skip 0
+npm --prefix plugin test
+```
+
+第 3 步要核对的清单（0.2.1-rc.3 实测行号）：
+
+| 契约 | rc.2 | rc.3 |
+| --- | --- | --- |
+| `preStep()` 定义 / `inbox.claim()` | `:902` / `:906` | `:902` / `:906`（未变） |
+| `agent/pre-step` 瀑布 / 默认决策 | `:909` / `:917` | `:909` / `:917`（未变） |
+| `buildRequest()` 定义 | `:1214` | `:1214`（未变） |
+| `request/context` append | `:1271` | `:1271`（未变） |
+| `session.requestContext()` | — | `:1627` |
+| `subagents.startActivation()` | — | `dsh-subagent` `:3036` |
+
+> 行号是**核对时的快照**，不是契约：它在 0.2.1-rc.1 → rc.2 之间整体下移过，在 rc.2 → rc.3 之间**没有再动**。每次升级都重新 `grep` 一遍，别照抄上一版。
 
 ## 不要做的事
 
@@ -227,13 +271,13 @@ requestContext() {
 **宿主的真相**（`dsh-agent-loop`）：每轮迭代是
 
 ```text
-preStep()       ← 0.2.1-rc.2: :902   （:956 调用本插件的注入点）
-buildRequest()  ← 0.2.1-rc.2: :1214  （:1075 调用点；:1271 才 append request/context）
+preStep()       ← 0.2.1-rc.3: :902   （:906 抽干 inbox，:909 调用本插件的注入点）
+buildRequest()  ← 0.2.1-rc.3: :1214  （:1075 调用点；:1271 才 append request/context）
 ```
 
 所以**第一步的 pre-step 执行时，`request/context` 帧尚不存在**。
 
-> 行号是**核对时的快照**，不是契约：它在 0.2.1-rc.1 → rc.2 之间已经整体下移过（`preStep` 定义 `:902`，`buildRequest` 定义 `:1214`）。每次升级都重新 `grep` 一遍，别照抄上一版。
+> 行号是**核对时的快照**，不是契约：它在 0.2.1-rc.1 → rc.2 之间已经整体下移过（`preStep` 定义 `:902`，`buildRequest` 定义 `:1214`），在 **0.2.1-rc.2 → rc.3 之间没有再动**（同一批行号逐个复核过）。每次升级都重新 `grep` 一遍，别照抄上一版。
 
 **修法**：注入只报告**已知为真**的路由，优先级为 ① `session.requestContext()` → ② `agent/request` 瀑布结算后的种子 → ③ **不回落** `agent.options`。第 ③ 条是取舍：**注入行只是对现实的陈述，立刻被推翻的猜测比不说更糟**，故路由已知前保持沉默。
 

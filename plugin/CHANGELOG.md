@@ -1,5 +1,60 @@
 # Changelog
 
+## 2.1.8 (2026-10-24)
+
+### 兼容性核查：DSH Desktop 0.2.1-rc.3
+
+当前宿主由 `0.2.1-rc.2` 升到 **`0.2.1-rc.3`**（nightly 渠道，2026-10-23 发布）。逐包比对 rc.2 → rc.3 的发布物，并**从运行中的 `app.asar` 直接读源码**复核插件依赖的每一处契约：**插件运行逻辑零改动**（`plugin/lib/index.js` / `plugin/lib/client.js` 未动一行）。
+
+宿主 95 个随包发布里，**除版本号外只有 4 个包有实际改动**，且全部落在插件未触碰的面上：
+
+| 包 | 改动 | 与本插件的关系 |
+| --- | --- | --- |
+| `dsh-client-ui-conversation` | 会话 View 标签页的**钉住/收起**（新增槽位 `conversation.session.header.views.actions`）、输入框草稿「追加」语义（`whenDraftExists`）、提交埋点新增 `is_new_session` / `agent_preset` | 纯新增，插件用的 `conversation.chat.node` 槽位与 `request/header` 帧语义未变 |
+| `dsh-client-ui-primitives` | `Tooltip` 增加 `placement`、`MenuItem` 增加 `current`、`Menu` 增加 `minWidthFromAnchor`、新增 `IconAppsAdd*` | 纯新增；插件只用到 `Toast` 与 `IconChevronDown*`，全部仍在 |
+| `dsh-llm-deepseek-account` / `-api-key` | 模型清单/目录能力下沉到共享的 `dsh-llm-deepseek`（`ModelListingCache`、`refuseListedModel`），配置字段重排 | 与插件的故障转移无关（插件只按宿主失败码分类，不解析模型清单） |
+
+插件依赖的宿主契约**逐项复核结果**（行号为 rc.3 运行实例的实际行号）：
+
+| 检查项 | 结论 |
+| --- | --- |
+| 插件加载与注入 | ✅ 运行中的宿主已挂载本插件行，`Config` 投影出全部 7 个 volatile 字段 |
+| 4 个事件钩子 | ✅ `agent/pre-step`、`agent/request`、`agent/request-error`、`agent/disposed` 全部仍在 |
+| `preStep()` → `buildRequest()` 时序 | ✅ 未变（`:902` / `:1214`；`request/context` 仍在 `:1271` 才 append） |
+| `inbox.claim()` 先抽干 | ✅ 未变（`preStep` 首行 `:906`；`pre-step` 瀑布 `:909`，默认决策 `:917`） |
+| `session.requestContext()` 语义 | ✅ 未变（折叠定义 `:1627`；`isSeeded` 仍是「本会话继承了一段前缀」，`:1416` 依旧要求显式 seed） |
+| 派发入口 | ✅ 仍只有 `startActivation(spec)`（`dsh-subagent` `:3036`），插件的包装点有效 |
+| `agentOptions` 组装语义 | ✅ 未变：宿主仅在**显式**选择路由时才带上 `agentOptions`（`dsh-tool-subagent` `:470`），因此「无显式路由 → 插件注入」这条前提依然成立 |
+| 失败码词表 | ✅ 未变（`RATE_LIMIT` / `QUOTA` / `SERVER` / `TIMEOUT` / `TRANSPORT` / `EMPTY_RESPONSE` / `INVALID_CREDENTIAL` 等） |
+| peer 区间覆盖 | ✅ 宿主 `unmetRequirements()` 对 `0.2.1-rc.3` 返回「无未满足要求」 |
+
+> 另记：宿主自带的「子代理模型可选」开关（`ctx.subagentModelSelection`，rc.2 起即存在，默认关闭）与本插件**不冲突**——它一旦启用，派发请求会带上显式 `agentOptions`，插件按既有约定**让位**（显式传参优先）。
+
+### Fixed
+
+- **asar 读取器的载荷基址错了 8 字节**（`plugin/test/peer-range.test.mjs` 的 `readFileFromAsar`）。头部的四个 uint32 本身就是 pickle 的框架，JSON 目录树从第 16 字节开始，而**载荷从 `8 + headerSize` 开始**；原实现用 `16 + headerSize`，于是**每个文件都被读偏 8 字节**：开头 8 字节被上一个文件的尾部顶替，末尾 8 字节被截断。
+
+  这个错误一直没人发现，是因为该读取器唯一的用途是「在文本里搜子串」（`function unmetRequirements(`），读偏的副本照样搜得到；**一旦按 JSON 解析就立刻炸**：`Unexpected token 'e', "e": "@deepseek-ai/dsh", … is not valid JSON`——本次新增的「运行中的宿主版本」用例正是第一个按 JSON 读它的用例，一上来就踩中。
+
+  修正为 `8 + headerSize`，并在注释里写清「为什么是 8 而不是 16」，避免下一个改它的人凭直觉改回去。
+
+- **「应当通过」的宿主版本清单第三次滞后**：清单停在 `0.2.1-rc.2`，而真实运行的宿主已是 `0.2.1-rc.3`。这已是同一类回归的第三次（2.1.5、2.1.6 各一次），所以这次不再靠人记流程——**清单改成由宿主自己核对**。
+
+### Tests
+
+- **新增用例「the RUNNING host version must be admitted by the peer range」**：从本机安装的宿主（`app.asar` 内 `@deepseek-ai/dsh` 的 `package.json`）读出**实际运行版本**，断言 ① peer 区间放行它、② 它被显式列进 `ADMITTED_HOST_VERSIONS`。宿主一升级而清单没跟上 → **测试直接失败**，而不是等到某天被想起来。
+  - 无宿主环境时**显式 `t.skip`**（不是静默 `return`）。
+  - 变异验证：把 `0.2.1-rc.3` 从清单里去掉 → 该用例失败；放回去 → 通过。
+- **「应当通过」清单抽成 `ADMITTED_HOST_VERSIONS` 常量**，semver 护栏与宿主评估器护栏共用同一份来源，杜绝两处清单各自漂移。
+- 全量：`tests 153 / pass 153 / fail 0 / skip 0`（此前 152 项）。
+
+### Docs
+
+`DEVELOPMENT.md`：
+
+1. 新增「宿主升级流程」一节：把「读 `app.asar` 核对契约 → 补版本清单 → 跑测试」固化成步骤，并写明**清单滞后三次**这一事实与新的自检用例。
+2. 记录 asar 载荷基址 `8 + headerSize` 的坑（第三次踩 asar 相关的坑，注释里留了证据）。
+
 ## 2.1.7 (2026-10-18)
 
 ### Fixed
