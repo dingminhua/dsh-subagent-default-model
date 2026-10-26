@@ -42,7 +42,7 @@ Of the three, this is the only one aimed at **both you and the subagent**: witho
 #### Channel 1 — the UI row (for you)
 
 - **Trajectory view** — each subagent's trajectory shows a row reading "**Current provider/model: `provider/model`**", rendered from the official `request/context` frame.
-- **Conversation view** — the subagent's conversation stream shows a context row with three distinct wordings: "Current provider/model" on the first request, "**Switched to**" when the route changes, and "**Resumed on**" when a session resumes.
+- **Conversation view** — the subagent's conversation stream shows a context row with three distinct wordings: "Current provider/model" on the first request, "**Switched to**" when the route changes, and "**Currently using**" when a session resumes.
 - **Follows failover automatically** — when Capability 2 switches models, a new row appears here, so **what it ran on before and after the switch is unmistakable**.
 
 How it looks in the conversation stream (the row itself):
@@ -260,7 +260,7 @@ Capability 3 has **two independent channels**. See [Capability 3](#capability-3-
 | View | What it shows | Source frame |
 | --- | --- | --- |
 | Trajectory | A row "Current provider/model: `provider/model`" | official `request/context` |
-| Conversation | One of "Current provider/model" / "Switched to" / "Resumed on" | official `request/header` (by `reason`: `initial` / `change` / `resume`) |
+| Conversation | One of "Current provider/model" / "Switched to" / "Currently using" | official `request/header` (by `reason`: `initial` / `change` / `resume`) |
 
 Both registrations live inside `ctx.effect`, and the node `kind` values are plugin-owned (`trajectory-subagent-model` for the trajectory, `chat-subagent-model-notice` for the conversation) rather than reusing the Host's built-in `context` kind — the latter is filtered out by the Host's visibility rules.
 

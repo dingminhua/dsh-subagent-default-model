@@ -308,10 +308,10 @@ test("client locales include the chat model labels (zh/en)", () => {
 	apply(ctx);
 	assert.equal(dictionaries.zh["row.chatModelInitial"], "当前供应商/模型");
 	assert.equal(dictionaries.zh["row.chatModelChange"], "已切换到");
-	assert.equal(dictionaries.zh["row.chatModelResume"], "继续使用");
+	assert.equal(dictionaries.zh["row.chatModelResume"], "当前使用");
 	assert.equal(dictionaries.en["row.chatModelInitial"], "Current provider/model");
 	assert.equal(dictionaries.en["row.chatModelChange"], "Switched to");
-	assert.equal(dictionaries.en["row.chatModelResume"], "Resumed on");
+	assert.equal(dictionaries.en["row.chatModelResume"], "Currently using");
 	assert.ok(dictionaries.zh["row.noticeLabel"], "zh missing row.noticeLabel");
 	assert.ok(dictionaries.en["row.noticeLabel"], "en missing row.noticeLabel");
 });
@@ -396,7 +396,7 @@ test("chat start labels a resumed session with the route", () => {
 		}
 	};
 	const state = definition.start(undefined, { event });
-	assert.match(state.content[0].text, /继续使用/);
+	assert.match(state.content[0].text, /当前使用/);
 	assert.match(state.content[0].text, /deepseek-v4-flash/);
 });
 

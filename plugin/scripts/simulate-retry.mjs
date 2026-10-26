@@ -97,7 +97,7 @@ function loadClientDefinitions() {
 		"row.trajectoryModel": "当前供应商/模型",
 		"row.chatModelInitial": "当前供应商/模型",
 		"row.chatModelChange": "已切换到",
-		"row.chatModelResume": "继续使用"
+		"row.chatModelResume": "当前使用"
 	};
 	// 0.1.7 client seams. The pre-0.1.7 `settingsScope` + `conversationEvents`
 	// services are gone: the card resolves its scope through
