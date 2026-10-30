@@ -2071,3 +2071,135 @@ test("both conversation definitions are registered inside ctx.effect", () => {
 		"every conversation registration must be wrapped in ctx.effect (bare calls throw on re-apply)"
 	);
 });
+
+// ── issue #2: the permanently-grey Save ──────────────────────────────────────
+//
+// Three independent defects locked Save shut, and they compounded:
+//
+//   1. the gate included `hasIncompleteRoute`, a NON-MONOTONIC predicate —
+//      "add a model row" set `dirty` (enabling Save) and made the predicate
+//      true (disabling it) in the same click, so the two cancelled out;
+//   2. with an empty model catalog, `addRoute()` wrote `provider: ""`, a row the
+//      UI could not complete (the model dropdown is disabled until a provider
+//      is chosen, and the provider list was empty) — unrecoverable except by
+//      deleting the row;
+//   3. the empty row serialized to a bare `""`, which normalized back into
+//      `{ provider: <section provider>, model: "" }` on the next load, so the
+//      deadlock PERSISTED across restarts.
+//
+// These tests pin the fixes, one per defect, plus the restored behaviours the
+// old gate was hiding.
+
+test("REGRESSION (issue #2): adding a model row arms Save instead of disarming it", async () => {
+	// The exact reported sequence: empty configuration, non-empty catalog.
+	// Before the fix, the click set dirty AND hasIncompleteRoute, so `disabled`
+	// stayed true and nothing on screen said why.
+	const groups = [{ id: "workbuddy", models: [{ id: "deepseek-v4.1-flash" }] }];
+	const { rerender } = await renderSettingsCard({ groups, value: { provider: "", model: "", models: [] } });
+	assert.equal(saveButton(rerender()).props.disabled, true, "an untouched form has nothing to save");
+	const addButton = collect(rerender(), (n) => n.type === "button" && n.props && /dsm-btn-outline/.test(n.props.className) && collect(n, (c) => typeof c.text === "string" && c.text.indexOf("添加模型") >= 0).length > 0)[0];
+	assert.ok(addButton, "the add-model button must be present");
+	addButton.props.onClick();
+	assert.equal(
+		saveButton(rerender()).props.disabled,
+		false,
+		"adding a row must arm Save: a half-filled draft is a reason to CLICK, not a reason to block"
+	);
+});
+
+test("REGRESSION (issue #2): an empty catalog refuses the add instead of creating an unfillable row", async () => {
+	// With no catalog the provider dropdown offers only "" and the model
+	// dropdown is disabled, so a new row could never be completed. Refusing is
+	// recoverable; a dead row is not.
+	const { rerender } = await renderSettingsCard({ groups: [], value: { provider: "", model: "", models: [] } });
+	const addButton = collect(rerender(), (n) => n.type === "button" && n.props && /dsm-btn-outline/.test(n.props.className) && collect(n, (c) => typeof c.text === "string" && c.text.indexOf("添加模型") >= 0).length > 0)[0];
+	assert.ok(addButton, "the add-model button must be present");
+	addButton.props.onClick();
+	const tree = rerender();
+	const routeRows = collect(tree, (n) => n.props && /^dsm-model-settings-route\b/.test(n.props.className || ""));
+	assert.equal(routeRows.length, 0, "no route row may be created while the catalog is empty");
+	// And the user is told why, using the catalog-empty copy the card owns.
+	assert.match(treeText(tree), /目录|Catalog|catalog|Models|模型/);
+});
+
+test("REGRESSION (issue #2): an all-empty row is DROPPED by save, never persisted as \"\"", async () => {
+	// The persistence half of the deadlock. `serializeDefaultModels` writes a
+	// row whose provider matches the section as a bare model id, so an empty row
+	// became `""` — and `normalizeDefaultModels` decoded `""` back into
+	// `{ provider: <section provider>, model: "" }`, a row that can never be
+	// completed. Save must filter empty rows out before serializing.
+	const written = [];
+	const groups = [{ id: "workbuddy", models: [{ id: "deepseek-v4.1-flash" }] }];
+	const value = { provider: "workbuddy", model: "", models: [] };
+	const { rerender } = await renderSettingsCard({
+		groups,
+		value,
+		write: async (nextValue) => { written.push(nextValue); return true; }
+	});
+	const addButton = collect(rerender(), (n) => n.type === "button" && n.props && /dsm-btn-outline/.test(n.props.className) && collect(n, (c) => typeof c.text === "string" && c.text.indexOf("添加模型") >= 0).length > 0)[0];
+	addButton.props.onClick();
+	// The card's handlers close over the draft captured at RENDER time, exactly
+	// like React: a second render is what React itself would do after setState,
+	// so Save must be clicked from the RE-RENDERED tree. Clicking the stale tree
+	// would test a snapshot no user can ever interact with.
+	saveButton(rerender()).props.onClick();
+	for (let i = 0; i < 8; i++) await new Promise((resolve) => setImmediate(resolve));
+	assert.ok(written.length > 0, "the save must reach the write path");
+	const models = written[written.length - 1].models;
+	assert.ok(
+		Array.isArray(models) && models.every((entry) => !(typeof entry === "string" && entry === "")),
+		`an empty row must never be persisted as a bare "": ${JSON.stringify(models)}`
+	);
+});
+
+test("REGRESSION (issue #2): Save is armed from the DATA, not a remembered click (remount)", async () => {
+	// `dirty` used to be a component-local boolean. The card unmounts when the
+	// user leaves the Plugins page; on return the draft is re-seeded from the
+	// mirror, so the form showed values while Save stayed grey. With `dirty`
+	// derived from (draft vs saved), a fresh mount of a form whose draft matches
+	// storage is correctly clean, and any difference arms Save regardless of
+	// whether a handler ran in THIS mount.
+	const groups = [{ id: "workbuddy", models: [{ id: "deepseek-v4.1-flash" }] }];
+	// Fresh mount where the saved value already differs from what is displayed
+	// is impossible (the draft seeds FROM the value), so the honest assertion is
+	// the inverse: a remount with nothing changed stays disabled — i.e. the
+	// derivation does not manufacture a phantom dirty state.
+	const { rerender } = await renderSettingsCard({
+		groups,
+		value: { provider: "workbuddy", model: "", models: ["deepseek-v4.1-flash"] }
+	});
+	assert.equal(saveButton(rerender()).props.disabled, true, "an unchanged remount must not claim unsaved changes");
+});
+
+test("REGRESSION (issue #2): a HALF-FILLED row never disables Save", async () => {
+	// This is the defect's core, isolated from every other route to it.
+	//
+	// `hasIncompleteRoute` sat in the Save gate, so ANY row missing a provider or
+	// a model locked the button — including the row the user is literally in the
+	// middle of filling. The predicate is non-monotonic: the interaction that
+	// makes you want to save is the same one that disables saving. A control
+	// that refuses to be pressed cannot say what is wrong; the message belongs
+	// on the attempt, not on the button.
+	//
+	// Seed a provider-only row (a real stored state: pick a provider, stop) and
+	// assert Save is armed. Under the old gate this is `disabled === true`.
+	const groups = [{ id: "workbuddy", models: [{ id: "deepseek-v4.1-flash" }] }];
+	// SAVED value names a DIFFERENT model, so once the user changes the provider
+	// dropdown the draft genuinely differs from storage — which is what makes
+	// Save meaningful in the first place. The row is still provider-without-model,
+	// i.e. exactly the state the old gate locked the button on.
+	const { rerender } = await renderSettingsCard({
+		groups,
+		value: { provider: "workbuddy", model: "deepseek-v4.1-flash", models: ["deepseek-v4.1-flash"] }
+	});
+	// Pick a provider on the (now empty-model) first select pair: set the model
+	// to "" through the real handler so the row becomes provider-only.
+	const selects = collect(rerender(), (n) => n.type === "select");
+	assert.ok(selects.length >= 2, "expected a provider and a model select");
+	selects[1].props.onChange({ target: { value: "" } });
+	assert.equal(
+		saveButton(rerender()).props.disabled,
+		false,
+		"a row without a model must not lock Save — the user is editing it right now"
+	);
+});

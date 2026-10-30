@@ -1,5 +1,35 @@
 # Changelog
 
+## 2.1.12 (2026-10-30)
+
+### Fixed
+
+**issue #2：「保存」按钮永久灰着**。三条独立缺陷互相叠加，任一条都能单独锁死保存。
+
+1. **保存门禁包含非单调谓词**。`saveDisabled = busy || !dirty || hasIncompleteRoute`：点「添加模型」会在同一次点击里既让 `dirty=true`（启用保存）又让 `hasIncompleteRoute=true`（禁用保存），两个条件互相抵消，按钮永远不亮。并且这个谓词**无法通过 UI 满足**——模型目录为空时新行的 provider 只能是 `""`，Model 下拉又 `disabled: !route.provider`，于是 `!route.provider` 永远成立。
+
+   改为 `busy || !(dirty || draftDiffers)`，与同作者三个插件（`trae` / `workbuddy` / `qoder`）的既有范式一致：**先把校验放在点击之后**，失败时用 `saveErrorState` 说清哪里不对。一个点不动的按钮无法告诉用户哪里错了，这正是缺陷本身。
+
+2. **空行被持久化成裸空串，死锁会跨重启存活**。`serializeDefaultModels` 对「provider 与首行相同且无 effort」的行只写 `route.model`，空行于是落盘为 `""`；`normalizeDefaultModels` 再把 `""` 还原成 `{ provider: <section provider>, model: "" }` —— 一个看上去可填、实际填不完的行。**只要带着空行保存过一次，下次启动就永久灰着**，用户完全不知道是自己那次保存写进去的。
+
+   三处同时修：`save()` 丢弃全空行；`serializeDefaultModels` 自身兜底过滤；裸串优化加 `route.model` 前置条件（`{provider, model:""}` 这种「刚选好 provider 还没选模型」的行保持显式对象，不再退化成空串）；`normalizeDefaultModels` 丢弃空条目，使旧版本写坏的历史文档也不会复活死锁。
+
+3. **空模型目录下 `addRoute()` 造出无法填完的行**。`groupsState` 为空时它写 `provider: ""`，而该值在 UI 上无法改变（provider 列表只有 `""`，model 下拉恒禁用）。改为**拒绝新增**并复用已有的 `row.catalogEmpty` 文案；目录可用时直接选中该 provider 的首个模型，让新行一出现就是合法的。
+
+4. **`dirty` 是纯组件内 state，卡片重挂载即丢**。卡片在离开 Plugins 页时卸载，重挂载时草稿从 scope 重新 seed，于是表单显示着用户刚才的值、`dirty` 却回到 false，保存按钮灰着且无任何解释。改为**派生**：比较草稿与已保存值（路由列表 + 三个开关），让「有没有改动」成为关于数据的事实，而不是一次被记住的交互。
+
+### Tests
+
+164/164（159 → 164），`skip 0`。新增 5 个回归用例，每条缺陷一个方向：
+
+- 目录可用时点「添加模型」→ Save **变为可点**（旧门禁下恒为 disabled）
+- 目录为空时点「添加模型」→ **不产生**路由行，并给出目录为空提示
+- 全空行经保存链路 → **永不落盘为裸 `""`**
+- **半填行**（选了 provider 未选 model）存在时 Save **仍可点** —— 缺陷核心的最小子集
+- 未改动的重挂载 **不得**误报为有未保存改动
+
+变异验证（每条都确认相关用例失败后恢复）：①门禁加回 `hasIncompleteRoute` → 半填用例失败；②`serializeDefaultModels` 裸串优化去掉 `route.model` 判空 → 空行落盘用例失败；③`addRoute` 恢复写 `provider: ""` → 目录为空用例失败。
+
 ## 2.1.11 (2026-10-30)
 
 > **发布说明**：本节的改动与下一节 2.1.10 的宿主兼容性核查**同批发布**，npm 上直接从 2.1.9 升到 2.1.11，2.1.10 没有单独发布过。保留两个条目是因为「换了宿主版本」和「改了行为」是两件独立的事，事后查证时分开更好读；`npm install` 请直接用 `2.1.11`。

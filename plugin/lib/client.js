@@ -154,13 +154,28 @@ window.__ModuleLoader__.load({
     // (see `servedNamespaceNow` in the `configForms` block).
     var SUBAGENT_MODEL_SETTINGS_NS = "dsh-subagent-default-model";
 
+    // Decode a stored section into the card's route list.
+    //
+    // An EMPTY entry is dropped rather than decoded (issue #2). A bare `""` in
+    // `models`, or an object with neither provider nor model, carries no route;
+    // decoding it (the old behaviour) produced `{ provider: <section provider>,
+    // model: "" }` — identical in the UI to a genuine half-filled row, so the
+    // user saw a mysterious unfillable row after a restart, with no way to tell
+    // it apart from their own draft. `serializeDefaultModels` no longer writes
+    // such entries, and this keeps a document written by an older version from
+    // resurrecting one.
     function normalizeDefaultModels(value) {
       var result = [];
       if (Array.isArray(value.models) && value.models.length > 0) {
         for (var i = 0; i < value.models.length; i++) {
           var entry = value.models[i];
-          if (typeof entry === "string") result.push({ provider: value.provider || "", model: entry, reasoningEffort: "" });
-          else if (entry && typeof entry === "object") result.push({ provider: entry.provider || value.provider || "", model: entry.model || "", reasoningEffort: entry.reasoningEffort || "" });
+          if (typeof entry === "string") {
+            if (entry === "") continue;
+            result.push({ provider: value.provider || "", model: entry, reasoningEffort: "" });
+          } else if (entry && typeof entry === "object") {
+            if (!entry.provider && !entry.model) continue;
+            result.push({ provider: entry.provider || value.provider || "", model: entry.model || "", reasoningEffort: entry.reasoningEffort || "" });
+          }
         }
       } else if (value.provider || value.model) {
         result.push({ provider: value.provider || "", model: value.model || "", reasoningEffort: value.reasoningEffort || "" });
@@ -169,6 +184,17 @@ window.__ModuleLoader__.load({
     }
 
     function serializeDefaultModels(previousValue, routes, strategy, failoverEnabled, injectRouteContext, applyToForkChildren) {
+      // Drop rows with neither a provider nor a model BEFORE anything else
+      // (issue #2). `save()` already filters, and this is the second line of
+      // defence: an all-empty row used to serialize as a bare `""` (its
+      // provider matched the section, so only `route.model` — the empty string
+      // — was written), which `normalizeDefaultModels` decoded back into
+      // `{ provider: <section provider>, model: "" }` — a row the UI can never
+      // complete, re-locking Save on the NEXT start. Filtering here makes that
+      // loss impossible regardless of which caller reaches this function.
+      routes = (routes || []).filter(function (route) {
+        return route && (Boolean(route.provider) || Boolean(route.model));
+      });
       var next = Object.assign({}, previousValue || {});
       next.failoverEnabled = failoverEnabled === false ? false : true;
       next.injectRouteContext = injectRouteContext === false ? false : true;
@@ -187,7 +213,13 @@ window.__ModuleLoader__.load({
       next.provider = provider;
       next.model = "";
       next.models = routes.map(function (route) {
-        if (route.provider === provider && !route.reasoningEffort) {
+        // The bare-string (same-provider) form is an OPTIMIZATION, and it is
+        // only lossless when the row actually names a model. A row with a
+        // provider but no model yet — the normal state right after picking a
+        // provider — must stay an explicit object, because the bare form would
+        // be `""` and `normalizeDefaultModels` would read that back as a
+        // fillable-looking row (issue #2's persistence loop).
+        if (route.provider === provider && !route.reasoningEffort && route.model) {
           return route.model;
         }
         var base = { provider: route.provider, model: route.model };
@@ -391,6 +423,8 @@ window.__ModuleLoader__.load({
       var saveErrorState = React.useState(null);
       var toastState = React.useState(null);
       var toastSeq = React.useRef(0);
+      // `dirtyState` records "the user has interacted", but it is NOT what
+      // decides whether Save can be pressed — see `draftDiffers` below.
       var dirtyState = React.useState(false);
       var busyState = React.useState(false);
       React.useEffect(function () {
@@ -444,9 +478,27 @@ window.__ModuleLoader__.load({
         dirtyState[1](true);
       }
       function addRoute() {
+        // A new row needs a REAL provider to be fillable: the model dropdown is
+        // disabled until a provider is chosen, and the provider list is empty
+        // when the catalog never loaded. Writing `provider: ""` in that state
+        // produced a row the UI could not complete — and, before the gate fix in
+        // this release, that row locked Save shut permanently (issue #2).
+        //
+        // So: refuse the add and say why, using the catalog-empty copy the card
+        // already owns. Refusing is recoverable (the user retries once the
+        // catalog arrives); a dead row is not.
         var firstGroup = groupsState[0][0];
+        if (!firstGroup) {
+          saveErrorState[1](t("row.catalogEmpty"));
+          return;
+        }
+        // Pick the first model the group actually advertises, so the row is
+        // valid the moment it appears rather than one interaction short of
+        // complete. An empty model list still yields `model: ""`, which the
+        // save-time filter drops instead of persisting.
+        var firstModel = firstGroup.models && firstGroup.models[0] ? firstGroup.models[0].id : "";
         routesState[1](function (routes) {
-          return routes.concat({ provider: firstGroup ? firstGroup.id : "", model: "", reasoningEffort: "" });
+          return routes.concat({ provider: firstGroup.id, model: firstModel, reasoningEffort: "" });
         });
         savedState[1](false);
         saveErrorState[1](null);
@@ -475,7 +527,23 @@ window.__ModuleLoader__.load({
         // cards do — `trae`/`workbuddy` disable on `!dirty || saving` and let the
         // write answer for itself.
         if (busyState[0]) return;
-        var nextValue = serializeDefaultModels(value, routesState[0], strategyState[0], failoverEnabledState[0], injectRouteContextState[0], applyToForkChildrenState[0]);
+        // Validate HERE, not on the button (issue #2).
+        //
+        // An EMPTY row — both fields blank — is not an error: it is a row the
+        // user added and has not reached yet. Drop it rather than refusing the
+        // whole save, which also stops the empty string from being persisted
+        // (the round-trip loss that turned one stray row into a permanent
+        // `model: ""` row and re-locked Save on the next start).
+        //
+        // A HALF-filled row is still saved, not refused: only the sides the user
+        // actually set are meaningful, and `serializeDefaultModels` already
+        // handles a model-less entry. Refusing here would reproduce the very
+        // defect being fixed — a click that does nothing — just with a message.
+        var filledRoutes = routesState[0].filter(function (route) {
+          return Boolean(route.provider) || Boolean(route.model);
+        });
+        var nextValue = serializeDefaultModels(value, filledRoutes, strategyState[0], failoverEnabledState[0], injectRouteContextState[0], applyToForkChildrenState[0]);
+
         savedState[1](false);
         saveErrorState[1](null);
         busyState[1](true);
@@ -651,18 +719,50 @@ window.__ModuleLoader__.load({
         var warning = checkEffortSupport(route, groupsState[0]);
         if (warning !== null) effortWarnings.push({ index: index, key: warning.key, warning: warning });
       });
-      // Save gate, aligned with the family cards (`trae` / `workbuddy` disable on
-      // `!dirty || saving` plus one content rule). Two scope gates used to sit
-      // here — `snap.status !== "ready"` and `snap.writable === false` — and they
-      // are exactly what made Save permanently unclickable: the settings scope is
-      // bound asynchronously from the describe mirror, so while the mirror has not
-      // answered (or the Host never serves this namespace) both conditions stay
-      // true forever, the button stays grey, and no message ever explains why.
-      // The family does not pre-gate on scope state: it lets the write happen and
-      // reports the refusal. `hasIncompleteRoute` stays, because a half-filled
-      // route genuinely has nothing valid to save — the family's equivalent of
-      // "no models enabled".
-      var saveDisabled = busyState[0] || !dirtyState[0] || hasIncompleteRoute;
+      // Save gate: `busy || !dirty` — NOTHING else.
+      //
+      // Two scope gates used to sit here (`snap.status !== "ready"` and
+      // `snap.writable === false`) and made Save permanently unclickable while
+      // the describe mirror was still answering. `hasIncompleteRoute` was the
+      // third, and it produced the same class of deadlock (issue #2): the
+      // predicate is NON-MONOTONIC — "add a model row" sets `dirty` (enabling
+      // Save) and simultaneously makes `hasIncompleteRoute` true (disabling it),
+      // so the two conditions cancel out and the button never lights up. With an
+      // empty model catalog the new row's provider cannot even be filled in, so
+      // the deadlock is unrecoverable through the UI.
+      //
+      // The family cards (`trae` / `workbuddy` / `qoder`) never pre-gate on row
+      // completeness; they let the click happen and report the refusal. This does
+      // the same: `save()` filters empty rows and `saveErrorState` explains any
+      // row that is half-filled. A button that refuses to be pressed carries no
+      // information about WHAT is wrong — that is the whole defect.
+      // Whether the draft differs from what is SAVED (issue #2, defect 4).
+      //
+      // `dirty` used to be a component-local boolean that only the six input
+      // handlers set. The card unmounts when the user leaves the Plugins page,
+      // and on remount the draft is re-seeded from `savedForm` — so the form
+      // showed the user's values while Save stayed grey, with nothing on screen
+      // explaining it. Deriving "has anything changed?" from the DATA makes a
+      // remount unable to disagree with what is displayed.
+      //
+      // The comparison is over the normalized route list plus the three scalar
+      // toggles, i.e. exactly what a save would write.
+      var draftSignature = JSON.stringify({
+        routes: routesState[0].filter(function (route) { return Boolean(route.provider) || Boolean(route.model); }),
+        strategy: strategyState[0],
+        failoverEnabled: failoverEnabledState[0] !== false,
+        injectRouteContext: injectRouteContextState[0] !== false,
+        applyToForkChildren: applyToForkChildrenState[0] === true
+      });
+      var savedSignature = JSON.stringify({
+        routes: normalizeDefaultModels(value),
+        strategy: value.strategy === "random" ? "random" : "round-robin",
+        failoverEnabled: value.failoverEnabled !== false,
+        injectRouteContext: value.injectRouteContext !== false,
+        applyToForkChildren: value.applyToForkChildren === true
+      });
+      var draftDiffers = draftSignature !== savedSignature;
+      var saveDisabled = busyState[0] || !(dirtyState[0] || draftDiffers);
       var discardDisabled = !dirtyState[0] || busyState[0];
       var routes = routesState[0].map(function (route, index) {
         var group = null;
