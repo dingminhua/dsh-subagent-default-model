@@ -34,6 +34,12 @@ async function createHarness(config = undefined, { continuable = true, activatio
 		async startActivation(spec) {
 			calls.push({ type: "startActivation", spec });
 			return spec;
+		},
+		// Provider registry: the plugin reads `inheritsParentContext` to decide
+		// whether a delegation reuses the parent's conversation prefix. `fork`
+		// does (it is seeded with the parent log); `spawn` does not.
+		getProvider(name) {
+			return PROVIDERS[name];
 		}
 	};
 	if (!legacy) {
@@ -63,6 +69,21 @@ async function disposeHarness(harness) {
 const defaultSection = {
 	provider: "deepseek-official",
 	model: "deepseek-v4-pro"
+};
+
+/**
+ * Delegation providers as the host advertises them.
+ *
+ * `inheritsParentContext` is the load-bearing field: the `fork` backend is
+ * seeded with the parent's session log, so the host keeps its route equal to
+ * the parent's on purpose (`dsh-base`: "Fork omits model selection so
+ * provider/model stay equal to the parent and the inherited history remains
+ * eligible for KV Cache reuse"). `spawn` starts from a fresh context, so a
+ * route change costs it nothing.
+ */
+const PROVIDERS = {
+	spawn: { name: "spawn", inheritsParentContext: false, capabilities: { agentOptions: true } },
+	fork: { name: "fork", inheritsParentContext: true, capabilities: { agentOptions: true } }
 };
 
 test("injects a configured single model", async () => {
@@ -258,5 +279,99 @@ test("disposal restores services and allows a clean remount", async () => {
 		await remounted.dispose();
 	} finally {
 		await harness.root.fiber.dispose();
+	}
+});
+
+// ── fork / same-context policy ───────────────────────────────────────────────
+//
+// The `fork` backend is SEEDED with the parent's conversation, and the host
+// deliberately does not let it select a model so its route stays equal to the
+// parent's — that is what keeps the inherited prefix eligible for KV-cache
+// reuse. Injecting a pool route there re-runs the whole inherited prefix on
+// another provider: one real fork child measured `inputTokens: 144185` against
+// `cacheReadTokens: 186` on its first request.
+//
+// So `applyToForkChildren` defaults to false, and these tests pin both sides of
+// the switch. Without them the policy is invisible: every other test passes
+// `spawn`-shaped specs and would never notice the gate disappearing.
+
+test("a fork child keeps the parent route by default (no agentOptions injected)", async () => {
+	const harness = await createHarness(defaultSection, { legacy: false });
+	try {
+		const request = { prompt: "hello" };
+		await harness.subagents.startActivation({ provider: "fork", request });
+		assert.equal(
+			harness.calls[0].spec.request.agentOptions,
+			undefined,
+			"a fork child must inherit the parent route so its KV cache survives"
+		);
+		// Identity, not just equality: the host compares spec identity, and a
+		// needless clone would be a silent behaviour change.
+		assert.strictEqual(harness.calls[0].spec.request, request);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("a spawn child is still injected from the same config (the gate is fork-only)", async () => {
+	// Guards the gate against over-reach: skipping fork is only correct because
+	// spawn does NOT inherit the parent conversation.
+	const harness = await createHarness(defaultSection, { legacy: false });
+	try {
+		await harness.subagents.startActivation({ provider: "spawn", request: { prompt: "hello" } });
+		assert.deepEqual(harness.calls[0].spec.request.agentOptions, {
+			provider: "deepseek-official",
+			model: "deepseek-v4-pro"
+		});
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("applyToForkChildren: true makes a fork child follow the configured route", async () => {
+	const harness = await createHarness(
+		{ ...defaultSection, applyToForkChildren: true },
+		{ legacy: false }
+	);
+	try {
+		await harness.subagents.startActivation({ provider: "fork", request: { prompt: "hello" } });
+		assert.deepEqual(harness.calls[0].spec.request.agentOptions, {
+			provider: "deepseek-official",
+			model: "deepseek-v4-pro"
+		});
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("an explicit route on a fork child wins regardless of the policy", async () => {
+	// The opt-out must never override an explicit choice: the plugin's whole
+	// contract is "explicit agentOptions always win".
+	const harness = await createHarness(defaultSection, { legacy: false });
+	try {
+		const explicit = { provider: "minmax", model: "MiniMax-M3.1-Flash" };
+		await harness.subagents.startActivation({
+			provider: "fork",
+			request: { prompt: "hello", agentOptions: explicit }
+		});
+		assert.deepEqual(harness.calls[0].spec.request.agentOptions, explicit);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("an unknown provider is injected as before (capability read never disables the feature)", async () => {
+	// `getProvider` returns undefined for an unregistered name. Treating that as
+	// "inherits context" would silently disable injection for every custom
+	// provider; the fallback must stay the long-standing inject behaviour.
+	const harness = await createHarness(defaultSection, { legacy: false });
+	try {
+		await harness.subagents.startActivation({ provider: "some-custom-backend", request: { prompt: "hello" } });
+		assert.deepEqual(harness.calls[0].spec.request.agentOptions, {
+			provider: "deepseek-official",
+			model: "deepseek-v4-pro"
+		});
+	} finally {
+		await disposeHarness(harness);
 	}
 });

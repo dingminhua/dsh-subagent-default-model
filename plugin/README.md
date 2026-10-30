@@ -4,7 +4,9 @@
 
 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 中的子代理（subagent）派发选择默认模型，可通过插件自己的设置卡片（其 Cordis `Config`）配置，存在 profile 的 `cordis.patch.yml`。
 
-当派发请求**完全没有 `agentOptions`** 时，本插件注入配置的默认路由 —— 因此所有 `subagent`、`subagent_fork` 以及任何省略 `agentOptions` 的工具调用都会经过它。显式传参的覆盖始终生效；配置段缺失或不完整时保持原有行为（子代理继承父会话路由）。
+当派发请求**完全没有 `agentOptions`** 时，本插件注入配置的默认路由 —— 因此 `subagent`、`spawn_teammate` 以及任何省略 `agentOptions` 的工具调用都会经过它。显式传参的覆盖始终生效；配置段缺失或不完整时保持原有行为（子代理继承父会话路由）。
+
+**例外：`subagent_fork` 默认不走这里。** `fork` 通道会继承父会话的完整对话，宿主刻意让它留在父路由上以复用该前缀的 KV 缓存，所以本插件默认让它让位（`applyToForkChildren: false`）。要让它也用这里的模型，在设置卡片里显式打开。
 
 ## 三个核心功能
 
@@ -299,7 +301,9 @@ CI 在 `ubuntu-latest`、`windows-latest`、`macos-latest` 三个平台上同时
 否则                            → 不注入；由宿主自行继承父会话路由
 ```
 
-插件包装宿主 `ctx.subagents` 服务（DSH 0.2.x 的 `startActivation`，以及旧版 `start` / `startContinuable`），覆盖所有派发路径 —— 内置的 `subagent` / `subagent_fork` 工具、agent-team 的 `spawn_teammate`，以及任何调用该服务但未提供 `agentOptions` 的自定义工具。
+插件包装宿主 `ctx.subagents` 服务（DSH 0.2.x 的 `startActivation`，以及旧版 `start` / `startContinuable`），覆盖所有派发路径 —— 内置的 `subagent` 工具、agent-team 的 `spawn_teammate`，以及任何调用该服务但未提供 `agentOptions` 的自定义工具。
+
+`subagent_fork` 也在包装范围内，但默认**不注入**：注入前会查被委派 provider 的 `inheritsParentContext`，该值为 `true` 的通道（目前只有 `fork`）默认保持父路由，除非配置 `applyToForkChildren: true`。
 
 ## 许可证
 

@@ -108,7 +108,7 @@ test("every declared Config field carries a schema default", () => {
 	assert.equal(dict.reasoningEffort.meta.default, "", "reasoningEffort defaults to the empty (unset) value");
 });
 
-test("the resolved section exposes all seven fields (none resolved away)", () => {
+test("the resolved section exposes every declared field (none resolved away)", () => {
 	// Direct guard on the failure above: resolve the schema the way an empty
 	// stored section does, unwrap the volatile references, and require every key
 	// to be PRESENT. This is exactly what `projectForm` filters on, so a field
@@ -122,11 +122,28 @@ test("the resolved section exposes all seven fields (none resolved away)", () =>
 		.filter(([, value]) => value !== undefined)
 		.map(([key]) => key)
 		.sort();
+	// Compared against the Config's OWN declared keys, not a hard-coded list.
+	// The hard-coded list (and the "seven" in this test's title) turned a guard
+	// against DROPPED fields into a guard against ADDING one: introducing
+	// `applyToForkChildren` failed a test whose actual assertion — every
+	// declared field survives resolution — was still true. Deriving the
+	// expectation keeps the real guarantee and stops pinning the count.
 	assert.deepEqual(
 		present,
-		["failoverEnabled", "injectRouteContext", "model", "models", "provider", "reasoningEffort", "strategy"],
+		Object.keys(resolved).sort(),
 		"a field resolving to undefined is dropped from the settings form altogether"
 	);
+});
+
+test("applyToForkChildren defaults to FALSE, so fork children keep the parent route", () => {
+	// The default is load-bearing, not cosmetic: the `fork` backend is seeded
+	// with the parent's conversation and the host deliberately keeps its route
+	// equal to the parent's so that prefix stays eligible for KV-cache reuse.
+	// Defaulting to `true` would silently re-bill that whole prefix on every
+	// fork child (measured once: inputTokens 144185 vs cacheReadTokens 186).
+	const value = Config({}).applyToForkChildren;
+	const unwrapped = value !== null && typeof value === "object" && typeof value.get === "function" ? value.get() : value;
+	assert.equal(unwrapped, false, "fork children must NOT follow the configured route unless the user opts in");
 });
 
 test("missing config applies without a settings source (inherit parent route)", () => {

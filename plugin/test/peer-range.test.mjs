@@ -57,15 +57,20 @@ const EXPECTED_RANGE = /^>=\s*0\.1\.7-rc\.1\s*<\s*0\.3\.0-0$/;
  * spelling of a real, running host — and a range that rejected only that one
  * spelling would still leave every guard here green.
  *
- * The list has gone stale twice (2.1.5, 2.1.6): each time a host upgrade
- * landed and the version was only discovered by reading the app bundle.
- * `the RUNNING host version must be admitted` below now derives the installed
- * version from the app bundle itself, so a stale list fails the suite instead
- * of waiting to be noticed.
+ * The list has gone stale four times (2.1.5, 2.1.6, 2.1.8, 2.1.10): each time
+ * a host upgrade landed and the version was only discovered by reading the app
+ * bundle. `the RUNNING host version must be admitted` below derives the
+ * installed version from the app bundle itself, so a stale list fails the
+ * suite instead of waiting to be noticed.
+ *
+ * `0.2.1-rc.4` and `0.2.1-rc.5` were both published before this plugin ran on
+ * either, so BOTH are listed: the running-host check only pins whichever
+ * version is installed on the current machine, and a machine still on rc.4
+ * must not fail a suite that was already reviewed for it.
  */
 const ADMITTED_HOST_VERSIONS = [
 	"0.2.0-rc.1", "0.2.0-rc.2", "0.2.0",
-	"0.2.1-rc.1", "0.2.1-rc.2", "0.2.1-rc.3", "0.2.1", "0.2.5-rc.1"
+	"0.2.1-rc.1", "0.2.1-rc.2", "0.2.1-rc.3", "0.2.1-rc.4", "0.2.1-rc.5", "0.2.1", "0.2.5-rc.1"
 ];
 
 /** The exact options `dsh-app-boot` passes to `semver.satisfies`. */

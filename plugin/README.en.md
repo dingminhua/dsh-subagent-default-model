@@ -4,7 +4,9 @@ English | [中文](README.md)
 
 Pick the default model for subagent delegations in [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness), configured through the plugin's own settings card (its Cordis `Config`), stored in the profile's `cordis.patch.yml`.
 
-When a delegation request carries **no `agentOptions` at all**, this plugin supplies a default route from your settings before the host creates the subagent — so every `subagent`, `subagent_fork`, and any tool that omits `agentOptions` routes through it. Explicit per-call overrides always win; an absent or incomplete settings section keeps the historical behaviour (children inherit the parent route).
+When a delegation request carries **no `agentOptions` at all**, this plugin supplies a default route from your settings before the host creates the subagent — so `subagent`, `spawn_teammate`, and any tool that omits `agentOptions` routes through it. Explicit per-call overrides always win; an absent or incomplete settings section keeps the historical behaviour (children inherit the parent route).
+
+**Exception: `subagent_fork` does not go through this by default.** A `fork` child inherits the parent's whole conversation, and the host deliberately keeps it on the parent's route so that prefix stays eligible for KV-cache reuse — so this plugin stands aside (`applyToForkChildren: false`). Opt in from the settings card to reroute it.
 
 ## Three core capabilities
 
@@ -299,7 +301,9 @@ else model (+ provider) is non-empty  → use that single route
 else                                  → no injection; the host inherits the parent-session route
 ```
 
-The plugin wraps the host `ctx.subagents` service (`startActivation` on DSH 0.2.x, plus the legacy `start` / `startContinuable`), so it covers every delegation path — built-in `subagent` / `subagent_fork` tools, the agent-team `spawn_teammate` path, and any custom tool that calls the service without providing `agentOptions`.
+The plugin wraps the host `ctx.subagents` service (`startActivation` on DSH 0.2.x, plus the legacy `start` / `startContinuable`), so it covers every delegation path — the built-in `subagent` tool, the agent-team `spawn_teammate` path, and any custom tool that calls the service without providing `agentOptions`.
+
+`subagent_fork` is inside that wrapping too, but it is **not** injected by default: before injecting, the plugin reads the delegated provider's `inheritsParentContext`, and a channel advertising `true` (currently only `fork`) keeps the parent route unless `applyToForkChildren: true` is configured.
 
 ## License
 

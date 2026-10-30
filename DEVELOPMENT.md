@@ -89,8 +89,9 @@ semver.satisfies(runtimeVersion, range, { includePrerelease: true })
 - **不要为了「只支持 0.1.7」而写 `<0.2.0`**——它挡不住 `0.2.0-rc.1`，却挡住正式的 `0.2.0`。
 - 上界写错时宿主**不降级**：`loadProfileDirectory()` 抛错 → 该 bundle 进 `skippedBundles` → stderr 输出 `skipping profile bundle "dsh-subagent-default-model"`，插件本体与设置卡片一起消失。
 - `plugin/test/peer-range.test.mjs` 是护栏，**必须与 `package.json` 同步改**；它调用宿主同款的 `semver.satisfies(..., { includePrerelease: true })`，并用手写回退实现做交叉验证（不支持的 `^` / `~` 语法会抛错而非静默返回 `false`）。
-- **「应当通过」的版本清单必须对预发布显式列举**：`includePrerelease: true` 让区间放行整条 `0.2.x`，但清单若只写 `0.2.0-rc.2` 与稳定的 `0.2.1`，那么 **真实运行中的 `0.2.1-rc.1` 从未被断言过**。DSH Desktop 0.2.1-rc.1 正是这样的运行时。清单里已补 `0.2.1-rc.1`。**每换一次宿主版本就补一行**——`0.2.1-rc.2`、`0.2.1-rc.3` 已经这样补过两次，规则与代价完全相同。
-  - **这条规则已经靠人执行失效过三次**（2.1.5、2.1.6、2.1.8）。清单现已抽成 `ADMITTED_HOST_VERSIONS` 常量，并新增用例「the RUNNING host version must be admitted by the peer range」：它从本机安装的宿主里读出**实际运行版本**并断言它在清单里。**宿主升级而清单没跟上 → 测试直接失败**，不再依赖记性。
+- **「应当通过」的版本清单必须对预发布显式列举**：`includePrerelease: true` 让区间放行整条 `0.2.x`，但清单若只写 `0.2.0-rc.2` 与稳定的 `0.2.1`，那么 **真实运行中的 `0.2.1-rc.1` 从未被断言过**。DSH Desktop 0.2.1-rc.1 正是这样的运行时。清单里已补 `0.2.1-rc.1`。**每换一次宿主版本就补一行**——`0.2.1-rc.2`、`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5` 都是这样补的，规则与代价完全相同。
+  - **这条规则已经靠人执行失效过四次**（2.1.5、2.1.6、2.1.8、2.1.10）。清单现已抽成 `ADMITTED_HOST_VERSIONS` 常量，并新增用例「the RUNNING host version must be admitted by the peer range」：它从本机安装的宿主里读出**实际运行版本**并断言它在清单里。**宿主升级而清单没跟上 → 测试直接失败**，不再依赖记性。
+  - 该用例只钉住**本机装的那一个**版本。因此一次跨多个 rc 的升级（rc.3 → rc.5）必须**把跳过的 rc.4 一并补上**：否则换到另一台还停在 rc.4 的机器上，同一份已评审的清单会失败。
 - 想诚实表达「仅 0.1.7 线」时，正确写法是 `>=0.1.7-rc.1 <0.2.0-0`（同时挡住 `0.2.0-rc.1` 与 `0.2.0`），而不是 `<0.2.0`。
 
 ### `peerDependenciesMeta: { optional: true }` 不参与宿主校验
@@ -154,7 +155,7 @@ Unexpected token 'e', "e": "@deepseek-ai/dsh", … is not valid JSON
 
 ## 宿主升级流程（每次换宿主版本都走一遍）
 
-「应当通过」的宿主版本清单**已经滞后过三次**（2.1.5、2.1.6、2.1.8 各一次），每次都是「宿主先升级、清单靠人记得补」。所以现在清单**由宿主自己核对**：
+「应当通过」的宿主版本清单**已经滞后过四次**（2.1.5、2.1.6、2.1.8、2.1.10 各一次），每次都是「宿主先升级、清单靠人记得补」。所以现在清单**由宿主自己核对**：
 
 ```bash
 # 1. 看宿主当前版本（安装包内 @deepseek-ai/dsh 的 package.json）
@@ -162,6 +163,7 @@ node -e '…手写 asar 读取…'   # 或直接看 app.asar 内该文件的 ver
 
 # 2. 补进 ADMITTED_HOST_VERSIONS（plugin/test/peer-range.test.mjs）
 #    —— 漏了的话，「the RUNNING host version must be admitted」用例会直接失败
+#    —— 跨多个 rc 升级时把跳过的版本也补上（见下）
 
 # 3. 逐项核对插件依赖的宿主契约（行号要重新 grep，别抄上一版）
 grep -n 'preStep\|buildRequest\|inbox.claim\|request/context' app.asar 内 dsh-agent-loop/lib/index.js
@@ -170,18 +172,65 @@ grep -n 'preStep\|buildRequest\|inbox.claim\|request/context' app.asar 内 dsh-a
 npm --prefix plugin test
 ```
 
-第 3 步要核对的清单（0.2.1-rc.3 实测行号）：
+第 3 步要核对的清单（0.2.1-rc.5 实测行号）：
 
-| 契约 | rc.2 | rc.3 |
-| --- | --- | --- |
-| `preStep()` 定义 / `inbox.claim()` | `:902` / `:906` | `:902` / `:906`（未变） |
-| `agent/pre-step` 瀑布 / 默认决策 | `:909` / `:917` | `:909` / `:917`（未变） |
-| `buildRequest()` 定义 | `:1214` | `:1214`（未变） |
-| `request/context` append | `:1271` | `:1271`（未变） |
-| `session.requestContext()` | — | `:1627` |
-| `subagents.startActivation()` | — | `dsh-subagent` `:3036` |
+| 契约 | rc.2 | rc.3 | rc.5 |
+| --- | --- | --- | --- |
+| `preStep()` 定义 / `inbox.claim()` | `:902` / `:906` | `:902` / `:906` | `:902` / `:906`（未变） |
+| `agent/pre-step` 瀑布 / 默认决策 | `:909` / `:917` | `:909` / `:917` | `:909` / `:917`（未变） |
+| `buildRequest()` 定义 | `:1214` | `:1214` | `:1214`（未变） |
+| `request/context` append | `:1271` | `:1271` | `:1271`（未变） |
+| `session.requestContext()` | — | `:1627` | `dsh-session` `:1627`（未变） |
+| `subagents.startActivation()` | — | `:3036` | `dsh-subagent` `:3036`（未变） |
+| `agent/request-error` / `agent/request` 瀑布 | — | `:1136` / `:1191` | `:1136` / `:1191`（未变） |
 
-> 行号是**核对时的快照**，不是契约：它在 0.2.1-rc.1 → rc.2 之间整体下移过，在 rc.2 → rc.3 之间**没有再动**。每次升级都重新 `grep` 一遍，别照抄上一版。
+> 行号是**核对时的快照**，不是契约：它在 0.2.1-rc.1 → rc.2 之间整体下移过，rc.2 → rc.3 → rc.5 之间**没有再动**。每次升级都重新 `grep` 一遍，别照抄上一版。
+
+### 跨多个 rc 升级：把跳过的版本也补进清单
+
+「the RUNNING host version」用例只断言**本机装的那一个**版本。因此 rc.3 → rc.5 这种**跳过 rc.4 的升级**，如果只补 `0.2.1-rc.5`，同一份已评审的清单换到一台还停在 `0.2.1-rc.4` 的机器上就会失败——而 rc.4 与 rc.5 的契约早就被同一轮核查覆盖了。
+
+判据：**清单描述的是「本插件已评审过的宿主版本集合」，不是「我这台机器上的那一个」。** 升级路径上跨过的每个版本都要显式列出。
+
+### 逐包比对的正确姿势（rc.3 → rc.5 实操）
+
+宿主的 `desktop-runtime.json` 列出了本次发布包含的**全部 305 个包**及其精确版本。把 rc.N 与 rc.N+1 的同名包都 `npm pack` 下来做 `diff -rq`，就能把「哪些包真有改动」和「哪些只是版本号变了」分开：
+
+```bash
+# 逐包拉取两个版本并比对（跳过 package.json 与 README，只看真实代码）
+diff -rq rc-old/pkg rc-new/pkg | grep -v -E 'package\.json differ|README'
+```
+
+rc.3 → rc.5 的结果：**305 个包里只有 10 个有真实代码改动**，且全部落在插件未触碰的面上（见 `plugin/CHANGELOG.md` 2.1.10 节）。插件依赖的 `dsh-agent-loop`、`dsh-subagent`、`dsh-tool-subagent`、`dsh-llm`、`dsh-settings`、`dsh-app-boot` 等**逐个文件比对为零改动**。
+
+> 判据：**「版本号变了」不等于「契约变了」，但只有逐文件比对才能把这句话变成结论。** 别用「应该只是版本号」代替比对。
+
+### 派发通道的能力不同，不能一把注入（fork / KV cache 的教训）
+
+插件包装的是 `startActivation(spec)`，而 `spec.provider` 指向的**派发后端能力不同**。宿主的 `SubagentProvider` 上有两个能力字段，意义并不是一回事：
+
+| 字段 | 含义 |
+| --- | --- |
+| `capabilities.agentOptions` | 这个后端**能不能**接受子代理自带的路由 |
+| `inheritsParentContext` | 这个后端的子代理**是不是用父会话日志播种**出来的 |
+
+`fork` 两者都是 `true`，`spawn` 是 `false` / `true`。**只看第一个会做错事**：fork 能接受 `agentOptions`，但它的子代理带着父会话的完整前缀，换路由就让这段前缀的缓存失效。宿主 `dsh-base` 在 fork 工具处写明这是刻意为之：
+
+> Fork omits model selection so provider/model stay equal to the parent and the inherited history remains eligible for KV Cache reuse.
+
+实测代价（一个真实 fork 子代理的首个请求）：`inputTokens: 144185` / `cacheReadTokens: 186`。
+
+**判据：注入前先问后端「你继承父上下文吗」，而不是「你能接受路由吗」。** 现实现：
+
+```js
+const entry = ctx.subagents.getProvider(spec.provider);
+if (entry?.inheritsParentContext === true && section.applyToForkChildren !== true) return request;
+```
+
+**两个反向陷阱都要避开**：
+
+- `getProvider` 返回 `undefined`（自定义 provider）时**必须照旧注入**。把「读不到能力」当成「继承上下文」，会让所有未知后端静默失去功能 —— 这正是 2.1.7 那种「看起来生效、实际没走」的失败。
+- 跳过必须**留日志**，否则「配置了却没生效」无从发现；但要**每 provider 每 fiber 只记一次**，否则每次派发都刷一行。
 
 ## 不要做的事
 
@@ -271,8 +320,8 @@ requestContext() {
 **宿主的真相**（`dsh-agent-loop`）：每轮迭代是
 
 ```text
-preStep()       ← 0.2.1-rc.3: :902   （:906 抽干 inbox，:909 调用本插件的注入点）
-buildRequest()  ← 0.2.1-rc.3: :1214  （:1075 调用点；:1271 才 append request/context）
+preStep()       ← 0.2.1-rc.5: :902   （:906 抽干 inbox，:909 调用本插件的注入点）
+buildRequest()  ← 0.2.1-rc.5: :1214  （:1075 调用点；:1271 才 append request/context）
 ```
 
 所以**第一步的 pre-step 执行时，`request/context` 帧尚不存在**。

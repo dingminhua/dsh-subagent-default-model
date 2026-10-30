@@ -1,5 +1,108 @@
 # Changelog
 
+## 2.1.11 (2026-10-30)
+
+> **发布说明**：本节的改动与下一节 2.1.10 的宿主兼容性核查**同批发布**，npm 上直接从 2.1.9 升到 2.1.11，2.1.10 没有单独发布过。保留两个条目是因为「换了宿主版本」和「改了行为」是两件独立的事，事后查证时分开更好读；`npm install` 请直接用 `2.1.11`。
+
+### Added
+
+- **`applyToForkChildren` 开关（默认 `false`）**：控制 `subagent_fork` 子代理是否也使用本插件设定的模型。设置卡片里有对应复选框，双语文案说明代价。
+
+  **为什么默认关闭**：`fork` 通道（`inheritsParentContext === true`）是**用父会话日志的前缀播种**出来的，宿主的 `dsh-base` 刻意不给它模型选择权：
+
+  > Fork omits model selection so provider/model stay equal to the parent and the inherited history remains eligible for KV Cache reuse.
+
+  插件此前对**所有**缺 `agentOptions` 的派发注入路由，包括 fork，于是这段刻意保留的前缀缓存直接失效。实测一个真实 fork 子代理的首个请求：`inputTokens: 144185` / `cacheReadTokens: 186` —— 14.4 万 token 的继承前缀在另一个供应商上被**全量重算**，命中率 0.13%。后续步骤会由新供应商自建缓存，所以损失是一次性的首请求惩罚，但金额很大。
+
+  **判定方式**：注入前查 `ctx.subagents.getProvider(spec.provider)?.inheritsParentContext`。为 `true` 时跳过（当前只有 `fork` 通道这样声明），并在**每个 provider 每个 fiber 只记一次** info 日志 —— 「配置了却没生效」必须可见（2.1.7 的教训），但不能按每次派发刷屏。
+
+  **显式传参优先**：fork 子代理若自带 `agentOptions`，照旧覆盖一切，开关不影响。
+
+  **未知 provider 照旧注入**：`getProvider` 返回 `undefined` 时按「不继承上下文」处理。把「读不到能力」当成「继承」会让所有自定义 provider 静默失去注入，方向反了。
+
+### Changed
+
+- **破坏性变更（行为）**：`subagent_fork` 子代理默认**不再**使用配置的模型，改为继承父路由。这是 2.1.7 起一直存在的行为，本次修正。依赖旧行为的用户请显式设置 `applyToForkChildren: true`。
+- 双语文档（`README.md` / `README.en.md` / `plugin/README.md` / `plugin/README.en.md`）中「覆盖 `subagent_fork`」的说法全部改为「覆盖，但默认让位」，并在配置表补 `applyToForkChildren` 一行。
+
+### Tests
+
+新增 6 个用例（153 → 159）：
+
+- fork 子代理默认不注入、且**保持请求对象同一性**（宿主比较 identity，无谓克隆是隐式行为变化）
+- 同一份配置下 spawn 仍然注入（证明门禁只针对 fork，没有误伤）
+- `applyToForkChildren: true` 时 fork 跟随配置路由
+- fork 上**显式** `agentOptions` 优先级不受开关影响
+- 未知 provider 仍被注入（能力读取失败不得静默关闭功能）
+- `applyToForkChildren` 默认值必须是 `false`（默认值是承重的，不是装饰）
+
+配套修正两个**会误伤新增字段**的旧用例：`settings-install` 里「all seven fields」把断言写死成 7 个键，`settings-write-gate` 的原子保存字段表也没包含新键 —— 前者改成与 `Config` 自身声明键比对（守住「字段不被丢弃」的真实语义，不再钉住数量），后者补上新字段并用**真实宿主写入门**验证它能被接受。
+
+变异验证：①去掉 fork 门禁 → 默认用例失败；②默认值改 `true` → 两个用例失败。恢复后 159/159。
+
+真实 `apply()` 端到端复核（非夹具）：fork → `agentOptions = undefined`，spawn → `{provider:"pool",model:"M1"}`。
+
+## 2.1.10 (2026-10-30)
+
+### 兼容性核查：DSH Desktop 0.2.1-rc.5
+
+当前宿主由 `0.2.1-rc.3` 升到 **`0.2.1-rc.5`**（nightly 渠道，2026-10-30 安装）。**插件运行逻辑零改动**（`plugin/lib/index.js` / `plugin/lib/client.js` 未动一行）——本版只做核查与清单维护。
+
+这次核查比 2.1.8 更彻底：把宿主 `desktop-runtime.json` 列出的**全部 305 个随包**都按 rc.3 / rc.5 各拉一份做逐文件比对（而非只挑几个包看）。
+
+**305 个包里只有 10 个有真实代码改动**，且全部落在插件未触碰的面上：
+
+| 包 | 改动 | 与本插件的关系 |
+| --- | --- | --- |
+| `dsh-client-ui-chat` | **推理文本展示**：新增 `reasoningText()`，把模型输出里 `<signature>…</signature>` 包裹的签名段剥离后再展示；`ReasoningBodyOwnerProps` 增加 `rawText`，`ReasoningContentInput` 不再继承 owner props（改为显式 `text` + `running`） | 插件只注册**自有 kind** 的 chat 渲染器（`chat-subagent-model-notice`）与本地的 `conversation.chat.node` 槽位，从不渲染 reasoning 行；`isVisibleChatNode()` 的白名单/黑名单规则未变 |
+| `dsh-client-ui-conversation` | View 标签页 tooltip 改为**按估算宽度按需出现**（`labelNeedsTooltip`）、移除 `session.moreViewsCurrent` 文案 | 插件用的 `conversation.chat.node` 槽位与 `request/header` 帧语义完全未变 |
+| `dsh-client-ui-settings-account` / `-general` / `dsh-client-ui-sidebar` | 版本号字符串（`0.2.1-rc.3` → `0.2.1-rc.5`、构建标记 `rc.5-d4db512`） | 纯版本串 |
+| `dsh-llm-deepseek-account` | 一行日志级别 `console.info` → `console.error` | 与插件的故障转移无关 |
+| `dsh-mcp-client` | `resources/list` 前先查 `getServerCapabilities()?.resources`，不支持时返回空列表而非报错 | 与本插件无关 |
+| `dsh-experimental-client-ui-cot-translation` | 跟随 chat 的 reasoning 改动（仅注释 + 契约描述） | 与本插件无关 |
+| `dsh-cordis-client-runner` | 内嵌 Slots 契约的**源码行号引用**（`slots.ts:441` → `:447` 等） | 纯文档字符串 |
+| `dsh-client-modules` | 内嵌构建 commit 号 | 纯字符串 |
+
+插件依赖的 `dsh-agent-loop`、`dsh-subagent`、`dsh-tool-subagent`、`dsh-llm`、`dsh-settings`、`dsh-app-boot`、`dsh-agent`、`dsh-agent-preset`、`dsh-experimental-agent-team`、`dsh-tool-subagent-control`、`dsh-session`、`dsh-llm-retry`、`dsh-llm-deepseek`、`dsh-llm-pi-ai`、`dsh-plugin-manager`、`dsh-host-plugin-inventory`：**逐文件比对为零改动**（仅 `package.json` 版本号）。
+
+**从运行中的 `app.asar` 直接读源码复核的契约（行号均为 rc.5 实测）**：
+
+| 检查项 | 结论 |
+| --- | --- |
+| 插件加载与注入 | ✅ 运行中的宿主已挂载本插件行（`include:dsh-subagent-default-model`），`Config` 投影出全部 7 个 volatile 字段 |
+| 4 个事件钩子 | ✅ `agent/pre-step`（`:909`）、`agent/request`（`:1191`）、`agent/request-error`（`:1136`）、`agent/disposed`（`:1663`）全部仍在 |
+| `preStep()` → `buildRequest()` 时序 | ✅ 未变（`:902` / `:1214`；`request/context` 仍在 `:1271` 才 append） |
+| `inbox.claim()` 先抽干 | ✅ 未变（`preStep` 首行 `:906`，仍在 `agent/pre-step` 瀑布之前） |
+| `session.requestContext()` 语义 | ✅ 未变（`dsh-session` `:1627`） |
+| 派发入口 | ✅ 仍只有 `startActivation(spec)`（`dsh-subagent` `:3036`），插件的包装点有效 |
+| `agentOptions` 组装语义 | ✅ 未变：宿主仅在**显式**选择路由时才带上 `agentOptions`（`dsh-tool-subagent` `:470`），「无显式路由 → 插件注入」这条前提依然成立 |
+| `request/header` 帧 | ✅ `initial` / `resume` / `change` / `series` 四种 `reason` 未变（`:1226`–`:1240`） |
+| 失败码词表 | ✅ 未变（`RATE_LIMIT` / `QUOTA` / `ACCOUNT_QUOTA` / `SERVER` / `TIMEOUT` / `TRANSPORT` / `EMPTY_RESPONSE` / `INVALID_CREDENTIAL` / `CONTEXT_WINDOW_EXCEEDED` 等） |
+| 客户端槽位 | ✅ `conversation.chat.node` 与 `plugins.bundle.config` / `plugins.row.config` 全部存在；本插件的 `chat-subagent-model-notice` 渲染器在运行中**处于 active** |
+| `cordis.original` 符号 | ✅ 仍在（插件据此拿到 `ctx.subagents` 背后的原始服务对象） |
+| peer 区间覆盖 | ✅ 宿主 `unmetRequirements()` 对 `0.2.1-rc.5` 返回「无未满足要求」 |
+
+**端到端实测**（不是静态推断）：在本机派发一个真实子代理，其 `subagent/descriptor` 固化了 `agentProvider: "dsh-opencode-go"` / `agentModel: "deepseek-v4.1-flash"` / `agentReasoningEffort: "high"` —— 与配置池一致，说明 `startActivation` 注入确实发生；子代理会话日志里也能读到插件写入的 `route-context` 行（`source.kind = plugin:dsh-subagent-default-model`）。
+
+### Fixed
+
+- **「应当通过」的宿主版本清单第四次滞后**：清单停在 `0.2.1-rc.3`，而真实运行的宿主已是 `0.2.1-rc.5`。2.1.8 新增的自检用例「the RUNNING host version must be admitted」**按预期直接失败**（`the running host 0.2.1-rc.5 must be listed in ADMITTED_HOST_VERSIONS`），没有靠人记得补——这次护栏真的起了作用。
+
+  清单补上 `0.2.1-rc.4` **与** `0.2.1-rc.5`：升级路径跨过了 rc.4，而该用例只断言**本机装的那一个**版本；若只补 rc.5，一台仍停在 rc.4 的机器上跑同一份已评审清单就会失败。判据已写进 `DEVELOPMENT.md`：清单描述的是「已评审过的宿主版本集合」，不是「我这台机器上的那一个」。
+
+  - 变异验证：把 `0.2.1-rc.5` 从清单里去掉 → 该用例失败；放回去 → 通过。
+
+### Docs
+
+`DEVELOPMENT.md`：
+
+1. 「宿主升级流程」补两节：**跨多个 rc 升级要把跳过的版本也补进清单**；**逐包比对的正确姿势**（用 `desktop-runtime.json` 的全量包清单做 `diff -rq`，把「真有改动」与「只是版本号变了」分开）。
+2. 契约行号表增补 rc.5 一列，并加 `agent/request-error` / `agent/request` 两行。
+
+### Tests
+
+全量：`tests 153 / pass 153 / fail 0 / skip 0`（用例数与 2.1.9 相同，本版未新增用例）。
+
 ## 2.1.9 (2026-10-26)
 
 ### Changed

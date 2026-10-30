@@ -138,7 +138,27 @@ const SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA = z.object({
 	// writes this key as part of EVERY save, so omitting it made every save
 	// fail — not just the reasoning-effort field. It also carries the
 	// single-model form's effort, which `defaultModel()` reads back.
-	reasoningEffort: volatileField(z.string().default("").description("Reasoning effort for the single-model form (`model`)"))
+	reasoningEffort: volatileField(z.string().default("").description("Reasoning effort for the single-model form (`model`)")),
+	// Whether the same-context delegation channels (`subagent_fork`) follow this
+	// plugin's configured route instead of inheriting the parent's.
+	//
+	// Default FALSE, i.e. fork children keep the parent route. The host's `fork`
+	// backend sets `inheritsParentContext = true` and is SEEDED with a prefix of
+	// the parent's session log, so its whole point is provider-side reuse of that
+	// prefix (KV cache). `dsh-base` spells the intent out where the fork tool is
+	// wired: "Fork omits model selection so provider/model stay equal to the
+	// parent and the inherited history remains eligible for KV Cache reuse."
+	//
+	// Measured cost of ignoring that: one real fork child sent its first request
+	// with `inputTokens: 144185, cacheReadTokens: 186` — i.e. the inherited
+	// 141-message prefix was re-billed in full on the other provider instead of
+	// being served from cache. Later steps are fine (the new provider builds its
+	// own cache), so the loss is a one-off first-request penalty, but it is a
+	// large one.
+	//
+	// Opting IN is a deliberate trade: you want fork children on the pool route
+	// and accept paying to re-run the inherited prefix once.
+	applyToForkChildren: volatileField(z.boolean().default(false).description("Let same-context channels (subagent_fork) follow the configured route instead of inheriting the parent's; off keeps the host's KV-cache reuse"))
 }).default({});
 
 /** The plugin's Cordis Config — on DSH 0.1.7+ this IS the settings section. */
@@ -231,6 +251,32 @@ function defaultModel(state) {
 	return void 0;
 }
 
+/**
+ * Whether one delegation's provider reuses the parent's conversation prefix.
+ *
+ * `inheritsParentContext === true` is the host's own statement that this backend
+ * is seeded with the parent's session log (currently only the `fork` backend).
+ * Route changes on such a child invalidate the KV cache the host preserved on
+ * purpose, so they are treated differently from a fresh-context spawn.
+ *
+ * @param ctx - the plugin context (reads `subagents`).
+ * @param provider - the provider name from the delegation spec.
+ * @returns {boolean} true when children on this provider inherit the prefix.
+ */
+function inheritsParentContext(ctx, provider) {
+	if (typeof provider !== "string" || provider.length === 0) return false;
+	try {
+		const subagents = ctx.subagents ?? ctx.get?.("subagents");
+		const entry = subagents?.getProvider?.(provider);
+		return entry?.inheritsParentContext === true;
+	} catch {
+		// An unreadable registry must not turn into "skip every delegation": fall
+		// back to the fresh-context behaviour (inject), which is the long-standing
+		// default and never silently disables the feature.
+		return false;
+	}
+}
+
 /** Inject the default model into one delegation request unless it already names one. */
 function applyDefaultModel(state, request) {
 	if (request === void 0 || request === null) return request;
@@ -238,6 +284,43 @@ function applyDefaultModel(state, request) {
 	const model = defaultModel(state);
 	if (model === void 0) return request;
 	return { ...request, agentOptions: model };
+}
+
+/**
+ * The provider-aware form of {@link applyDefaultModel}: also honours
+ * `applyToForkChildren` for same-context (`fork`) delegations.
+ *
+ * A fork child that is left alone keeps the parent route, exactly as the host
+ * intends; when the user opts in, the pool route is injected as for any other
+ * child. A skip is logged ONCE per provider so "configured but not applied" is
+ * never silent — the 2.1.7 failure mode was exactly that.
+ *
+ * @param ctx - the plugin context, used to read provider capabilities.
+ * @param state - the plugin state.
+ * @param request - the delegation request.
+ * @param provider - the provider name the spec targets.
+ * @returns the request, possibly with `agentOptions` injected.
+ */
+function applyDefaultModelFor(ctx, state, request, provider) {
+	if (request === void 0 || request === null) return request;
+	// An explicit route always wins, regardless of the fork policy.
+	if (request.agentOptions !== void 0) return request;
+	if (inheritsParentContext(ctx, provider) && state.getSection()?.applyToForkChildren !== true) {
+		// Logged once per provider per fiber: this fires on EVERY fork delegation,
+		// and a line per delegation would be the same log spam this plugin
+		// already fixed for context injection. It is still logged at all because
+		// "configured but silently not applied" is the exact failure mode that
+		// took a release to diagnose (2.1.7).
+		if (state.forkSkipNoticed?.has(provider) !== true) {
+			(state.forkSkipNoticed ??= new Set()).add(provider);
+			ctx.logger?.info?.(
+				"[dsh-subagent-default-model] %s children inherit the parent conversation, so the configured route is NOT applied to them (set applyToForkChildren: true to override). They stay on the parent route so that prefix keeps its KV-cache reuse.",
+				provider
+			);
+		}
+		return request;
+	}
+	return applyDefaultModel(state, request);
 }
 
 // ── subagent-only error failover ─────────────────────────────────────────────
@@ -635,21 +718,23 @@ function installSubagentWrapper(ctx, state) {
 	// route at all on 0.2.x (children silently inherited the parent route).
 	const originalStartActivation = raw.startActivation;
 	const wrappedStart = typeof originalStart === "function"
-		? async (name, request) => originalStart.call(raw, name, applyDefaultModel(state, request))
+		? async (name, request) => originalStart.call(raw, name, applyDefaultModelFor(ctx, state, request, name))
 		: void 0;
 	const wrappedStartContinuable = typeof originalStartContinuable === "function"
 		? async (spec) => {
 			if (spec === void 0 || spec === null) return originalStartContinuable.call(raw, spec);
 			return originalStartContinuable.call(raw, {
 				...spec,
-				request: applyDefaultModel(state, spec.request)
+				request: applyDefaultModelFor(ctx, state, spec.request, spec.name ?? spec.provider)
 			});
 		}
 		: void 0;
 	const wrappedStartActivation = typeof originalStartActivation === "function"
 		? async (spec) => {
 			if (spec === void 0 || spec === null) return originalStartActivation.call(raw, spec);
-			const request = applyDefaultModel(state, spec.request);
+			// `spec.provider` names the delegation backend (`spawn` / `fork`), which
+			// is what decides whether this child inherits the parent conversation.
+			const request = applyDefaultModelFor(ctx, state, spec.request, spec.provider);
 			// Keep the spec reference when nothing was injected: host code compares
 			// identity and a needless clone would be a silent behaviour change.
 			return originalStartActivation.call(raw, request === spec.request ? spec : {
@@ -700,7 +785,10 @@ export function apply(ctx, config) {
 				injectRouteContext: unwrap(raw.injectRouteContext),
 				// Read back too: the single-model form stores its effort here, so
 				// dropping the key silently ignored the configured effort.
-				reasoningEffort: unwrap(raw.reasoningEffort)
+				reasoningEffort: unwrap(raw.reasoningEffort),
+				// Fork/same-context policy. Absent resolves to the schema default
+				// (`false`), so an old config patch keeps the host's fork behaviour.
+				applyToForkChildren: unwrap(raw.applyToForkChildren)
 			};
 			// Drop any field that resolved to undefined so downstream defaults apply.
 			for (const key of Object.keys(section)) {

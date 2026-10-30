@@ -41,7 +41,8 @@
 
 - **单模型默认路由**：所有未显式选模型的子代理使用同一条配置路由。
 - **逐路由推理强度**：每个模型条目可独立配置 `reasoningEffort`。
-- **完整覆盖派发入口**：包装 0.2.x 的 `startActivation()` 与旧版 `start()` / `startContinuable()`，覆盖 `subagent`、`subagent_fork`、`spawn_teammate` 以及其他调用 `ctx.subagents` 的发起方。
+- **完整覆盖派发入口**：包装 0.2.x 的 `startActivation()` 与旧版 `start()` / `startContinuable()`，覆盖 `subagent`、`spawn_teammate` 以及其他调用 `ctx.subagents` 的发起方。
+- **`subagent_fork` 默认让位**：`fork` 通道的子代理会继承父会话的完整对话，宿主因此刻意让它留在父路由上，好让继承的前缀能复用 KV 缓存。本插件默认**不**改它的路由（`applyToForkChildren: false`）；确有需要可在设置卡片里显式打开，代价是那段继承上下文要在新模型上重算一次。
 - **设置热更新**：编辑设置后，下一次派发立即采用新配置。
 - **干净卸载**：Cordis 销毁插件时恢复原始服务方法。
 - **原生设置卡片**：可在 `设置 → 插件配置 → 子代理默认模型` 中完成配置。
@@ -201,6 +202,7 @@ CI 在 `ubuntu-latest` / `windows-latest` / `macos-latest` 三个平台同时跑
 | `failoverEnabled` | boolean | `true` | 连接失败时在 `models` 列表内按队列与策略切换模型（仅 subagent）。 |
 | `injectRouteContext` | boolean | `true` | 把当前真实的 provider/model 以一行提示词注入子代理上下文（仅 subagent；路由已知后才注入）。 |
 | `reasoningEffort` | string | — | 可选的逐路由推理强度。设置面板会校验它是否被目标模型声明，不匹配时给出警告（不阻止保存）。 |
+| `applyToForkChildren` | boolean | `false` | `subagent_fork` 子代理是否也使用这里的模型。默认关闭：fork 继承父会话对话，宿主让它留在父路由以复用 KV 缓存；开启后那段前缀会在新模型上重算一次。 |
 
 ## 市场收录与展示
 
