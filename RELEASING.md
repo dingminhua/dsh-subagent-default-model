@@ -15,6 +15,67 @@
 > export PATH="/opt/homebrew/bin:$PATH"
 > ```
 
+## 速查：照着敲（2.2.0 实操版）
+
+把 `X.Y.Z` 换成目标版本。每一步失败就停下，不要往下走。
+
+```bash
+export PATH="/opt/homebrew/bin:$PATH"
+cd /Users/dmh2002/DshProject/dsh-subagent-default-model
+
+# ① 全绿
+(cd plugin && node --test 2>&1 | grep -E "^ℹ (tests|pass|fail|skipped)")   # fail 0 且 pass == tests
+node integration.mjs 2>&1 | grep -E "^ℹ (pass|fail)"
+node prove.mjs      2>&1 | grep -E "^ℹ (pass|fail)"
+
+# ② 改版本号 + CHANGELOG（手动编辑这两处，见第 2、3 步的选号规则）
+
+# ③ 提交 + 打 tag + 推送
+git status --short            # 只应剩已暂存项
+git add -A
+git commit -m "release: X.Y.Z —— <一句话>"
+git tag -a vX.Y.Z -m "vX.Y.Z: <一句话>"
+git push origin main && git push origin vX.Y.Z
+git rev-list -n1 vX.Y.Z       # 必须 == git rev-parse HEAD
+
+# ④ 离线打包预检（全部 ✓ 才发布）
+(cd plugin && npm pack --pack-destination /tmp)
+cd /tmp && rm -rf preXYZ && mkdir preXYZ && cd preXYZ
+tar xzf /tmp/dsh-subagent-default-model-X.Y.Z.tgz
+node -p "require('./package/package.json').version"
+cd /Users/dmh2002/DshProject/dsh-subagent-default-model
+for f in package.json lib/index.js lib/client.js CHANGELOG.md README.md README.en.md cordis.patch.yml; do
+  git show vX.Y.Z:plugin/$f | diff -q - /tmp/preXYZ/package/$f >/dev/null 2>&1 && echo "✓ $f" || echo "✗ $f"
+done
+
+# ⑤ 发布（此时不要再改任何要发布的文件）
+cd plugin && npm publish
+
+# ⑥ 轮询 tarball 并全量比对（元数据先到、tarball 后到）
+URL=$(curl -s "https://registry.npmjs.org/dsh-subagent-default-model" -H 'Cache-Control: no-cache' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['versions']['X.Y.Z']['dist']['tarball'])")
+for i in $(seq 1 10); do
+  code=$(curl -s -o /tmp/p.tgz -w "%{http_code}" "$URL"); echo "尝试 $i: $code"
+  [ "$code" = "200" ] && break; sleep 30
+done
+cd /tmp && rm -rf vX && mkdir vX && cd vX && tar xzf /tmp/p.tgz
+cd /Users/dmh2002/DshProject/dsh-subagent-default-model
+for f in package.json lib/index.js lib/client.js CHANGELOG.md README.md README.en.md cordis.patch.yml; do
+  git show vX.Y.Z:plugin/$f | diff -q - /tmp/vX/package/$f >/dev/null 2>&1 && echo "✓ $f" || echo "✗ $f"
+done
+
+# ⑦ 建 GitHub Release
+gh release create vX.Y.Z --repo dingminhua/dsh-subagent-default-model \
+  --title "vX.Y.Z — <一句话>" --notes-file /tmp/rel.md --verify-tag
+gh release view vX.Y.Z --repo dingminhua/dsh-subagent-default-model \
+  --json tagName,isDraft,isPrerelease      # isDraft 必须为 false
+
+# ⑧ 收尾核对
+git log origin/main..HEAD --oneline        # 应为空
+npm view dsh-subagent-default-model version   # 应 == vX.Y.Z
+git describe --tags --abbrev=0               # 与上一条一致
+```
+
 ## 每次发布的完整步骤
 
 ### 1. 确认代码与测试
@@ -38,6 +99,18 @@ npm --prefix plugin version patch|minor|major --no-git-tag-version
 
 > 后续步骤以目标版本号 `X.Y.Z` 指代。
 
+**选哪个号**：
+
+| 改动性质 | 号段 | 例 |
+| --- | --- | --- |
+| 修 bug、文案、样式微调 | patch | `2.1.11` → `2.1.12` |
+| **用户可见的入口/界面迁移**，或破坏性语义变更 | minor | `2.1.21` → `2.2.0`（配置从插件页搬到设置侧边栏） |
+| 让旧配置无法继续工作 | major | — |
+
+判定要点：**用户的操作路径是否改变**。同样是改界面，调整文案位置是 patch；把配置从「插件市场详情页」搬到「设置 → 侧边栏」改变了用户找东西的路径，就该走 minor。
+
+> **多个未发布的版本可以合并成一个号。** 若连续几个改动都只存在于 git 历史、从未发到 npm，发布时不需要逐个补发——直接把当前内容打成一个版本（如 2.1.16–2.1.21 六次改动合并为 2.2.0），并在 CHANGELOG 里说明「它们只存在于 git 历史，未单独发布」。这样 npm 上的版本序列不会出现一串没人用过的号。
+
 ### 3. 更新 CHANGELOG.md
 
 在 `plugin/CHANGELOG.md` 顶部新增一节 `## X.Y.Z (YYYY-MM-DD)`，按 `Features` / `Fixes` / `Docs` 分组记录本次变更（参见现有 0.3.1 的写法）。
@@ -60,6 +133,27 @@ git push origin vX.Y.Z
 > ```
 > 修正后务必用 `git rev-list -n1 vX.Y.Z` 确认指向当前 HEAD。
 
+**提交前检查工作区**——`git status --short` 必须是空的（除暂存区外无其他改动）。今天出现过 `git add -A` 漏掉新文件、以及改了文件却没提交就打包的情况：
+
+```bash
+git status --short          # 应只剩已暂存项
+git add -A                  # 把全部改动纳入
+git commit -m "..."
+git tag -a vX.Y.Z -m "..."
+git push origin main && git push origin vX.Y.Z
+git rev-list -n1 vX.Y.Z     # 必须等于下面这条
+git rev-parse HEAD
+```
+
+> ⚠️ **推送 git ≠ 发布 npm，两者互不替代。** 今天曾连续 2.1.16–2.1.21 六个版本只推了 git、没发 npm，导致「文件里写着 2.1.21、用户装到的还是 2.1.15」。只要某一轮没有走到第 5 步，就必须在下次发布时把这些改动一并带上，并在 CHANGELOG 里说明。
+>
+> 发布结束后核对一次全貌：
+> ```bash
+> git log origin/main..HEAD --oneline        # 应为空（本地没有未推提交）
+> npm view dsh-subagent-default-model version   # 应等于 git tag 的最新版本
+> git describe --tags --abbrev=0               # 与上一条一致
+> ```
+
 ### 5. 发布到 npm
 
 ```bash
@@ -69,11 +163,31 @@ npm publish
 
 **打包内容**：`package.json` 的 `files` 字段已限定只发布 `lib/`、`icons/`、`cordis.patch.yml`、`LICENSE`、`README.md`、`README.en.md`、`CHANGELOG.md`，`test/` 和 `node_modules/` 不会进入发布包。
 
-**发布前检查**（可选但推荐）：
+**发布前预检**（必做，不是可选）：
+
+打包到临时目录，解包，再与 git tag **逐字节**比对。这一步确认「按下回车那一刻要发的东西」与「tag 声称的东西」是同一份内容——它能在发布前抓住漏提交、忘记 `git add`、改完没保存这类问题：
 
 ```bash
-npm pack --dry-run    # 核对 tarball 内容与版本号
+# 1) 离线打包（不发布）
+rm -f /tmp/dsh-subagent-default-model-X.Y.Z.tgz
+npm pack --pack-destination /tmp
+
+# 2) 解包
+cd /tmp && rm -rf preXYZ && mkdir preXYZ && cd preXYZ
+tar xzf /tmp/dsh-subagent-default-model-X.Y.Z.tgz
+node -p "require('./package/package.json').version"   # 必须是 X.Y.Z
+
+# 3) 与 tag 逐字节比对（回到仓库根执行）
+cd /Users/dmh2002/DshProject/dsh-subagent-default-model
+for f in package.json lib/index.js lib/client.js CHANGELOG.md README.md README.en.md cordis.patch.yml; do
+  git show vX.Y.Z:plugin/$f | diff -q - /tmp/preXYZ/package/$f >/dev/null 2>&1 \
+    && echo "✓ $f" || echo "✗ $f"
+done
 ```
+
+**全部 ✓ 才允许发布。** 有任何 ✗ 说明 tag 与工作区不一致：先提交、重新打 tag，再回到这一步。
+
+顺便核对包内容：`npm pack --dry-run` 应只列出 10 个文件（`lib/`、`icons/`、`cordis.patch.yml`、`LICENSE`、两份 README、`CHANGELOG.md`、`package.json`），没有 `test/`、`locale/`、`docs/`。
 
 > ⚠️ **tarball 在等待 2FA 之前就已打好**（2.1.13 的教训）。
 >
@@ -116,6 +230,32 @@ npm view dsh-subagent-default-model dist-tags.latest   # 应为 X.Y.Z
 curl -sL "$(npm view dsh-subagent-default-model@X.Y.Z dist.tarball)" \
   | tar xz -O package/lib/index.js | diff - <(git show vX.Y.Z:plugin/lib/index.js) && echo "tarball == tag"
 ```
+
+**元数据先到、tarball 后到**，两者可能差几分钟到十几分钟。这段时间里 `dist-tags` 已显示新版本、版本端点也返回 200，但 tarball 仍 404、`npm install <pkg>@X.Y.Z` 报 `ETARGET`。这不是发布失败，是 CDN 传播。轮询等待即可：
+
+```bash
+URL=$(curl -s "https://registry.npmjs.org/dsh-subagent-default-model" -H 'Cache-Control: no-cache' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['versions']['X.Y.Z']['dist']['tarball'])")
+for i in $(seq 1 10); do
+  code=$(curl -s -o /tmp/p.tgz -w "%{http_code}" "$URL")
+  echo "尝试 $i: HTTP $code"
+  [ "$code" = "200" ] && break
+  sleep 30
+done
+```
+
+拿到 200 后，解包与 tag 全量比对（不只比 `lib/index.js`）：
+
+```bash
+cd /tmp && rm -rf vX && mkdir vX && cd vX && tar xzf /tmp/p.tgz
+cd /Users/dmh2002/DshProject/dsh-subagent-default-model
+for f in package.json lib/index.js lib/client.js CHANGELOG.md README.md README.en.md cordis.patch.yml; do
+  git show vX.Y.Z:plugin/$f | diff -q - /tmp/vX/package/$f >/dev/null 2>&1 \
+    && echo "✓ $f" || echo "✗ $f"
+done
+```
+
+（`npm install` 若报 `ETARGET`，先 `npm cache clean --force` 再试——本地缓存可能仍持有旧元数据。2.1.12 与 2.1.14 都遇到过。）
 
 `dist-tags` 会滞后（曾出现 `npm view` 仍显示旧版本、而直连 registry 已更新的情况），必要时用 `curl -H 'Cache-Control: no-cache' https://registry.npmjs.org/<pkg>` 复核。
 
@@ -225,6 +365,20 @@ gh release create v0.3.1 \
 ```
 
 ## 常见问题
+
+### 一张表：今天踩过的坑
+
+这些都是**实际发生过的**，不是假设。照着做就能避开。
+
+| 现象 | 真实原因 | 处置 |
+| --- | --- | --- |
+| npm 上版本内容比 git tag 旧，同号不同物 | `npm publish` **先打包、再等 2FA**。打包后改的代码不会进包 | 发行版本号（版本不可覆盖）；按下回车后不再改文件 |
+| `npm view` 显示旧版本就以为发布失败 | `dist-tags` 与 CDN 有延迟；本地 npm 缓存也可能陈旧 | 必须「直连 registry + 等数分钟 + 真实 `npm install`」三条同时满足才判失败 |
+| 元数据已更新但 `npm install` 报 `ETARGET` | 元数据先到、tarball 后到，CDN 传播中 | 轮询 tarball URL 直到 200；必要时 `npm cache clean --force` |
+| 连续多个版本只推 git 没发 npm | 把「推送」当成了「发布」 | 每次收尾核对 `npm view version` 与 `git describe --tags` 是否一致 |
+| GitHub Release 漏建 | npm 成功不等于 Release 已建 | 第 8 步不可跳过；`gh release view` 确认 `isDraft=false` |
+
+> **一条总原则**：`npm publish` 打印的成功回执（`+ pkg@X.Y.Z`）**只是客户端回执**，不证明服务端已收。判定发布结果永远以「真实 tarball 能否下载并逐字节等于 tag」为准。
 
 ### 忘了创建 GitHub Release
 

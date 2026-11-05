@@ -402,6 +402,46 @@ if (this.header.isSeeded && seed === void 0) throw new Error("seeded session req
 
 所以这个标志不再是「上一轮发过请求」，而是「**本会话继承了一段前缀**」（含显式为空的前缀）。`isStaleFold()` 只看这个标志、不假设上一轮一定请求过——正是这个写法让它在含义放宽后**依然正确**：标志为真就保守地视折叠值为历史。`route-context.test.mjs` 里新增了对应的回归用例，防止有人把标志改严（要求上一轮必须有 `request/context`）或改松。
 
+### 案例五：夹具在 slot 里「无条件放行」，掩盖了恒为 false 的探测
+
+**缺陷**：2.1.16/2.1.17 的 `settings.section` 注册**整段从未执行**。代码里用 `typeof ctx.slots.specOf === "function"` 做能力探测，而 `specOf` 只存在于渲染器的内部 hostFace，**不在 `ctx.slots` 这个公共服务上**。探测恒为 false，注册被跳过，界面上什么都没有、也不报错。
+
+**夹具的错**（两重）：
+
+1. 夹具的 `ctx.slots` **没有 `specOf`**，于是新代码在测试里同样走不到注册分支——测试全绿，但功能从不生效。**夹具缺方法时，被测代码的降级路径就被当成了正常运行。**
+2. 夹具的 `inject(name, callback)` **无条件调用回调**，而真实 `slots.inject()` 只在该 slot **已声明**时才调用；未声明时只是等待。
+
+修夹具时还发现第三个问题：夹具**立刻调用** `inject` 回调返回的 disposer，等于「注册完马上释放」——宿主绝不会这样做，disposer 是交给 fiber 在卸载时调用的。
+
+**宿主真相**（`dsh-client-ui-renderer`）：
+
+```js
+inject(key, callback) {
+  const reconcile = () => {
+    const spec = this._core.specDynamic(key);
+    if (spec === void 0) return;          // 未声明 → 什么都不做
+    const disposeEffect = ctx.effect(callback, ...);
+    ...
+  };
+}
+```
+
+**结论（比夹具本身更重要）**：`slots.inject()` **本身就是探测**。在外面再套一层探测不仅多余，还引入新失败点。现在的实现是无条件 `inject`，让宿主决定。
+
+> 这条教训的普遍形式：**探测失败必须往「能用」的方向失败**。写成「探测不到就不注册」，任何探测缺陷都会静默关闭功能；写成「拿不准就注册，让宿主决定」，最坏情况只是宿主忽略一次注册。
+
+### 案例六：把「界面上有东西」当成「新代码生效」
+
+不是夹具问题，但同样花了时间。
+
+2.1.16 之后我在界面里看到过那一项，据此断定探测可用。**但那一项来自重启前加载的旧 bundle**，不是新代码。宿主在启动时快照 client bundle，而页面可能仍持有旧的——所以我看到的可能是上一次构建的产物。
+
+**判据**：判断「新代码是否生效」必须看**只有新代码才有的东西**：
+
+- 构建标记（本仓的 `[diag]` 行里带 `DSM_CLIENT_BUILD`，每次改 `client.js` 都要递增它，正是为此）；
+- 或者直接查运行态（`cordis_inspect_query` 看 slot occupants 里有没有你的 id）；
+- 而不是「界面上看起来对」。
+
 ### 复盘：为什么这些都没被测试拦住
 
 | 案例 | 夹具缺了什么 | 宿主中的对应语义 |
@@ -410,8 +450,10 @@ if (this.header.isSeeded && seed === void 0) throw new Error("seeded session req
 | 二 | `requestContext` 是常量 | 折叠最新 `request/context` 的可变值 |
 | 三 | 瀑布顺序与宿主相反 | `preStep` 先于 `buildRequest` |
 | 四 | 只造全新会话 | `Session.fromRestore` 带着上一轮日志回来 |
+| 五 | 缺 `specOf`；`inject` 无条件回调 | `inject` 等声明；未声明时不执行 |
+| 五 | 立刻调用返回的 disposer | disposer 由 fiber 在卸载时调用 |
 
-四者是同一个错误的四种形态：**夹具在「宿主会拒绝 / 会变化 / 会有序 / 会带着历史回来」的地方一律放行**。
+前五者是同一个错误的五种形态：**夹具在「宿主会拒绝 / 会变化 / 会有序 / 会带着历史回来 / 会等待声明」的地方一律放行**。
 
 > 案例四尤其值得记住：它是在**修复完成、测试全绿、已经发布**之后，由独立评审根据「宿主会不会带着历史回来」这一问才发现的。前三个案例的修法把「取值的来源」换成了折叠值，但没有问**这个折叠值属于哪一轮**。
 
@@ -427,9 +469,16 @@ if (this.header.isSeeded && seed === void 0) throw new Error("seeded session req
 ## 验证清单（修改后）
 
 1. 重启 DSH Desktop
-2. 打开 **设置 → 插件 → dsh-subagent-default-model**，确认设置卡出现（`view: 'page'` 默认展开）
-3. 保存后确认 `~/.dsh/profiles/desktop/cordis.patch.yml` 里 `id: dsh-subagent-default-model` 条目的 `config:` 更新
-4. 创建一个不带显式 `agentOptions` 的子代理，确认其路由到配置的默认模型
+2. 打开 **设置**（侧边栏底部），左侧导航应出现「子代理默认模型」一项（带 LD 图标，排在 Agent 预设之后）
+3. 点开该页，确认自上而下是：一句话总述 → 三条核心用途 → 配置表单 → 折叠的诊断信息
+4. 保存后确认 `~/.dsh/profiles/desktop/cordis.patch.yml` 里 `id: dsh-subagent-default-model` 条目的 `config:` 更新
+5. 创建一个不带显式 `agentOptions` 的子代理，确认其路由到配置的默认模型
+
+> 第 2 步若看不到该页，**不要靠肉眼反复重启猜**：直接查运行态里 slot 到底有没有你的 id——
+> ```text
+> cordis_inspect_query  platform=client provider=Slots method=listSubTree  input={"root":"settings.section"}
+> ```
+> 返回的 `selected.occupants` 就是真答案。没有你的 id = 注册没发生；有但界面没显示 = 渲染层问题。这两者的修法完全不同。
 
 > **宿主只在启动时加载插件一次。** 改动 `lib/` 后必须重启 DSH 才生效 —— 改文件不等于改正在运行的程序。
 > 排查时先核对**进程启动时间 vs 文件修改时间**，否则会把「旧代码的行为」误判为新缺陷（本仓实际发生过两次）。
