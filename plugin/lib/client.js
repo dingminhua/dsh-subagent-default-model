@@ -26,11 +26,11 @@ window.__ModuleLoader__.load({
     // 跑的是哪一个 client bundle」——宿主在启动时快照 bundle，页面可能仍
     // 持有旧版本；一眼对出构建号即可排除/坐实这一点。每次改 client.js
     // 排查时必须递增它。
-    var DSM_CLIENT_BUILD = "2026-10-26.1";
+    var DSM_CLIENT_BUILD = "2026-11-06.1";
 
     // ── plugin icon (LD brand logo, 64px) ────────────────────────────────
     var DSM_ICON = "data:image/png;base64,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";
-    var SETTINGS_CSS = ".dsm-model-settings{display:flex;flex-direction:column;gap:14px;margin:0;padding:0}.dsm-model-settings-list{display:flex;flex-direction:column;gap:10px}.dsm-model-settings-route{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;padding:10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:10px;background:var(--dsw-alias-bg-layer-3,#202126)}.dsm-model-settings-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-select{width:100%;max-width:220px;height:32px;padding:0 28px 0 10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font:inherit;font-size:13px;line-height:1.5}.dsm-model-settings-select:focus{outline:2px solid var(--dsw-alias-state-business-primary,#5686fe);outline-offset:1px}.dsm-model-settings-select:disabled{color:var(--dsw-alias-label-tertiary,#999);cursor:default}.dsm-model-settings-remove{height:32px;min-width:32px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer;font-size:16px;line-height:1}.dsm-model-settings-remove:hover{color:var(--dsw-alias-state-error-primary,#ef4444);background:var(--dsw-alias-interactive-bg-hover-danger,rgba(242,90,90,.15))}.dsm-model-settings-options{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.dsm-model-settings-strategy{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-strategy .dsm-model-settings-select{max-width:150px}.dsm-model-settings-failover{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-failover input[type=checkbox]{cursor:pointer}.dsm-failover-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999);white-space:nowrap}.dsm-model-settings-inject-route{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-inject-route input[type=checkbox]{cursor:pointer}.dsm-inject-route-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999)}.dsm-model-settings-apply-fork{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-apply-fork input[type=checkbox]{cursor:pointer}.dsm-apply-fork-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999)}.dsm-model-settings-footer{border-top:1px solid var(--dsw-alias-border-l2,#36373b);display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 0 4px}.dsm-model-settings-footer-left{display:flex;align-items:center;gap:10px;flex:1;min-width:0}.dsm-model-settings-footer-status{flex:1;min-width:0;color:var(--dsw-alias-label-secondary,#b8b8b8);font-size:12px;line-height:1.5}.dsm-model-settings-footer-error{flex:1;min-width:0;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:1.5}.dsm-btn{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dsm-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px}.dsm-btn:disabled{opacity:.4;cursor:default}.dsm-btn-outline{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent;font-weight:500}.dsm-btn-outline:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:rgba(255,255,255,.04)}.dsm-btn-primary{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dsm-btn-primary:hover:not(:disabled){opacity:.9}.dsm-model-settings-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-plugin-card{border:1px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-3,#202126);border-radius:12px;list-style:none;transition:border-color .16s,background .16s}.dsm-plugin-card:hover{border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-open{background:var(--dsw-alias-bg-layer-2,#25262b);border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.dsm-plugin-card-header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:-2px}.dsm-plugin-card-head{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.dsm-plugin-card-title{color:var(--dsw-alias-label-primary,#e6e6e6);font-size:15px;font-weight:600;line-height:1.4}.dsm-plugin-card-description{color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5}.dsm-plugin-card-chevron{color:var(--dsw-alias-label-tertiary,#999);flex:none;display:inline-flex;transition:transform .16s}.dsm-plugin-card-chevron-open{transform:rotate(180deg)}.dsm-plugin-card-caret{color:inherit;font-size:12px;line-height:1;display:inline-flex}.dsm-plugin-card-body{border-top:1px solid var(--dsw-alias-border-l2,#36373b);margin:0 16px;padding:0 0 8px}.dsm-plugin-card-body .dsm-model-settings{margin:0;padding:12px 0 0;background:transparent;border:0;border-radius:0}.dsm-plugin-card-body .dsm-model-settings-head{display:none}.dsm-plugin-card-icon{width:32px;height:32px;flex:none;border-radius:7px}.dsm-model-settings-cheer{display:inline-flex;align-items:center;gap:4px;flex:none;text-decoration:underline;text-underline-offset:2px;color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5;transition:color .16s}.dsm-model-settings-cheer-star{font-size:12px;line-height:1;display:inline-flex}.dsm-model-settings-cheer:hover{color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-model-settings-cheer:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:2px}.dsm-model-settings-warn{grid-column:1/-1;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-model-settings-warn-list{display:flex;flex-direction:column;gap:4px;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-notice-row{display:flex;flex-direction:column;gap:4px;margin:6px 0;font-size:12px}.dsm-notice-toggle{appearance:none;font:inherit;cursor:pointer;background:transparent;border:0;padding:2px 0;display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-tertiary,#9a9a9a);text-align:left;min-width:0}.dsm-notice-toggle:hover{color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-notice-toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px;border-radius:3px}.dsm-notice-dot{flex:none;width:5px;height:5px;border-radius:50%;background:var(--dsw-alias-label-caption,#777)}.dsm-notice-label{flex:none;font-weight:500}.dsm-notice-summary{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-notice-summary:before{content:'·';margin-right:6px;color:var(--dsw-alias-label-caption,#777)}.dsm-notice-body{margin:0;padding:8px 10px;border-left:2px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-1,#1b1b1d);color:var(--dsw-alias-label-secondary,#b8b8b8);font-size:12px;line-height:18px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto}";
+    var SETTINGS_CSS = ".dsm-model-settings{display:flex;flex-direction:column;gap:14px;margin:0;padding:0}.dsm-model-settings-list{display:flex;flex-direction:column;gap:10px}.dsm-model-settings-route{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;padding:10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:10px;background:var(--dsw-alias-bg-layer-3,#202126)}.dsm-model-settings-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-select{width:100%;max-width:220px;height:32px;padding:0 28px 0 10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font:inherit;font-size:13px;line-height:1.5}.dsm-model-settings-select:focus{outline:2px solid var(--dsw-alias-state-business-primary,#5686fe);outline-offset:1px}.dsm-model-settings-select:disabled{color:var(--dsw-alias-label-tertiary,#999);cursor:default}.dsm-model-settings-remove{height:32px;min-width:32px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer;font-size:16px;line-height:1}.dsm-model-settings-remove:hover{color:var(--dsw-alias-state-error-primary,#ef4444);background:var(--dsw-alias-interactive-bg-hover-danger,rgba(242,90,90,.15))}.dsm-model-settings-options{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.dsm-model-settings-strategy{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-strategy .dsm-model-settings-select{max-width:150px}.dsm-model-settings-failover{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-failover input[type=checkbox]{cursor:pointer}.dsm-failover-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999);white-space:nowrap}.dsm-model-settings-inject-route{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-inject-route input[type=checkbox]{cursor:pointer}.dsm-inject-route-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999)}.dsm-model-settings-apply-fork{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-apply-fork input[type=checkbox]{cursor:pointer}.dsm-apply-fork-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999)}.dsm-model-settings-footer{border-top:1px solid var(--dsw-alias-border-l2,#36373b);display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 0 4px}.dsm-model-settings-footer-left{display:flex;align-items:center;gap:10px;flex:1;min-width:0}.dsm-model-settings-footer-status{flex:1;min-width:0;color:var(--dsw-alias-label-secondary,#b8b8b8);font-size:12px;line-height:1.5}.dsm-model-settings-footer-error{flex:1;min-width:0;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:1.5}.dsm-btn{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dsm-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px}.dsm-btn:disabled{opacity:.4;cursor:default}.dsm-btn-outline{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent;font-weight:500}.dsm-btn-outline:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:rgba(255,255,255,.04)}.dsm-btn-primary{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dsm-btn-primary:hover:not(:disabled){opacity:.9}.dsm-model-settings-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-plugin-card{border:1px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-3,#202126);border-radius:12px;list-style:none;transition:border-color .16s,background .16s}.dsm-plugin-card:hover{border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-open{background:var(--dsw-alias-bg-layer-2,#25262b);border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.dsm-plugin-card-header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:-2px}.dsm-plugin-card-head{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.dsm-plugin-card-title{color:var(--dsw-alias-label-primary,#e6e6e6);font-size:15px;font-weight:600;line-height:1.4}.dsm-plugin-card-description{color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5}.dsm-plugin-card-chevron{color:var(--dsw-alias-label-tertiary,#999);flex:none;display:inline-flex;transition:transform .16s}.dsm-plugin-card-chevron-open{transform:rotate(180deg)}.dsm-plugin-card-caret{color:inherit;font-size:12px;line-height:1;display:inline-flex}.dsm-plugin-card-body{border-top:1px solid var(--dsw-alias-border-l2,#36373b);margin:0 16px;padding:0 0 8px}.dsm-plugin-card-body .dsm-model-settings{margin:0;padding:12px 0 0;background:transparent;border:0;border-radius:0}.dsm-plugin-card-body .dsm-model-settings-head{display:none}.dsm-plugin-card-icon{width:32px;height:32px;flex:none;border-radius:7px}.dsm-model-settings-cheer{display:inline-flex;align-items:center;gap:4px;flex:none;text-decoration:underline;text-underline-offset:2px;color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5;transition:color .16s}.dsm-model-settings-cheer-star{font-size:12px;line-height:1;display:inline-flex}.dsm-model-settings-cheer:hover{color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-model-settings-cheer:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:2px}.dsm-model-settings-warn{grid-column:1/-1;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-model-settings-warn-list{display:flex;flex-direction:column;gap:4px;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-notice-row{display:flex;flex-direction:column;gap:4px;margin:6px 0;font-size:12px}.dsm-notice-toggle{appearance:none;font:inherit;cursor:pointer;background:transparent;border:0;padding:2px 0;display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-tertiary,#9a9a9a);text-align:left;min-width:0}.dsm-notice-toggle:hover{color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-notice-toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px;border-radius:3px}.dsm-notice-dot{flex:none;width:5px;height:5px;border-radius:50%;background:var(--dsw-alias-label-caption,#777)}.dsm-notice-label{flex:none;font-weight:500}.dsm-notice-summary{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-notice-summary:before{content:'·';margin-right:6px;color:var(--dsw-alias-label-caption,#777)}.dsm-model-settings-section{display:flex;flex-direction:column;gap:14px}.dsm-settings-heading{margin:0;font-size:16px;font-weight:600;line-height:24px;color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-settings-intro{margin:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-section .dsm-model-settings{margin:0;padding:0;background:transparent;border:0;border-radius:0}.dsm-notice-body{margin:0;padding:8px 10px;border-left:2px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-1,#1b1b1d);color:var(--dsw-alias-label-secondary,#b8b8b8);font-size:12px;line-height:18px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto}";
 
     if (typeof document !== "undefined") {
       var cssId = "dsh-subagent-default-model/client.css";
@@ -65,6 +65,8 @@ window.__ModuleLoader__.load({
     var SUBAGENT_ROW_ZH = {
       "row.title": "子代理默认模型（dsh-subagent-default-model）",
       "row.desc": "为 subagent / subagent_fork 选择一个或多个默认路由；清空后子代理继承父会话路由。",
+      "section.title": "子代理默认模型",
+      "section.intro": "指定子代理默认使用的模型，配置连接失败时的故障转移，以及路由在轨迹与对话中的可见性。",
       "row.provider": "Provider",
       "row.model": "Model",
       "row.effort": "推理强度",
@@ -105,6 +107,8 @@ window.__ModuleLoader__.load({
     var SUBAGENT_ROW_EN = {
       "row.title": "Subagent default model (dsh-subagent-default-model)",
       "row.desc": "Choose one or more default routes for subagent / subagent_fork; clear them to inherit the parent session route.",
+      "section.title": "Subagent default model",
+      "section.intro": "Choose the models subagents use by default, configure failover on connection failures, and control route visibility in the trajectory and conversation views.",
       "row.provider": "Provider",
       "row.model": "Model",
       "row.effort": "Reasoning strength",
@@ -1004,6 +1008,33 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // ── SubagentModelSection: the MAIN Settings sidebar page ─────────────
+    //
+    // Since 0.2.1-rc.5 the general Settings panel exposes a `settings.section`
+    // LIST slot: each registration becomes one item in the left-hand nav rail
+    // (id / order / label) and one page in the right-hand pane. Third-party
+    // plugins use it too (e.g. `dsh-opencode-go` registers `id: "opencode-go"`,
+    // `order: 20`), which is exactly the "OpenCode Go" row in the Settings UI.
+    //
+    // Why a wrapper instead of registering `SubagentModelCard` directly:
+    //   - the section component receives `{ t, close }`, NOT `view`, so the
+    //     collapsible card would render CLOSED (its open state is seeded from
+    //     `props.view === "page"`);
+    //   - a Settings page is already a dedicated surface, so a second
+    //     collapsible shell around the form is redundant chrome.
+    //
+    // So the section renders the real form (`SubagentModelRow`) directly, with
+    // the same heading + intro the shipped sections use, and a small block of
+    // CSS so the form reads as a page rather than a card.
+    function SubagentModelSection(props) {
+      var t = props.t;
+      return React.createElement("div", { className: "dsm-model-settings-section" },
+        React.createElement("h2", { className: "dsm-settings-heading" }, t("section.title")),
+        React.createElement("p", { className: "dsm-settings-intro" }, t("section.intro")),
+        React.createElement(SubagentModelRow, props)
+      );
+    }
+
     // ── 对话流注入行的渲染器（自有节点 kind）─────────────────────────────
     //
     // 宿主按 `entryKey = node.kind` 在 `conversation.chat.node` 槽位**运行时分派**
@@ -1557,30 +1588,80 @@ window.__ModuleLoader__.load({
           };
         };
 
-        // Cards register ONCE, unconditionally, exactly like the local siblings
-        // (`dsh-connect-workbuddy` / `dsh-connect-trae`). They deliberately do NOT
-        // follow the namespace: the forwarding scope above re-routes itself, so a
-        // late mirror answer cannot leave a card pinned to a namespace the Host
-        // does not serve, and the card needs no re-registration to recover.
-        var registerCard = function (slotName, key) {
+        // ── Main Settings sidebar page (`settings.section`) ──────────────
+        //
+        // The plugin's configuration used to live ONLY in the Plugins page's
+        // `plugins.bundle.config` / `plugins.row.config` keyed slots. Starting
+        // with 0.2.1-rc.5 the general Settings panel exposes a `settings.section`
+        // LIST slot, and third-party plugins (e.g. dsh-opencode-go) use it to
+        // put their own page in the left-hand nav rail. The request is to MOVE
+        // the settings there, so those two registrations are gone and the form
+        // is now a first-class Settings section.
+        //
+        // Capability probe: `settings.section` does not exist on hosts before
+        // 0.2.1-rc.5, and this plugin still supports 0.1.7. `slots.inject()`
+        // on an undeclared slot waits forever rather than throwing, so a
+        // registration there would simply never appear — but probing first
+        // makes the intent explicit and keeps the diagnostics honest. We use
+        // `getVersion`, the same API the shipped settings shell uses to rebuild
+        // its nav rows, and fall back to a no-op when it is unavailable.
+        // A DECLARATION probe, not a version compare: `specOf` is the renderer's
+        // own `specDynamic` accessor and answers `undefined` for a slot the host
+        // never declared (`slots.inject()` would then wait forever and the page
+        // would simply never appear). Probing keeps the console honest instead
+        // of leaving a silent no-op.
+        var settingsSectionAvailable = false;
+        try {
+          settingsSectionAvailable = typeof ctx.slots.specOf === "function"
+            && ctx.slots.specOf("settings.section") !== undefined;
+        } catch (_error) {
+          settingsSectionAvailable = false;
+        }
+        if (!settingsSectionAvailable) {
+          console.warn('[dsh-subagent-default-model] this host declares no "settings.section" slot (added in 0.2.1-rc.5), so the settings page is unavailable; the Host provider still works from its config file.');
+        }
+        if (settingsSectionAvailable) {
           try {
-            ctx.slots.inject(slotName, function () {
+            ctx.slots.inject("settings.section", function () {
               return ctx.slots.register({
-                name: slotName,
-                key: key,
-                priority: 30,
+                name: "settings.section",
+                id: "dsh-subagent-default-model",
+                // After the shipped sections (account -10, general 0, models 10,
+                // plugins 15, agent-presets 20) and alongside other third-party
+                // pages; 30 keeps us last without colliding with a built-in.
+                order: 30,
+                label: function () { return ctx.locale.bind(SUBAGENT_ROW_LOCALE)("section.title"); },
                 locale: SUBAGENT_ROW_LOCALE,
                 inject: subagentRowInjected
-              }, SubagentModelCard);
+              }, SubagentModelSection);
             });
           } catch (error) {
-            console.error('[dsh-subagent-default-model] settings card slot "' + slotName + '" failed to register (host provider unaffected):', error);
+            console.error('[dsh-subagent-default-model] settings.section page failed to register (host provider unaffected):', error);
           }
-        };
-        // 0.1.7 placement: register under Plugins config surfaces (the old
-        // `settings.plugin.item` slot was removed in 0.1.7).
-        registerCard("plugins.bundle.config", "dsh-subagent-default-model");
-        registerCard("plugins.row.config", "dsh-subagent-default-model#dsh-subagent-default-model");
+          // Optional nav-rail glyph, addressed by the SAME id as the page (an
+          // unmatched id never renders, and the shell keeps its default gear
+          // when nothing is registered). The plugin already ships a brand mark,
+          // so the entry is recognizable instead of another generic gear.
+          try {
+            ctx.slots.inject("settings.section.icon", function () {
+              return ctx.slots.register({
+                name: "settings.section.icon",
+                id: "dsh-subagent-default-model",
+                locale: SUBAGENT_ROW_LOCALE
+              }, function () {
+                return React.createElement("img", {
+                  src: DSM_ICON,
+                  alt: "",
+                  width: 16,
+                  height: 16,
+                  style: { borderRadius: "3px", display: "block" }
+                });
+              });
+            });
+          } catch (error) {
+            console.error('[dsh-subagent-default-model] settings.section.icon failed to register (the page still renders with the default glyph):', error);
+          }
+        }
       });
     }
 

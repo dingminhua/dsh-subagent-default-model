@@ -134,6 +134,8 @@ Configure via the Web settings card (Settings → Plugins → dsh-subagent-defau
 
 ### Pin a default model
 
+> **Where to configure it**: the "Subagent default model" page in the Settings panel's left nav (since 2.1.16; earlier releases put it on the plugin's marketplace detail page).
+
 ```yaml
 - id: dsh-subagent-default-model
   name: dsh-subagent-default-model

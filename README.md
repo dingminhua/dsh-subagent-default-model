@@ -134,6 +134,8 @@ CI 在 `ubuntu-latest` / `windows-latest` / `macos-latest` 三个平台同时跑
 
 ### 固定一个默认模型
 
+> **在哪里配置**：设置面板左侧导航的「子代理默认模型」一页（2.1.16 起；此前在插件市场详情页）。
+
 ```yaml
 - id: dsh-subagent-default-model
   name: dsh-subagent-default-model

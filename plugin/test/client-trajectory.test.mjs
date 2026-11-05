@@ -117,6 +117,14 @@ function makeCtx(overrides = {}) {
 			},
 			register(options, component) {
 				return { options, component };
+			},
+			// `specOf` is the renderer's own declaration accessor (`specDynamic`):
+			// it answers undefined for a slot the host never declared, which is
+			// what the plugin probes before registering its Settings page. The
+			// fixture therefore has to DECLARE its slots — a lookup that always
+			// answered would make the probe untestable in both directions.
+			specOf(name) {
+				return DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined;
 			}
 		},
 		uiConversation: {
@@ -130,6 +138,15 @@ function makeCtx(overrides = {}) {
 	};
 	return { ctx, registrations, slotRegistrations, dictionaries, remoteSession, configForms, fakeScope, effectDisposers };
 }
+
+/**
+ * Slots this fixture's host declares.
+ *
+ * `settings.section` is the main Settings sidebar page and the plugin's only
+ * configuration surface since 2.1.16. Declaring it here mirrors a 0.2.1-rc.5+
+ * host; removing it models an older host, where the plugin must not register.
+ */
+const DECLARED_SLOTS = new Set(["settings.section", "conversation.chat.node"]);
 
 /**
  * The settings-card placements among all slot registrations.
@@ -172,19 +189,87 @@ test("client registers the subagent-default-model settings card and loads the mo
 	// configForms block below it that registers this very card.
 	assert.deepEqual(Array.from(inject), ["slots", "locale", "uiConversation"]);
 	apply(ctx);
-	// Two placements (bundle + row config), matching the workbuddy card pattern.
-	const cards = cardRegistrations(slotRegistrations);
-	assert.equal(cards.length, 2);
-	assert.deepEqual(
-		cards.map((entry) => entry.name),
-		["plugins.bundle.config", "plugins.row.config"]
-	);
-	assert.equal(cards[0].value.options.key, "dsh-subagent-default-model");
-	assert.equal(cards[1].value.options.key, "dsh-subagent-default-model#dsh-subagent-default-model");
-	const props = cards[0].value.options.inject();
+	// Since 2.1.16 the ONLY configuration surface is the main Settings page
+	// (`settings.section`). The two Plugins-page placements are deliberately
+	// gone: the request was to move the settings there, and keeping a second
+	// copy would give the user two places that edit one document.
+	const sections = slotRegistrations.filter((entry) => entry.name === "settings.section");
+	assert.equal(sections.length, 1, "exactly one Settings page");
+	assert.equal(cardRegistrations(slotRegistrations).length, 0, "no Plugins-page card may remain");
+	const registered = sections[0].value;
+	assert.equal(registered.options.id, "dsh-subagent-default-model");
+	assert.equal(registered.options.order, 30, "after the shipped sections (account -10 … agent-presets 20)");
+	assert.equal(registered.options.locale, "settings.subagentModel");
+	// The label resolves through the plugin's own dictionary, so the nav rail
+	// entry is localized rather than a raw package name.
+	assert.equal(registered.options.label(), "子代理默认模型");
+	const props = registered.options.inject();
 	const groups = await props.loadCatalog();
 	assert.equal(groups.length, 1);
 	assert.equal(groups[0].id, "mock");
+});
+
+test("no Settings page is registered on a host that declares no settings.section slot", async () => {
+	// The slot arrived in 0.2.1-rc.5; this plugin still supports 0.1.7, where a
+	// `slots.inject("settings.section", …)` would wait forever and silently show
+	// nothing. The declaration probe must therefore SKIP the registration
+	// instead of leaving a permanent no-op, and it must say why in the console.
+	const declared = new Set(DECLARED_SLOTS);
+	DECLARED_SLOTS.delete("settings.section");
+	// The fixture's probe reads this set at call time; restore it unconditionally.
+	const warnings = [];
+	const originalWarn = console.warn;
+	console.warn = (...args) => { warnings.push(args.join(" ")); };
+	try {
+		const { ctx, slotRegistrations } = makeCtx();
+		const { apply } = capturedModule.factory(factoryRequire);
+		apply(ctx);
+		assert.equal(
+			slotRegistrations.filter((entry) => entry.name === "settings.section").length,
+			0,
+			"nothing may be registered into an undeclared slot"
+		);
+		assert.ok(
+			warnings.some((line) => line.includes("settings.section")),
+			`expected a diagnostic naming the missing slot, got: ${JSON.stringify(warnings)}`
+		);
+	} finally {
+		console.warn = originalWarn;
+		for (const name of declared) DECLARED_SLOTS.add(name);
+	}
+});
+
+test("the Settings page renders the form directly, without the collapsible card shell", () => {
+	// A Settings page is already a dedicated surface that receives `{ t, close }`
+	// — NOT `view`. Registering the collapsible card there would seed its open
+	// state from `props.view === "page"` (undefined) and render CLOSED, hiding
+	// every control behind a second expand click.
+	// Render through the SAME harness the other panel tests use (`reactRequire`
+	// provides the React double), so this exercises the installed component
+	// rather than a hand-driven call.
+	const { ctx, slotRegistrations, dictionaries } = makeCtx();
+	const react = makeReactDouble();
+	capturedModule.factory((id) => {
+		if (id === "react") return react;
+		if (id === "@deepseek-ai/dsh-client-ui-primitives") {
+			return { Toast: function Toast() {}, IconChevronDownOutlineRegular: function Icon() {} };
+		}
+		throw new Error(`unexpected require: ${id}`);
+	}).apply(ctx);
+	const section = slotRegistrations.find((entry) => entry.name === "settings.section").value;
+	const props = section.options.inject();
+	const tt = (key, params) => {
+		const template = dictionaries.zh?.[key] ?? key;
+		return params === undefined ? template : template.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
+	};
+	react.beginPass();
+	const tree = expand(section.component({ ...props, t: tt, close: (() => {}) }));
+	const text = collect(tree, () => true).map((node) => node.text ?? "").join(" ");
+	assert.match(text, /子代理默认模型/, "the page heading must render");
+	assert.match(text, /故障转移/, "the intro copy must render");
+	// The collapsible shell's own header button must NOT be present.
+	const cardHeaders = collect(tree, (node) => node.props && node.props.className === "dsm-plugin-card-header");
+	assert.equal(cardHeaders.length, 0, "the Plugins-page card shell must not wrap the Settings page");
 });
 
 test("client registers a trajectory-subagent-model definition", () => {
@@ -744,7 +829,7 @@ async function renderSettingsCard({ groups, value, snapshotOverride, write }) {
 		settingsValue: value
 	});
 	capturedModule.factory(reactRequire).apply(ctx);
-	const card = cardRegistrations(slotRegistrations)[0].value.component;
+	const card = slotRegistrations.filter((entry) => entry.name === "settings.section")[0].value.component;
 	// Same interpolation contract the locale runtime provides.
 	const t = (key, params) => {
 		const template = dictionaries.zh?.[key] ?? key;
@@ -889,6 +974,7 @@ test("a late mirror answer re-routes the scope to the served namespace so writes
 		slots: {
 			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
 			register: (options, component) => ({ options, component }),
+			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined),
 		},
 		uiConversation: services.uiConversation,
 	};
@@ -897,9 +983,10 @@ test("a late mirror answer re-routes the scope to the served namespace so writes
 
 	// (1) Cards are live immediately, with no event; the scope stays honestly
 	// read-only while the mirror lists nothing.
-	const cards = slotRegs.filter((d) => d.options.name.startsWith("plugins."));
-	assert.equal(cards.length, 2, "both placements must register at apply time, without waiting for an event");
-	assert.deepEqual(cards.map((d) => d.options.name), ["plugins.bundle.config", "plugins.row.config"]);
+	// The Settings page registers at apply time, with no event; the scope stays
+	// honestly read-only while the mirror lists nothing.
+	const cards = slotRegs.filter((d) => d.options.name === "settings.section");
+	assert.equal(cards.length, 1, "the Settings page must register at apply time, without waiting for an event");
 	assert.deepEqual(bound, [], "no namespace may be bound while the mirror lists none");
 	const injected = cards[0].options.inject();
 	assert.equal(injected.settingsScope.getSnapshot().status, "unavailable", "an unbound scope reports unavailable");
@@ -956,13 +1043,16 @@ test("the scope offers an ATOMIC write and forces a mirror read for verification
 		locale: { register: () => () => {}, bind: () => (k) => k },
 		slots: {
 			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
-			register: (options, component) => ({ options, component })
+			register: (options, component) => ({ options, component }),
+			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined),
+			// Same declaration probe the renderer exposes; see DECLARED_SLOTS.
+			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined)
 		},
 		uiConversation: services.uiConversation
 	};
 	const { apply } = capturedModule.factory(factoryRequire);
 	apply(ctx);
-	const cards = slotRegs.filter((d) => d.options.name.startsWith("plugins."));
+	const cards = slotRegs.filter((d) => d.options.name === "settings.section");
 	const injected = cards[0].options.inject();
 	const scope = injected.settingsScope;
 
@@ -1011,13 +1101,16 @@ test("an unbound scope reports its state when a write is refused, not a generic 
 		locale: { register: () => () => {}, bind: () => (k) => k },
 		slots: {
 			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
-			register: (options, component) => ({ options, component })
+			register: (options, component) => ({ options, component }),
+			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined),
+			// Same declaration probe the renderer exposes; see DECLARED_SLOTS.
+			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined)
 		},
 		uiConversation: services.uiConversation
 	};
 	const { apply } = capturedModule.factory(factoryRequire);
 	apply(ctx);
-	const injected = slotRegs.filter((d) => d.options.name.startsWith("plugins."))[0].options.inject();
+	const injected = slotRegs.filter((d) => d.options.name === "settings.section")[0].options.inject();
 	const scope = injected.settingsScope;
 
 	// Nothing is bound, so a write cannot be sent anywhere.
@@ -1059,6 +1152,7 @@ test("registers both cards and binds the served namespace when the mirror is alr
 		slots: {
 			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
 			register: (options, component) => ({ options, component }),
+			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined),
 		},
 		uiConversation: { events: { register: () => () => {} } },
 	};
@@ -1066,9 +1160,8 @@ test("registers both cards and binds the served namespace when the mirror is alr
 	apply(ctx);
 
 	assert.deepEqual(bound, ["include:dsh-subagent-default-model"], "the already-served namespace binds at apply time");
-	const cards = slotRegs.filter((d) => d.options.name.startsWith("plugins."));
-	assert.equal(cards.length, 2, "both placements must register immediately");
-	assert.deepEqual(cards.map((d) => d.options.name), ["plugins.bundle.config", "plugins.row.config"]);
+	const cards = slotRegs.filter((d) => d.options.name === "settings.section");
+	assert.equal(cards.length, 1, "the Settings page must register immediately");
 });
 
 test("binds to the include:-prefixed namespace the Desktop host actually serves", async () => {
@@ -1309,15 +1402,25 @@ function catalogCtx({ presentAtApply }) {
 		}
 	});
 	let captured = null;
+	let lastSlot = "";
 	const ctx = {
 		get: (n) => { reads.push(n); return services()[n]; },
 		inject: (deps, cb) => { const s = services(); const miss = deps.filter((d) => s[d] === undefined); if (miss.length) return () => {}; const d = Object.create(null); for (const k of deps) d[k] = s[k]; return cb(d); },
 		effect: (cb) => { const off = cb(); return () => {}; },
 		on: () => () => {}, emit: () => {},
 		locale: { register: () => () => {}, bind: () => (k) => k },
-		slots: { inject: (s, cb) => cb(), register: (def) => { captured = def; return () => {}; } },
+		slots: {
+			// The PAGE registration is the one this fixture is about; the nav glyph
+			// registers into a second slot and must not overwrite it.
+			inject: (slotName, cb) => { lastSlot = slotName; return cb(); },
+			register: (options, component) => {
+				if (lastSlot === "settings.section") captured = { options, component };
+				return () => {};
+			},
+			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined)
+		},
 	};
-	return { ctx, mount: () => { mounted = true; }, reads, face: () => (captured ? captured.inject() : null) };
+	return { ctx, mount: () => { mounted = true; }, reads, face: () => (captured ? captured.options.inject() : null) };
 }
 
 test("catalog resolves when remote.session mounts AFTER apply (lazy re-probe)", async () => {
@@ -1374,15 +1477,25 @@ function lateCatalogCtx({ emptyFirst, groups }) {
 		}
 	});
 	let captured = null;
+	let lastSlot = "";
 	const ctx = {
 		get: (n) => services()[n],
 		inject: (deps, cb) => { const s = services(); const d = Object.create(null); for (const k of deps) d[k] = s[k]; return cb(d); },
 		effect: (cb) => { cb(); return () => {}; },
 		on: () => () => {}, emit: () => {},
 		locale: { register: () => () => {}, bind: () => (k) => k },
-		slots: { inject: (s, cb) => cb(), register: (def) => { captured = def; return () => {}; } }
+		slots: {
+			// The PAGE registration is the one this fixture is about; the nav glyph
+			// registers into a second slot and must not overwrite it.
+			inject: (slotName, cb) => { lastSlot = slotName; return cb(); },
+			register: (options, component) => {
+				if (lastSlot === "settings.section") captured = { options, component };
+				return () => {};
+			},
+			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined)
+		}
 	};
-	return { ctx, face: () => (captured ? captured.inject() : null), calls: () => calls };
+	return { ctx, face: () => (captured ? captured.options.inject() : null), calls: () => calls };
 }
 
 test("catalog re-probes while the answer is empty, so a late catalog still populates the selects", async () => {
@@ -1640,7 +1753,7 @@ async function renderCardThroughInjectedFace(host) {
 	const mutableReact = cardCtx.mutableReact;
 	const slotRegistrations = cardCtx.slotRegistrations;
 	const dictionaries = cardCtx.dictionaries;
-	const cardRow = cardRegistrations(slotRegistrations)[0].value;
+	const cardRow = slotRegistrations.filter((entry) => entry.name === "settings.section")[0].value;
 	const t = (key, params) => {
 		const template = dictionaries.zh?.[key] ?? key;
 		return params === undefined ? template : template.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
@@ -2202,4 +2315,21 @@ test("REGRESSION (issue #2): a HALF-FILLED row never disables Save", async () =>
 		false,
 		"a row without a model must not lock Save — the user is editing it right now"
 	);
+});
+
+test("the nav glyph is registered under the SAME id as the page", async () => {
+	// `settings.section.icon` is addressed by the matching section id: an
+	// unmatched id never renders, so a typo between the two would silently leave
+	// the default gear glyph while looking correct in the code.
+	const { ctx, slotRegistrations } = makeCtx();
+	const { apply } = capturedModule.factory(factoryRequire);
+	apply(ctx);
+	const page = slotRegistrations.find((entry) => entry.name === "settings.section").value;
+	const icon = slotRegistrations.find((entry) => entry.name === "settings.section.icon");
+	assert.ok(icon, "the nav glyph must be registered, or the rail keeps a generic gear");
+	assert.equal(icon.value.options.id, page.options.id, "the glyph id must equal the page id");
+	// The section also declares a `locale`, so its label resolves through the
+	// plugin's own dictionary rather than the raw package name.
+	assert.equal(page.options.label(), "子代理默认模型");
+	assert.equal(typeof page.options.label, "function", "label must be a thunk so it follows the active locale");
 });

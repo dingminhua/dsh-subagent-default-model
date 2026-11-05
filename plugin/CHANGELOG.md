@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.1.16 (2026-11-06)
+
+### Changed
+
+**插件设置从「插件页卡片」移动到「设置 → 侧边栏」独立页面。**
+
+原来配置只在插件市场的 `plugins.bundle.config` / `plugins.row.config` 两个 keyed 槽位里，用户要点开插件详情页才能找到。现在改为宿主的 `settings.section` LIST 槽位——就是设置面板左侧导航里「账号与余额 / 通用设置 / 模型 / 内置插件 / OpenCode Go …」那一列，一个注册对应一个页面。
+
+- 新增 `settings.section` 页面（`id: dsh-subagent-default-model`，`order: 30`，排在内置 section 之后）；
+- 新增 `settings.section.icon` 导航图标（复用插件自有品牌图标，而不是又一个通用齿轮）；
+- **删除了**原 `plugins.bundle.config` / `plugins.row.config` 两处注册。同一个文档不应有两个编辑入口，这也是「移动」而非「新增」的含义；
+- 页面直接渲染表单（`SubagentModelRow`），**不套**可折叠卡片外壳：设置页本身就是独立界面，它收到的是 `{ t, close }` 而没有 `view`，套卡片会因 `props.view === "page"` 为假而默认折叠，把所有控件藏到二次展开之后。
+
+### Compatibility
+
+`settings.section` 是 **0.2.1-rc.5** 引入的，而本插件的 peer 下限是 `0.1.7`。因此注册前先做**声明探测**（`ctx.slots.specOf("settings.section")`，即渲染器自己的 `specDynamic`）；未声明时**不注册**并打一条 warn 说明原因。
+
+> 为什么不直接 `slots.inject`：读 `dsh-client-ui-renderer` 的 `inject()` 实现可知，slot 未声明时它只是等待声明出现（`spec === undefined` 时直接 return），注册永不发生、也不报错——在旧宿主上这会表现为「配置入口凭空消失且无人知其所以然」。
+
+### Tests
+
+`181/181`（178 → 181），`skip 0`。新增/改写：
+
+- 页面注册到 `settings.section`，`id`/`order`/`locale` 正确，label 经本地化字典解析；
+- **旧宿主（未声明该 slot）上不注册任何东西，并打出说明性 warn**；
+- 页面渲染真实表单，且**不含**可折叠卡片的头部按钮；
+- 导航图标与页面 **id 必须一致**（不一致会静默回落到通用齿轮）。
+
+变异验证 4/4 命中：①去掉声明探测（无条件注册）→ 旧宿主用例失败；②用折叠卡片替代表单 → 渲染用例失败；③恢复旧的两处插件页注册 → 「no Plugins-page card」用例失败；④图标 id 与页面 id 不一致 → 图标用例失败。
+
+> 夹具也被修了：测试桩原本没有 `specOf`，新探测在测试里恒为假、永远走不到注册分支——测试会全绿但功能从不生效。现在夹具显式声明 `settings.section`（并可通过删除它来模拟旧宿主）。
+
 ## 2.1.15 (2026-11-06)
 
 ### Changed
