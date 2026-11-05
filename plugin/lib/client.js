@@ -876,27 +876,12 @@ window.__ModuleLoader__.load({
       }
       // The binding diagnostics are a triage aid, not part of the form: a
       // permanently visible `[diag …]` line reads as an error to anyone who is
-      // not debugging. It stays COLLAPSED and one click away, and the toggle
-      // only appears when there is something to show.
+      // not debugging. It stays COLLAPSED, one click away, and LAST on the page
+      // — the bottom edge is where meta information belongs, so it never pushes
+      // the configuration the user came for down the screen.
       var diagOpenState = React.useState(false);
       var diagOpen = diagOpenState[0];
       return React.createElement("section", { className: "dsm-model-settings" },
-        diagnosticText ? React.createElement("div", { className: "dsm-model-settings-diag" },
-          React.createElement("button", {
-            type: "button",
-            className: "dsm-model-settings-diag-toggle",
-            "aria-expanded": diagOpen ? "true" : "false",
-            onClick: function () { diagOpenState[1](!diagOpen); }
-          },
-            React.createElement("span", { className: "dsm-model-settings-diag-caret" }, diagOpen ? "▾" : "▸"),
-            t("section.diagToggle"),
-            diagOpen ? null : React.createElement("span", { className: "dsm-model-settings-diag-hint" }, "· " + t("section.diagHint"))
-          ),
-          diagOpen ? React.createElement("div", {
-            className: "dsm-model-settings-hint",
-            "data-bindings-diag": diagnosticText
-          }, diagnosticText) : null
-        ) : null,
         // An empty catalog is the cause of "the model cannot be selected": the
         // Provider select then offers only "inherit" and the Model select is
         // disabled behind `!route.provider`. Say so instead of showing a select
@@ -997,6 +982,22 @@ window.__ModuleLoader__.load({
           React.createElement("button", { type: "button", className: "dsm-btn dsm-btn-outline", disabled: discardDisabled, onClick: discard }, t("row.discard")),
           React.createElement("button", { type: "button", className: "dsm-btn dsm-btn-primary", disabled: saveDisabled, onClick: save }, busyState[0] ? t("row.saving") : t("row.save"))
         ),
+        diagnosticText ? React.createElement("div", { className: "dsm-model-settings-diag" },
+          React.createElement("button", {
+            type: "button",
+            className: "dsm-model-settings-diag-toggle",
+            "aria-expanded": diagOpen ? "true" : "false",
+            onClick: function () { diagOpenState[1](!diagOpen); }
+          },
+            React.createElement("span", { className: "dsm-model-settings-diag-caret" }, diagOpen ? "\u25BE" : "\u25B8"),
+            t("section.diagToggle"),
+            diagOpen ? null : React.createElement("span", { className: "dsm-model-settings-diag-hint" }, "\u00B7 " + t("section.diagHint"))
+          ),
+          diagOpen ? React.createElement("div", {
+            className: "dsm-model-settings-hint",
+            "data-bindings-diag": diagnosticText
+          }, diagnosticText) : null
+        ) : null,
         toastState[0] ? React.createElement(Toast, { key: toastState[0].seq, text: toastState[0].text, onDone: function () { toastState[1](null); } }) : null
       );
     }

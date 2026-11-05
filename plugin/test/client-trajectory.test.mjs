@@ -2452,3 +2452,50 @@ test("the binding diagnostics are collapsed by default", async () => {
 		assert.equal(instance.props["aria-expanded"], "false", "the toggle must start collapsed");
 	}
 });
+
+test("the diagnostics sit LAST on the page, below the save controls", async () => {
+	// Placement is the point: meta information belongs at the bottom edge. Above
+	// the form it pushed the configuration the user came for down the screen, and
+	// directly under the intro it read as a warning about the plugin itself.
+	const { ctx, slotRegistrations, dictionaries } = makeCtx({
+		configForms: {
+			describe: () => ({ getSnapshot: () => ({ view: { namespaces: [{ ns: "include:dsh-subagent-default-model" }] } }) }),
+			get: () => ({
+				getSnapshot: () => ({ status: "ready", writable: true, value: { provider: "p", model: "m", models: ["m"] } }),
+				subscribe: () => () => {},
+				set: async () => true
+			})
+		}
+	});
+	const react = makeReactDouble();
+	capturedModule.factory((id) => {
+		if (id === "react") return react;
+		if (id === "@deepseek-ai/dsh-client-ui-primitives") {
+			return { Toast: function Toast() {}, IconChevronDownOutlineRegular: function Icon() {} };
+		}
+		throw new Error(`unexpected require: ${id}`);
+	}).apply(ctx);
+	const section = slotRegistrations.find((entry) => entry.name === "settings.section").value;
+	const tt = (key, params) => {
+		const template = dictionaries.zh?.[key] ?? key;
+		return params === undefined ? template : template.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
+	};
+	react.beginPass();
+	const tree = collect(expand(section.component({ ...section.options.inject(), t: tt, close: () => {} })), () => true);
+	// The form is the last block of the section; within it, the diagnostics must
+	// come after the footer that holds Save.
+	const form = tree.find((node) => node.props && node.props.className === "dsm-model-settings");
+	assert.ok(form, "expected the settings form");
+	const classes = form.children
+		.map((child) => (child.props && child.props.className) || "")
+		.filter((name) => name !== "");
+	const diagAt = classes.indexOf("dsm-model-settings-diag");
+	const footerAt = classes.indexOf("dsm-model-settings-footer");
+	assert.ok(diagAt >= 0, "the diagnostics block must be rendered");
+	assert.ok(footerAt >= 0, "expected the save footer");
+	assert.ok(
+		diagAt > footerAt,
+		`the diagnostics must come AFTER the save footer (got diag=${diagAt}, footer=${footerAt}): ${JSON.stringify(classes)}`
+	);
+	assert.equal(diagAt, classes.length - 1, "the diagnostics must be the last block in the form");
+});
