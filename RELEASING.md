@@ -75,6 +75,18 @@ npm publish
 npm pack --dry-run    # 核对 tarball 内容与版本号
 ```
 
+> ⚠️ **tarball 在等待 2FA 之前就已打好**（2.1.13 的教训）。
+>
+> `npm publish` 的执行顺序是「**打包 → 需要认证时才停下等你**」。所以在浏览器确认那一步打开之后再去改代码，**改动不会进入这次发布** —— 包里仍是按下回车那一刻的文件。2.1.13 就是这么出的事：打包后我在等待授权期间提交了一个修复，npm 上留下的是修复前的构建，而 git tag 指向修复后的提交，同号不同物，且 npm 版本不可覆盖。
+>
+> 两条纪律：
+> 1. **按下 `npm publish` 之后不要再改任何要发布的文件**；要改就等这次发布结束、改完再发下一个版本号。
+> 2. 发布后**必须**用 `npm pack` 下载回来的真实 tarball 与 git tag 比对，而不是只信 `npm view` 的版本号：
+>
+> ```bash
+> curl -sL "$(npm view dsh-subagent-default-model@X.Y.Z dist.tarball)" | tar xz -O package/lib/index.js | diff - <(git show vX.Y.Z:plugin/lib/index.js)
+> ```
+
 ### 6. 2FA 确认（若账号开启两步验证）
 
 `npm publish` 会打印类似：
@@ -97,6 +109,15 @@ npm error   https://www.npmjs.com/auth/cli/<id>
 npm view dsh-subagent-default-model version        # 应显示 X.Y.Z
 npm view dsh-subagent-default-model dist-tags.latest   # 应为 X.Y.Z
 ```
+
+**但版本号通过不等于内容正确**。再跑一次内容比对（把 `X.Y.Z` 换成实际版本）：
+
+```bash
+curl -sL "$(npm view dsh-subagent-default-model@X.Y.Z dist.tarball)" \
+  | tar xz -O package/lib/index.js | diff - <(git show vX.Y.Z:plugin/lib/index.js) && echo "tarball == tag"
+```
+
+`dist-tags` 会滞后（曾出现 `npm view` 仍显示旧版本、而直连 registry 已更新的情况），必要时用 `curl -H 'Cache-Control: no-cache' https://registry.npmjs.org/<pkg>` 复核。
 
 > **注意：刚发布后 registry 读缓存可能有短暂延迟**，可能出现 `version` 返回旧版、`versions` 却含新版的情况。稍等重查即可。
 >
