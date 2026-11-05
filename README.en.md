@@ -134,7 +134,9 @@ Configure via the Web settings card (Settings → Plugins → dsh-subagent-defau
 
 ### Pin a default model
 
-> **Where to configure it**: the "Subagent default model" page in the Settings panel's left nav (since 2.1.16; earlier releases put it on the plugin's marketplace detail page).
+> **Where to configure it**: the "Subagent default model" page in the Settings panel's left nav (since 2.2.0; earlier releases put it on the plugin's marketplace detail page).
+>
+> The page reads top to bottom as: one-line summary → three core values → the form → collapsed diagnostics (only useful when triaging a save problem).
 
 ```yaml
 - id: dsh-subagent-default-model
