@@ -76,6 +76,10 @@ npm view dsh-subagent-default-model version   # 应 == vX.Y.Z
 git describe --tags --abbrev=0               # 与上一条一致
 ```
 
+**2.2.0 实测耗时**（供估时参考）：本地测试与打包约 2 分钟；按下 `npm publish` 到 `dist-tags` 更新约 1 分钟；tarball 立即可下载（本次无需轮询）；全量比对与安装验证约 1 分钟；Release 约 10 秒。
+
+> ⏱ **不要用后台任务等待传播。** 起一个 `sleep 300` 的 job 等结果，会在会话重启时连同结果一起消失（本项目实际踩过）。需要结果时现场查那三条判据即可。
+
 ## 每次发布的完整步骤
 
 ### 1. 确认代码与测试
@@ -410,6 +414,57 @@ for t in $(git tag -l | sort -V); do
     && echo "  ✅ $t" || echo "  ❌ $t  (缺 Release)"
 done
 ```
+
+### 读懂 `npm publish` 的输出
+
+一次正常发布打印的东西大致是这些，**每一行的含义不同**，不要一律当成「成功」或「失败」：
+
+```text
+npm notice total files: 10                         ← 打包内容，先用 npm pack --dry-run 核对
+npm notice shasum: 5ce19bd0…                       ← tarball 摘要，发布后可用它比对
+npm notice Publishing to https://registry.npmjs.org/ with tag latest and default access
+Authenticate your account at:                      ← 2FA：需在浏览器确认
+https://www.npmjs.com/auth/cli/8b4044e2-…
+Press ENTER to open in the browser...
+npm notice Your package is being processed and may take a few minutes to become available.
++ dsh-subagent-default-model@2.2.0                 ← 客户端回执，不等于服务端已收
+```
+
+关键几条：
+
+| 输出 | 含义 | 该做什么 |
+| --- | --- | --- |
+| `Authenticate your account at: …` | 需要 2FA | 浏览器打开确认，终端会自动继续 |
+| `Your package is being processed…` | 服务端已接受，正在入队 | 等；别重跑 publish |
+| `+ pkg@X.Y.Z` | **客户端**回执 | **不能据此判定成功**，必须走第 7 步验证 |
+| `E403 … cannot publish over the previously published versions` | 该版本已存在于 registry | 大概率上次其实发成了，去验证而不是改版本号 |
+| `EOTP` | 2FA 未完成 | 回浏览器完成；见下一条 |
+| `ETARGET`（`npm install` 时） | 元数据已更新但 tarball 还没传播，或本地缓存陈旧 | 轮询 tarball 直到 200；必要时 `npm cache clean --force` |
+
+> `npm notice` 前缀的行都是**信息**，不是错误。只有 `npm error` 开头才是失败。
+
+### 等发布传播：不要用后台任务等，直接查
+
+「元数据先到、tarball 后到」意味着发布后往往需要等几分钟到十几分钟。**等待本身不需要脚本托管**——不要为此起一个 `sleep 300` 的后台进程：会话重启、进程收尾都会让它消失，届时你既拿不到结果、也不知道它是否跑过（本仓实际发生过一次）。
+
+正确做法是**需要结果时现场查**，一次不成再查一次：
+
+```bash
+# 一行看状态：latest 是否已是目标版本 + tarball 是否可下载
+export PATH="/opt/homebrew/bin:$PATH"
+VER=X.Y.Z
+curl -s "https://registry.npmjs.org/dsh-subagent-default-model" -H 'Cache-Control: no-cache' \
+  | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+print('latest =', d['dist-tags']['latest'])
+print('$VER present =', '$VER' in d['versions'])
+print('tarball =', d['versions'].get('$VER',{}).get('dist',{}).get('tarball','(缺)'))"
+```
+
+tarball 就绪后直接下载并比对（脚本化版本见第 7 步）。若下载仍 404，等 30–60 秒再查；**只有连续多次仍为 404 且元数据也缺失**，才是真的没发出去。
+
+> 判据排序：**`dist-tags.latest` 已更新 + tarball 返回 200 + 解包内容等于 tag** 这三条同时成立 = 发布完成。任一条缺失就继续等，不要改版本号重发。
 
 ### `npm publish` 报 EOTP（需要一次性密码）
 
