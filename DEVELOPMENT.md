@@ -205,36 +205,6 @@ rc.3 → rc.5 的结果：**305 个包里只有 10 个有真实代码改动**，
 
 > 判据：**「版本号变了」不等于「契约变了」，但只有逐文件比对才能把这句话变成结论。** 别用「应该只是版本号」代替比对。
 
-### 插件详情页读的是 `meta.detail`，不是 README（0.2.2 新增的界面）
-
-0.2.2 在插件页加了一个「详细介绍文档」区块。宿主解析顺序（`dsh-plugin-detail` 的 `readPackageDocument` / `localeDetail`）：
-
-1. 按界面语言走链：`zh-CN` → `zh-cn` / `zh-CN` → `zh` → `en`；
-2. 取**第一个声明了** `meta.detail` 的 `locale/<language>.json`——文件存在但没写 `detail` 不算命中，链会继续往下；
-3. 读该路径指向的 Markdown（包根相对、`/` 分隔、以 `.md`/`.markdown` 结尾，不能含空段 `.` `..` 反斜杠或 URL scheme）；
-4. **一个都没有就回落包根 README**。
-
-我们的 README 有数百行，所以不写 `meta.detail` 的后果是整篇被塞进 560px 的滚动框。三处必须同时到位：
-
-| 位置 | 要求 | 漏了会怎样 |
-| --- | --- | --- |
-| `locale/zh.json`、`locale/en.json` | `meta.detail` 指向短文档 | 回落 README 全文 |
-| `docs/DETAIL*.md` | 真实存在、≤100 **字符** | 不是回落，而是 `invalid` +「重试」按钮，比长文更糟 |
-| `package.json#files` | 明确列出 `locale` 与两份文档 | 仓库里正常、发布包里缺，恰好是没人测试的地方 |
-
-**`en.json` 必须写**：它是语言链的尾巴，所有没单独提供 detail 的语言都会落到它上面。
-
-100 字按**字符总数**算（汉字、标点、字母、空格全算），建议 80–95 留余量。别写 YAML front matter（会被剥掉）、别用原始 HTML（`omitHtml` 忽略）。宿主没有开关能关掉整个区块；想「不显示」只能指向空文档，但仍会留个空框。**别为了不显示而删 README**——npm 页面、GitHub、第三方市场索引会一起空掉。
-
-守卫在 `plugin/test/detail-docs.test.mjs`（5 条）。想不靠肉眼确认，可以直接把宿主自己的代码拿来跑：
-
-```js
-// 从 asar 取出 dsh-plugin-detail 的 document.js / files.js，然后：
-const files = localFiles(packageRoot, 1);
-const doc = await readPackageDocument(files, "", languageChain("zh-CN"), 1 << 20, signal);
-// doc.origin === "locale" && doc.path === "docs/DETAIL.zh.md"
-```
-
 ### 路由在 step 内是固定的：`agent/request` 不能再改 provider/model（0.2.2 的教训）
 
 这是**语义**变更，`diff -rq` 只能告诉你 `dsh-agent-loop` 改了 12 个文件，看不出「哪条契约收紧了」。必须读代码或类型文档。

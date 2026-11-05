@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.1.19 (2026-11-06)
+
+### Reverted
+
+**撤销 2.1.15 的「100 字详情文档」，插件详情页恢复渲染完整 README。**
+
+2.1.15 曾给插件页加了一套短简介机制（`docs/DETAIL.zh.md` / `docs/DETAIL.md` + `locale/*.json` 的 `meta.detail`），目的是避免宿主把整篇 README 塞进详情区块。现在这些全部移除：
+
+- 删除 `docs/DETAIL.zh.md`、`docs/DETAIL.md`；
+- 删除 `locale/zh.json`、`locale/en.json`；
+- `package.json#files` 去掉 `locale` 与两条 `docs/` 路径，回到 7 项；
+- 删除 `test/detail-docs.test.mjs`（5 条守卫随之失效，测试 182 → 177）。
+
+宿主的行为随之回到默认：`meta.detail` 一个都找不到 → 回落包根 README → 详情页显示完整说明。
+
+**为什么会想做这件事、又为什么撤掉**：`meta.detail` 的取值要求「id 必须与 section 匹配」这类隐式约定，与新版宿主叠加后容易失效且失败无声（找不到就静默回落，界面上看不出问题）。与其维护一套只为缩短显示文本的机制，不如让 README 直接可见——它的内容是有用的，只是很长。
+
 ## 2.1.18 (2026-11-06)
 
 ### Fixed

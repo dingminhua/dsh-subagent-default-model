@@ -1,7 +1,0 @@
-{
-  "meta": {
-    "title": "dsh-subagent-default-model",
-    "description": "Default models for DSH subagents, with pooled assignment and cross-provider failover.",
-    "detail": "docs/DETAIL.md"
-  }
-}
