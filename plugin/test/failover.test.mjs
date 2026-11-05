@@ -573,3 +573,32 @@ test("0.2.2: the main agent loop is still never touched", async (t) => {
 		await disposeHarness(harness);
 	}
 });
+
+test("0.2.2: a refused select() does not retire the candidate or spend the pool", async (t) => {
+	// Bookkeeping must follow a selection that actually LANDED. Recording the
+	// switch first meant a refused `select()` still incremented `count` and
+	// marked the step as handled: the pool entry was retired without ever being
+	// used, and the step stopped retrying it.
+	const harness = await createHarness({
+		...SECTION_WITH_MODELS,
+		models: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-lite"]
+	});
+	try {
+		const agent = makeStepRouteAgent("sub-1", { selectThrows: new Error("model/selection rejected") });
+		await dispatchRequestError(harness.root, agent, { step: 1 });
+		assert.deepEqual(agent.selections, [], "a refused selection recorded nothing");
+
+		// The host now accepts the call: the SAME step must still be able to pick
+		// the entry that was never really taken.
+		let attempts = 0;
+		agent.model.select = (selection) => {
+			attempts += 1;
+			agent.selections.push(selection);
+		};
+		await dispatchRequestError(harness.root, agent, { step: 1 });
+		assert.equal(attempts, 1, "the refused attempt must not have consumed the step");
+		assert.deepEqual(agent.selections, [{ provider: "deepseek-official", model: "deepseek-v4-flash" }]);
+	} finally {
+		await disposeHarness(harness);
+	}
+});

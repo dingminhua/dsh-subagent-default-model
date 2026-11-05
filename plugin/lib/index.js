@@ -444,12 +444,6 @@ async function switchForNextStep(ctx, state, pending, payload, next) {
 	if (target === void 0) return downstream;
 	const tried = new Set(current?.tried ?? []);
 	tried.add(index);
-	pending.set(agent.id, {
-		index,
-		tried,
-		count: (current?.count ?? 0) + 1,
-		step
-	});
 	try {
 		agent.model.select({
 			provider: target.provider,
@@ -469,6 +463,15 @@ async function switchForNextStep(ctx, state, pending, payload, next) {
 		);
 		return downstream;
 	}
+	// Record ONLY a selection that actually landed: an incremented `count` for a
+	// switch the host refused would retire a pool entry that was never used and
+	// stop the next step from retrying it.
+	pending.set(agent.id, {
+		index,
+		tried,
+		count: (current?.count ?? 0) + 1,
+		step
+	});
 	ctx.logger.warn(
 		`[dsh-subagent-default-model] subagent %s failed with %s on turn %d step %d; %s/%s is selected for its NEXT step (this host fixes the route of the failed step, so the current turn cannot continue on it)`,
 		agent.id,
