@@ -113,10 +113,16 @@ function makeCtx(overrides = {}) {
 		},
 		slots: {
 			inject(name, callback) {
-				slotRegistrations.push({ name, value: callback() });
+				// The callback may register one entry or several (the page and its
+				// nav glyph share one inject), and returns their combined
+				// disposer. `register` below records each entry, so this only has
+				// to run the callback.
+				var disposer = callback();
+				if (typeof disposer === "function") disposer();
 			},
 			register(options, component) {
-				return { options, component };
+				slotRegistrations.push({ name: options.name, value: { options, component } });
+				return () => {};
 			},
 			// `specOf` is the renderer's own declaration accessor (`specDynamic`):
 			// it answers undefined for a slot the host never declared, which is
@@ -146,7 +152,7 @@ function makeCtx(overrides = {}) {
  * configuration surface since 2.1.16. Declaring it here mirrors a 0.2.1-rc.5+
  * host; removing it models an older host, where the plugin must not register.
  */
-const DECLARED_SLOTS = new Set(["settings.section", "conversation.chat.node"]);
+const DECLARED_SLOTS = new Set(["settings.section", "settings.section.icon", "conversation.chat.node"]);
 
 /**
  * The settings-card placements among all slot registrations.
@@ -972,8 +978,8 @@ test("a late mirror answer re-routes the scope to the served namespace so writes
 		effect: (cb) => { cb(); return () => {}; },
 		locale: { register: () => () => {}, bind: () => (k) => k },
 		slots: {
-			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
-			register: (options, component) => ({ options, component }),
+			inject: (s, cb) => { const d = cb(); if (typeof d === "function") d(); return () => {}; },
+			register: (options, component) => { slotRegs.push({ options, component }); return () => {}; },
 			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined),
 		},
 		uiConversation: services.uiConversation,
@@ -1042,8 +1048,8 @@ test("the scope offers an ATOMIC write and forces a mirror read for verification
 		effect: (cb) => { cb(); return () => {}; },
 		locale: { register: () => () => {}, bind: () => (k) => k },
 		slots: {
-			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
-			register: (options, component) => ({ options, component }),
+			inject: (s, cb) => { const d = cb(); if (typeof d === "function") d(); return () => {}; },
+			register: (options, component) => { slotRegs.push({ options, component }); return () => {}; },
 			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined),
 			// Same declaration probe the renderer exposes; see DECLARED_SLOTS.
 			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined)
@@ -1100,8 +1106,8 @@ test("an unbound scope reports its state when a write is refused, not a generic 
 		effect: (cb) => { cb(); return () => {}; },
 		locale: { register: () => () => {}, bind: () => (k) => k },
 		slots: {
-			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
-			register: (options, component) => ({ options, component }),
+			inject: (s, cb) => { const d = cb(); if (typeof d === "function") d(); return () => {}; },
+			register: (options, component) => { slotRegs.push({ options, component }); return () => {}; },
 			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined),
 			// Same declaration probe the renderer exposes; see DECLARED_SLOTS.
 			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined)
@@ -1150,8 +1156,8 @@ test("registers both cards and binds the served namespace when the mirror is alr
 		effect: (cb) => { cb(); return () => {}; },
 		locale: { register: () => () => {}, bind: () => (k) => k },
 		slots: {
-			inject: (s, cb) => { const def = cb(); slotRegs.push(def); return () => {}; },
-			register: (options, component) => ({ options, component }),
+			inject: (s, cb) => { const d = cb(); if (typeof d === "function") d(); return () => {}; },
+			register: (options, component) => { slotRegs.push({ options, component }); return () => {}; },
 			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined),
 		},
 		uiConversation: { events: { register: () => () => {} } },
@@ -1410,11 +1416,12 @@ function catalogCtx({ presentAtApply }) {
 		on: () => () => {}, emit: () => {},
 		locale: { register: () => () => {}, bind: () => (k) => k },
 		slots: {
-			// The PAGE registration is the one this fixture is about; the nav glyph
-			// registers into a second slot and must not overwrite it.
-			inject: (slotName, cb) => { lastSlot = slotName; return cb(); },
+			// The PAGE registration is the one this fixture is about. Both slots
+			// arrive through the SAME inject now, so the entry is selected by its
+			// own `options.name` rather than by which slot was injected.
+			inject: (slotName, cb) => { const d = cb(); return typeof d === "function" ? d : () => {}; },
 			register: (options, component) => {
-				if (lastSlot === "settings.section") captured = { options, component };
+				if (options.name === "settings.section") captured = { options, component };
 				return () => {};
 			},
 			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined)
@@ -1485,11 +1492,11 @@ function lateCatalogCtx({ emptyFirst, groups }) {
 		on: () => () => {}, emit: () => {},
 		locale: { register: () => () => {}, bind: () => (k) => k },
 		slots: {
-			// The PAGE registration is the one this fixture is about; the nav glyph
-			// registers into a second slot and must not overwrite it.
-			inject: (slotName, cb) => { lastSlot = slotName; return cb(); },
+			// Both slots arrive through the SAME inject now, so the page entry is
+			// selected by its own `options.name`.
+			inject: (slotName, cb) => { const d = cb(); return typeof d === "function" ? d : () => {}; },
 			register: (options, component) => {
-				if (lastSlot === "settings.section") captured = { options, component };
+				if (options.name === "settings.section") captured = { options, component };
 				return () => {};
 			},
 			specOf: (name) => (DECLARED_SLOTS.has(name) ? { name, kind: "list", scope: "root" } : undefined)
@@ -2332,4 +2339,33 @@ test("the nav glyph is registered under the SAME id as the page", async () => {
 	// plugin's own dictionary rather than the raw package name.
 	assert.equal(page.options.label(), "子代理默认模型");
 	assert.equal(typeof page.options.label, "function", "label must be a thunk so it follows the active locale");
+});
+
+test("the nav glyph renders the plugin's own mark at the requested size", async () => {
+	// The shell wraps this cell in a <span> (`inline: true`) and passes
+	// `{ size, active }`. Rendering the mark means an <img> carrying the brand
+	// data URI at exactly the requested edge — not a generic gear, and not a
+	// block element that would break the nav row's baseline.
+	const { ctx, slotRegistrations } = makeCtx();
+	const react = makeReactDouble();
+	capturedModule.factory((id) => {
+		if (id === "react") return react;
+		if (id === "@deepseek-ai/dsh-client-ui-primitives") {
+			return { Toast: function Toast() {}, IconChevronDownOutlineRegular: function Icon() {} };
+		}
+		throw new Error(`unexpected require: ${id}`);
+	}).apply(ctx);
+	const icon = slotRegistrations.find((entry) => entry.name === "settings.section.icon");
+	assert.ok(icon, "the glyph entry must exist");
+	const component = icon.value.component;
+	react.beginPass();
+	const node = component({ size: 16, active: true });
+	assert.equal(node.type, "img", "the nav glyph must be an image");
+	assert.match(String(node.props.src), /^data:image\/png;base64,/, "and must carry the brand mark, not a re-drawn glyph");
+	assert.equal(node.props.width, 16);
+	assert.equal(node.props.height, 16);
+	// A larger request must be honoured rather than hard-coding 16.
+	react.beginPass();
+	const bigger = component({ size: 24, active: false });
+	assert.equal(bigger.props.width, 24, "the requested edge must be respected");
 });

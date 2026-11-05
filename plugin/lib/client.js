@@ -1623,7 +1623,16 @@ window.__ModuleLoader__.load({
         if (settingsSectionAvailable) {
           try {
             ctx.slots.inject("settings.section", function () {
-              return ctx.slots.register({
+              // The page and its nav glyph are registered together, in ONE
+              // `inject` callback, and both disposers are returned as a pair.
+              //
+              // Two separate `slots.inject()` calls look equivalent but are not:
+              // each waits on its own declaration, and the glyph's cell is only
+              // meaningful while the page's id exists. Registering them from the
+              // same callback makes the pairing structural instead of a
+              // convention, and Cordis disposes both with this fiber.
+              var disposers = [];
+              disposers.push(ctx.slots.register({
                 name: "settings.section",
                 id: "dsh-subagent-default-model",
                 // After the shipped sections (account -10, general 0, models 10,
@@ -1633,33 +1642,56 @@ window.__ModuleLoader__.load({
                 label: function () { return ctx.locale.bind(SUBAGENT_ROW_LOCALE)("section.title"); },
                 locale: SUBAGENT_ROW_LOCALE,
                 inject: subagentRowInjected
-              }, SubagentModelSection);
+              }, SubagentModelSection));
+              // Nav-rail glyph, addressed by the SAME id as the page: the shell
+              // renders `renderSlot("settings.section.icon", …, { only: row.id })`,
+              // so an unmatched id simply never appears and the default gear
+              // stays. `inline: true` on this slot wraps the cell in a <span>,
+              // hence an <img> sized to the owner's requested edge.
+              var iconSlotAvailable = false;
+              try {
+                iconSlotAvailable = typeof ctx.slots.specOf === "function"
+                  && ctx.slots.specOf("settings.section.icon") !== undefined;
+              } catch (_iconProbeError) {
+                iconSlotAvailable = false;
+              }
+              if (iconSlotAvailable) {
+                disposers.push(ctx.slots.register({
+                  name: "settings.section.icon",
+                  id: "dsh-subagent-default-model",
+                  locale: SUBAGENT_ROW_LOCALE
+                }, function (iconProps) {
+                  var edge = iconProps && typeof iconProps.size === "number" ? iconProps.size : 16;
+                  return React.createElement("img", {
+                    src: DSM_ICON,
+                    alt: "",
+                    width: edge,
+                    height: edge,
+                    style: {
+                      width: edge + "px",
+                      height: edge + "px",
+                      borderRadius: "3px",
+                      display: "block",
+                      objectFit: "contain",
+                      // The shipped glyphs follow the label colour; the brand
+                      // mark carries its own, so it is only dimmed when the row
+                      // is not the active section.
+                      opacity: iconProps && iconProps.active === false ? 0.75 : 1
+                    }
+                  });
+                }));
+              } else {
+                console.warn('[dsh-subagent-default-model] this host declares no "settings.section.icon" slot, so the nav entry keeps the default glyph; the page itself is unaffected.');
+              }
+              return function () {
+                for (var index = 0; index < disposers.length; index += 1) {
+                  var dispose = disposers[index];
+                  if (typeof dispose === "function") dispose();
+                }
+              };
             });
           } catch (error) {
             console.error('[dsh-subagent-default-model] settings.section page failed to register (host provider unaffected):', error);
-          }
-          // Optional nav-rail glyph, addressed by the SAME id as the page (an
-          // unmatched id never renders, and the shell keeps its default gear
-          // when nothing is registered). The plugin already ships a brand mark,
-          // so the entry is recognizable instead of another generic gear.
-          try {
-            ctx.slots.inject("settings.section.icon", function () {
-              return ctx.slots.register({
-                name: "settings.section.icon",
-                id: "dsh-subagent-default-model",
-                locale: SUBAGENT_ROW_LOCALE
-              }, function () {
-                return React.createElement("img", {
-                  src: DSM_ICON,
-                  alt: "",
-                  width: 16,
-                  height: 16,
-                  style: { borderRadius: "3px", display: "block" }
-                });
-              });
-            });
-          } catch (error) {
-            console.error('[dsh-subagent-default-model] settings.section.icon failed to register (the page still renders with the default glyph):', error);
           }
         }
       });

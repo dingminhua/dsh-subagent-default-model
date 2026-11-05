@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.1.17 (2026-11-06)
+
+### Fixed
+
+**设置侧边栏的导航图标没有出现，仍显示通用齿轮。**
+
+2.1.16 把配置页搬到 `settings.section` 后，同一次提交也注册了 `settings.section.icon`，但页面上只见到默认齿轮。原因是两处注册用了**两个独立的 `slots.inject()`**：
+
+- 每个 `inject()` 各自等待自己的 slot 声明；
+- 渲染器对 `.icon` 的取值是 `renderSlot("settings.section.icon", …, { only: row.id })`，**id 必须与 section 完全一致**才会有 occupant，否则静默回落到 `navIcon()` 的通用齿轮，页面上看不出任何错误。
+
+现在两处注册合并进**同一个 `inject` 回调**，disposer 成对返回、随 fiber 一起释放。配对关系因此是结构性的，而不是靠两处代码碰巧都写对。
+
+同时加固了图标本身：
+
+- 按 owner 传入的 `size` 渲染（此前硬编码 16），`active` 为假时降到 75% 不透明度；
+- `inline: true` 的槽位把 cell 包在 `<span>` 里，所以用 `<img>` + `display:block` 精确占位，不会破坏导航行的基线；
+- `.icon` 也有自己的声明探测：宿主没有这个槽位时只打 warn，页照常渲染。
+
+### Tests
+
+`182/182`（181 → 182），`skip 0`。新增「导航图标必须与页面同 id」与「按 size 渲染品牌图标」两条守卫；变异验证 2/2 命中（去掉图标注册、把尺寸硬编码回 16）。
+
+> 夹具又一次挡在前面：`settings.section` 与 `settings.section.icon` 现在从**同一个** `inject` 出来，原先按「哪次 inject」区分注册的桩全部失效，必须改成按 `options.name` 选取。这类改动不改就只会测试变红、看不出真实原因。
+
 ## 2.1.16 (2026-11-06)
 
 ### Changed
