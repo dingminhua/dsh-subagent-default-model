@@ -1610,17 +1610,14 @@ window.__ModuleLoader__.load({
         // never declared (`slots.inject()` would then wait forever and the page
         // would simply never appear). Probing keeps the console honest instead
         // of leaving a silent no-op.
-        var settingsSectionAvailable = false;
-        try {
-          settingsSectionAvailable = typeof ctx.slots.specOf === "function"
-            && ctx.slots.specOf("settings.section") !== undefined;
-        } catch (_error) {
-          settingsSectionAvailable = false;
-        }
-        if (!settingsSectionAvailable) {
-          console.warn('[dsh-subagent-default-model] this host declares no "settings.section" slot (added in 0.2.1-rc.5), so the settings page is unavailable; the Host provider still works from its config file.');
-        }
-        if (settingsSectionAvailable) {
+        //
+        // NO declaration probe. `slots.inject()` already IS the probe: it waits
+        // for the declaration and runs the callback only once the slot exists,
+        // doing nothing at all on a host that never declares it. A probe built
+        // on an accessor the service may not expose turns "not supported here"
+        // into "never registers anywhere" — which is exactly how 2.1.16/2.1.17
+        // shipped a page nobody could see. Let the host answer.
+        {
           try {
             ctx.slots.inject("settings.section", function () {
               // The page and its nav glyph are registered together, in ONE
@@ -1648,41 +1645,42 @@ window.__ModuleLoader__.load({
               // so an unmatched id simply never appears and the default gear
               // stays. `inline: true` on this slot wraps the cell in a <span>,
               // hence an <img> sized to the owner's requested edge.
-              var iconSlotAvailable = false;
-              try {
-                iconSlotAvailable = typeof ctx.slots.specOf === "function"
-                  && ctx.slots.specOf("settings.section.icon") !== undefined;
-              } catch (_iconProbeError) {
-                iconSlotAvailable = false;
-              }
-              if (iconSlotAvailable) {
-                disposers.push(ctx.slots.register({
-                  name: "settings.section.icon",
-                  id: "dsh-subagent-default-model",
-                  locale: SUBAGENT_ROW_LOCALE
-                }, function (iconProps) {
-                  var edge = iconProps && typeof iconProps.size === "number" ? iconProps.size : 16;
-                  return React.createElement("img", {
-                    src: DSM_ICON,
-                    alt: "",
-                    width: edge,
-                    height: edge,
-                    style: {
-                      width: edge + "px",
-                      height: edge + "px",
-                      borderRadius: "3px",
-                      display: "block",
-                      objectFit: "contain",
-                      // The shipped glyphs follow the label colour; the brand
-                      // mark carries its own, so it is only dimmed when the row
-                      // is not the active section.
-                      opacity: iconProps && iconProps.active === false ? 0.75 : 1
-                    }
+              // Same reasoning as the page: `inject` waits for the declaration,
+              // so an unconditional call is safe and a probe is not.
+              {
+                var iconInject = null;
+                try {
+                  iconInject = ctx.slots.inject("settings.section.icon", function () {
+                    var iconDisposer = ctx.slots.register({
+                      name: "settings.section.icon",
+                      id: "dsh-subagent-default-model",
+                      locale: SUBAGENT_ROW_LOCALE
+                    }, function (iconProps) {
+                      var edge = iconProps && typeof iconProps.size === "number" ? iconProps.size : 16;
+                      return React.createElement("img", {
+                        src: DSM_ICON,
+                        alt: "",
+                        width: edge,
+                        height: edge,
+                        style: {
+                          width: edge + "px",
+                          height: edge + "px",
+                          borderRadius: "3px",
+                          display: "block",
+                          objectFit: "contain",
+                          opacity: iconProps && iconProps.active === false ? 0.75 : 1
+                        }
+                      });
+                    });
+                    disposers.push(iconDisposer);
+                    return iconDisposer;
                   });
-                }));
-              } else {
-                console.warn('[dsh-subagent-default-model] this host declares no "settings.section.icon" slot, so the nav entry keeps the default glyph; the page itself is unaffected.');
+                } catch (_iconInjectError) {
+                  iconInject = null;
+                }
+                if (typeof iconInject === "function") disposers.push(iconInject);
               }
+
               return function () {
                 for (var index = 0; index < disposers.length; index += 1) {
                   var dispose = disposers[index];

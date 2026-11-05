@@ -42,6 +42,7 @@ function factoryRequire(id) {
 function makeCtx(overrides = {}) {
 	const registrations = [];
 	const slotRegistrations = [];
+	const disposers = [];
 	const dictionaries = {};
 	// Live locale namespaces, so the stub can reproduce the host's duplicate rule.
 	const registeredLocales = new Set();
@@ -113,12 +114,16 @@ function makeCtx(overrides = {}) {
 		},
 		slots: {
 			inject(name, callback) {
-				// The callback may register one entry or several (the page and its
-				// nav glyph share one inject), and returns their combined
-				// disposer. `register` below records each entry, so this only has
-				// to run the callback.
+				// Mirror the real `slots.inject()` contract: run the callback only
+				// for a slot this host DECLARES, and keep the returned disposer
+				// (never call it — the host releases it on fiber disposal, and
+				// invoking it here would delete the registration the test is
+				// about). An undeclared slot simply waits, which is modelled by
+				// not calling back at all.
+				if (!DECLARED_SLOTS.has(name)) return () => {};
 				var disposer = callback();
-				if (typeof disposer === "function") disposer();
+				disposers.push(disposer);
+				return () => {};
 			},
 			register(options, component) {
 				slotRegistrations.push({ name: options.name, value: { options, component } });
@@ -215,32 +220,26 @@ test("client registers the subagent-default-model settings card and loads the mo
 	assert.equal(groups[0].id, "mock");
 });
 
-test("no Settings page is registered on a host that declares no settings.section slot", async () => {
-	// The slot arrived in 0.2.1-rc.5; this plugin still supports 0.1.7, where a
-	// `slots.inject("settings.section", …)` would wait forever and silently show
-	// nothing. The declaration probe must therefore SKIP the registration
-	// instead of leaving a permanent no-op, and it must say why in the console.
+test("an undeclared settings.section slot registers nothing, and the plugin still applies", async () => {
+	// The slot arrived in 0.2.1-rc.5; this plugin still supports 0.1.7. There is
+	// NO declaration probe any more — a probe built on an accessor the service
+	// may not expose is what shipped a page nobody could see. Safety comes from
+	// `slots.inject()` itself: it WAITS for the declaration and never runs the
+	// callback on a host that does not declare the slot, which this fixture
+	// models by never calling back for an undeclared name.
 	const declared = new Set(DECLARED_SLOTS);
 	DECLARED_SLOTS.delete("settings.section");
-	// The fixture's probe reads this set at call time; restore it unconditionally.
-	const warnings = [];
-	const originalWarn = console.warn;
-	console.warn = (...args) => { warnings.push(args.join(" ")); };
+	DECLARED_SLOTS.delete("settings.section.icon");
 	try {
 		const { ctx, slotRegistrations } = makeCtx();
 		const { apply } = capturedModule.factory(factoryRequire);
-		apply(ctx);
+		assert.doesNotThrow(() => apply(ctx), "a host without the slot must not break apply()");
 		assert.equal(
 			slotRegistrations.filter((entry) => entry.name === "settings.section").length,
 			0,
 			"nothing may be registered into an undeclared slot"
 		);
-		assert.ok(
-			warnings.some((line) => line.includes("settings.section")),
-			`expected a diagnostic naming the missing slot, got: ${JSON.stringify(warnings)}`
-		);
 	} finally {
-		console.warn = originalWarn;
 		for (const name of declared) DECLARED_SLOTS.add(name);
 	}
 });
