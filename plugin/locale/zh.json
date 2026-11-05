@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "dsh-subagent-default-model",
+    "description": "为 DSH 子代理指定默认模型：多模型分配、跨供应商故障转移，并显示当前路由。",
+    "detail": "docs/DETAIL.zh.md"
+  }
+}

@@ -1,5 +1,48 @@
 # Changelog
 
+## 2.1.15 (2026-11-06)
+
+### Changed
+
+**插件详情页改为一段短简介，不再整篇渲染 README。**
+
+DSH 0.2.2 起，插件页在名称、简介、开关下方新增「详细介绍文档」区块。宿主的解析顺序是（`dsh-plugin-detail` 的 `readPackageDocument` / `localeDetail`）：
+
+1. 按界面语言走语言链（`zh-CN` → `zh` → `en`），依次读 `locale/<language>.json`；
+2. 取**第一个声明了** `meta.detail` 的值（某个 locale 文件存在但没写 `detail` 不算命中，继续往下走）；
+3. 渲染该路径指向的 Markdown；
+4. **一个都没找到，就回落到包根目录的 README**。
+
+本项目的 README 有数百行，于是整篇被塞进一个 560px 高的滚动框。现在补上三处：
+
+- 新增 `docs/DETAIL.zh.md`（82 字符）与 `docs/DETAIL.md`（95 字符）；
+- 新增 `locale/zh.json`、`locale/en.json`，`meta` 里各有 `title` / `description` / `detail`；
+- `package.json` 的 `files` 补入 `locale` 与两条 `docs/` 明确路径。
+
+**`en.json` 必须写**：它是语言链的最终兜底，只写 `zh.json` 的话英文界面（以及所有未单独提供的语言）照样回落 README 全文。
+
+### Tests
+
+`178/178`（173 → 178），`skip 0`。新增 5 条守卫（`test/detail-docs.test.mjs`），分别钉住：
+
+- 每个 `locale/*.json` 都声明了 `meta.detail`，且 `en.json` 存在；
+- `meta.detail` 指向的文件**真实存在**且非空（指向不存在的文件不会安静回落，而是显示错误信息加「重试」按钮，比长文更糟）；
+- 每份文档 ≤ 100 字符（按字符总数，非字数），且不低于 40 字符；
+- 这些文件都在 `package.json#files` 白名单内（漏了只在发布包里缺，恰好是没人跑测试的地方）；
+- 路径为包根相对、已规范化、以 `.md` 结尾。
+
+变异验证 4/4 命中：删掉 `en.json` 的 `detail`、把 `detail` 指向不存在的文件、把文案改超长、从 `files` 移除 `locale`，各自触发对应用例失败。
+
+**用宿主自己的代码验证**：把 asar 里 `dsh-plugin-detail` 的 `document.js` / `files.js` 取出来，直接调用 `localFiles` + `readPackageDocument` + `languageChain` 解析本包：
+
+| 界面语言 | 结果 |
+| --- | --- |
+| `zh-CN` / `zh` | `docs/DETAIL.zh.md`，82 字符 |
+| `en-US` | `docs/DETAIL.md`，95 字符 |
+| `ja-JP` | 按语言链回落英文，95 字符 |
+
+四种语言都没有 `invalid` 错误。
+
 ## 2.1.14 (2026-11-05)
 
 ### Fixed
