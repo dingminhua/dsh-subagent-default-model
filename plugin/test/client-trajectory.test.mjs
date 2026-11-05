@@ -2368,3 +2368,87 @@ test("the nav glyph renders the plugin's own mark at the requested size", async 
 	const bigger = component({ size: 24, active: false });
 	assert.equal(bigger.props.width, 24, "the requested edge must be respected");
 });
+
+test("the Settings page states the plugin's three values, one sentence each", async () => {
+	// The page's intro is where a user decides whether the switches below matter.
+	// Three bullets, one per value, must all render — a prose paragraph that
+	// names them only implicitly is what this replaced.
+	const { ctx, slotRegistrations, dictionaries } = makeCtx({
+		configForms: {
+			describe: () => ({ getSnapshot: () => ({ view: { namespaces: [{ ns: "include:dsh-subagent-default-model" }] } }) }),
+			get: () => ({
+				getSnapshot: () => ({ status: "ready", writable: true, value: { provider: "p", model: "m", models: ["m"] } }),
+				subscribe: () => () => {},
+				set: async () => true
+			})
+		}
+	});
+	const react = makeReactDouble();
+	capturedModule.factory((id) => {
+		if (id === "react") return react;
+		if (id === "@deepseek-ai/dsh-client-ui-primitives") {
+			return { Toast: function Toast() {}, IconChevronDownOutlineRegular: function Icon() {} };
+		}
+		throw new Error(`unexpected require: ${id}`);
+	}).apply(ctx);
+	const section = slotRegistrations.find((entry) => entry.name === "settings.section").value;
+	const tt = (key, params) => {
+		const template = dictionaries.zh?.[key] ?? key;
+		return params === undefined ? template : template.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
+	};
+	react.beginPass();
+	// `collect` walks EXPANDED nodes; the raw element tree still holds function
+	// components, so expand first or nothing below the section will be found.
+	const tree = collect(expand(section.component({ ...section.options.inject(), t: tt, close: () => {} })), () => true);
+	const text = tree.map((node) => node.text ?? "").join(" ");
+	// One assertion per value, named by the capability a user would recognise.
+	assert.match(text, /多模型分配/, "value 1: pooled assignment");
+	assert.match(text, /跨供应商故障转移/, "value 2: cross-provider failover");
+	assert.match(text, /路由可见可查/, "value 3: visible route");
+	// And they really are three separate items, not one run-on paragraph. Scoped
+	// to the intro list: the route rows further down are `li` elements too.
+	const valueList = collect(tree, (node) => node.props && node.props.className === "dsm-settings-values")[0];
+	assert.ok(valueList, "expected the values list");
+	assert.equal(valueList.children.length, 3, "expected exactly three value bullets");
+});
+
+test("the binding diagnostics are collapsed by default", async () => {
+	// `[diag …]` is a triage aid. Left expanded it reads as an error banner to
+	// anyone who is not debugging, on a page whose job is to look trustworthy.
+	const { ctx, slotRegistrations, dictionaries } = makeCtx({
+		configForms: {
+			describe: () => ({ getSnapshot: () => ({ view: { namespaces: [{ ns: "include:dsh-subagent-default-model" }] } }) }),
+			get: () => ({
+				getSnapshot: () => ({ status: "ready", writable: true, value: { provider: "p", model: "m", models: ["m"] } }),
+				subscribe: () => () => {},
+				set: async () => true
+			})
+		}
+	});
+	const react = makeReactDouble();
+	capturedModule.factory((id) => {
+		if (id === "react") return react;
+		if (id === "@deepseek-ai/dsh-client-ui-primitives") {
+			return { Toast: function Toast() {}, IconChevronDownOutlineRegular: function Icon() {} };
+		}
+		throw new Error(`unexpected require: ${id}`);
+	}).apply(ctx);
+	const section = slotRegistrations.find((entry) => entry.name === "settings.section").value;
+	const tt = (key, params) => {
+		const template = dictionaries.zh?.[key] ?? key;
+		return params === undefined ? template : template.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
+	};
+	react.beginPass();
+	const tree = collect(expand(section.component({ ...section.options.inject(), t: tt, close: () => {} })), () => true);
+	const diag = collect(tree, (node) => node.props && node.props["data-bindings-diag"]);
+	assert.equal(diag.length, 0, "the [diag] text must not be expanded on first render");
+	// The toggle is present, so the information is one click away rather than gone.
+	const toggle = collect(tree, (node) => node.props && node.props.className === "dsm-model-settings-diag-toggle");
+	// The fixture's React double keeps hook cells across the passes the harness
+	// performs, so the same toggle can appear more than once in one collection.
+	// What matters is that EVERY instance is collapsed on first render.
+	assert.ok(toggle.length >= 1, "expected a diagnostics toggle");
+	for (const instance of toggle) {
+		assert.equal(instance.props["aria-expanded"], "false", "the toggle must start collapsed");
+	}
+});
