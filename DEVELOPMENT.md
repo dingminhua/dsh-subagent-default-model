@@ -174,15 +174,15 @@ npm --prefix plugin test
 
 第 3 步要核对的清单（0.2.1-rc.5 实测行号）：
 
-| 契约 | rc.2 | rc.3 | rc.5 |
-| --- | --- | --- | --- |
-| `preStep()` 定义 / `inbox.claim()` | `:902` / `:906` | `:902` / `:906` | `:902` / `:906`（未变） |
-| `agent/pre-step` 瀑布 / 默认决策 | `:909` / `:917` | `:909` / `:917` | `:909` / `:917`（未变） |
-| `buildRequest()` 定义 | `:1214` | `:1214` | `:1214`（未变） |
-| `request/context` append | `:1271` | `:1271` | `:1271`（未变） |
-| `session.requestContext()` | — | `:1627` | `dsh-session` `:1627`（未变） |
-| `subagents.startActivation()` | — | `:3036` | `dsh-subagent` `:3036`（未变） |
-| `agent/request-error` / `agent/request` 瀑布 | — | `:1136` / `:1191` | `:1136` / `:1191`（未变） |
+| 契约 | rc.2 | rc.3 | rc.5 | 0.2.2-rc.1 |
+| --- | --- | --- | --- | --- |
+| `preStep()` 定义 / `inbox.claim()` | `:902` / `:906` | `:902` / `:906` | `:902` / `:906`（未变） | `:666` / `:670`（**整体上移，且语义变了**） |
+| `agent/pre-step` 瀑布 / 默认决策 | `:909` / `:917` | `:909` / `:917` | `:909` / `:917`（未变） | `:685` / `:690` |
+| `buildRequest()` 定义 | `:1214` | `:1214` | `:1214`（未变） | `:1018` |
+| `request/context` append | `:1271` | `:1271` | `:1271`（未变） | `:1075` |
+| `session.requestContext()` | — | `:1627` | `dsh-session` `:1627`（未变） | `dsh-session` `:1636` |
+| `subagents.startActivation()` | — | `:3036` | `dsh-subagent` `:3036`（未变） | `dsh-subagent` `:3051` |
+| `agent/request-error` / `agent/request` 瀑布 | — | `:1136` / `:1191` | `:1136` / `:1191`（未变） | `:929` / `:994`（`agent/request` **已废弃**） |
 
 > 行号是**核对时的快照**，不是契约：它在 0.2.1-rc.1 → rc.2 之间整体下移过，rc.2 → rc.3 → rc.5 之间**没有再动**。每次升级都重新 `grep` 一遍，别照抄上一版。
 
@@ -204,6 +204,52 @@ diff -rq rc-old/pkg rc-new/pkg | grep -v -E 'package\.json differ|README'
 rc.3 → rc.5 的结果：**305 个包里只有 10 个有真实代码改动**，且全部落在插件未触碰的面上（见 `plugin/CHANGELOG.md` 2.1.10 节）。插件依赖的 `dsh-agent-loop`、`dsh-subagent`、`dsh-tool-subagent`、`dsh-llm`、`dsh-settings`、`dsh-app-boot` 等**逐个文件比对为零改动**。
 
 > 判据：**「版本号变了」不等于「契约变了」，但只有逐文件比对才能把这句话变成结论。** 别用「应该只是版本号」代替比对。
+
+### 路由在 step 内是固定的：`agent/request` 不能再改 provider/model（0.2.2 的教训）
+
+这是**语义**变更，`diff -rq` 只能告诉你 `dsh-agent-loop` 改了 12 个文件，看不出「哪条契约收紧了」。必须读代码或类型文档。
+
+**变更**：0.2.2 把模型路由从「每次请求由 `agent/request` 瀑布决定」改成「**每个 step 在准备阶段固定**」。
+
+```js
+// preStep()：在调用瀑布之前就捕获，之后一路传递，重试也用同一份
+const selection = this.model.current();
+...
+return { ...decision, assembly, selection, toolSet };
+
+// prepareRequest(turn, step, selection, signal)：seed 由这份 selection 拼出
+const seedConfig = deepFreeze(structuredClone({ ...controls, ...selection }));
+const proposedConfig = await this.dispatch.waterfall("agent/request", ...);
+// 新增的硬校验：改了就抛
+if (proposedConfig.provider !== selection.provider || proposedConfig.model !== selection.model) throw ...
+```
+
+类型文档写得很直白（`dsh-agent/lib/types/runtime-types.d.ts`）：
+
+> `payload.modelSelection` — **captured step selection, retained across retries**
+>
+> `agent/request` — a replacement may adjust controls but **must keep the provider, model, and reasoning effort selection**. … **@deprecated** … Use `agent.model.select()` before step preparation for model and reasoning choices. **Other per-request control overrides have no replacement API.**
+
+**对插件的影响**：故障转移原本就是「在 `agent/request` 里把 seed 换成池中下一个模型」。在 0.2.2 上这段代码不是「失效」，而是**必然抛错**，把一次额度耗尽变成一句 `agent "X": agent/request proposed … after step preparation fixed …` —— 比原错误更难排查。
+
+**修法**：能力探测 + 双路径，一个构建同时服务新旧宿主。
+
+```js
+// agent.model 在 0.2.2 之前不存在，因此这是能力探测而非版本比较
+function fixesStepRoute(agent) {
+	return typeof agent?.model?.select === "function";
+}
+```
+
+- **旧宿主**：保持原逻辑（改写 seed 换模型重试）。
+- **新宿主**：
+  1. 先 `await next()` 让下游（`dsh-llm-retry`）处理。它有回退，**瞬时失败不该换路**——`select()` 会持久化到下一步，重试成功后再换路就是一次无辜的切换。
+  2. 下游不重试才说明这条路真的死了：`agent.model.select(next)` 为**下一个 step / turn** 预选健康路由，然后**放行原始错误**（它才说明真实原因）。
+  3. 每个 step 最多选一次；`agent/request` 直接 `return next()`，绝不改写。
+
+**必须承认的代价**：0.2.2 上「同一次请求内透明续跑」无法实现——路由在失败的那一步已锁定，`select()` 只影响下一步。所以永久性失败（配额、密钥）会结束当前 turn。这是宿主能力收回，不是实现偷懒；README 与 CHANGELOG 都如实写了。
+
+**测试夹具的教训**：原夹具只驱动 `ctx.waterfall("agent/request", seed)` 并断言返回值变了——它模拟的是**旧宿主的契约**，因此在新宿主上仍然全绿，却完全没覆盖真实的抛错路径。夹具现在有两种 agent：`makeAgent`（无 `agent.model`，旧宿主）与 `makeStepRouteAgent`（有 `agent.model.select`，新宿主）。**当宿主给契约加硬校验时，夹具必须把校验也加进去，否则它只是在自证清白。**
 
 ### 派发通道的能力不同，不能一把注入（fork / KV cache 的教训）
 

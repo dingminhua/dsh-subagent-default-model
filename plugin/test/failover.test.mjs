@@ -54,8 +54,30 @@ function makeAgent(id, { origin = "subagent", provider = "deepseek-official", mo
 	};
 }
 
+/**
+ * An agent from a DSH 0.2.2+ host.
+ *
+ * `agent.model` (absent before 0.2.2) is the capability the plugin probes: on
+ * these hosts the step's route is fixed and `agent/request` must return it
+ * unchanged, so the only lever is `agent.model.select()`, read at the NEXT
+ * step's preparation. `selections` records every call so a test can assert the
+ * chosen route instead of assuming it.
+ */
+function makeStepRouteAgent(id, { origin = "subagent", provider = "deepseek-official", model = "deepseek-v4-pro", selectThrows = undefined } = {}) {
+	const agent = makeAgent(id, { origin, provider, model });
+	const selections = [];
+	agent.selections = selections;
+	agent.model = {
+		select(selection) {
+			if (selectThrows !== void 0) throw selectThrows;
+			selections.push(selection);
+		}
+	};
+	return agent;
+}
+
 /** Drive one `agent/request-error` waterfall (the loop's dispatch). */
-function dispatchRequestError(ctx, agent, { turn = 1, step = 1, provider = "deepseek-official", failure = { message: "boom", code: "RATE_LIMIT" } } = {}) {
+function dispatchRequestError(ctx, agent, { turn = 1, step = 1, provider = "deepseek-official", failure = { message: "boom", code: "RATE_LIMIT" }, downstream = undefined } = {}) {
 	return ctx.waterfall("agent/request-error", {
 		agent,
 		turn,
@@ -63,7 +85,7 @@ function dispatchRequestError(ctx, agent, { turn = 1, step = 1, provider = "deep
 		provider,
 		failure,
 		signal: new AbortController().signal
-	}, () => Promise.resolve(void 0));
+	}, () => Promise.resolve(downstream));
 }
 
 /** Drive one `agent/request` waterfall (the loop's buildRequest). */
@@ -411,6 +433,142 @@ test("stays on the switched model for subsequent steps of the same run", async (
 			model: "deepseek-v4-pro"
 		}, { step: 2 });
 		assert.deepEqual(config2, { provider: "deepseek-official", model: "deepseek-v4-flash" });
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+// ── DSH 0.2.2+: the step's route is fixed ───────────────────────────────────
+//
+// 0.2.2 captures the step's selection in `preStep()` and throws if the
+// `agent/request` waterfall returns a different provider/model ("... after step
+// preparation fixed ..."). The pre-0.2.2 failover did exactly that, so on these
+// hosts it did not fail over — it crashed the subagent with a host-internal
+// error. The replacement records a route with `agent.model.select()`, which the
+// NEXT step preparation reads. These tests pin that contract.
+
+test("0.2.2: a failure the host's own retry recovers does NOT move the route", async (t) => {
+	// `dsh-llm-retry` is mounted in the base composition and owns backoff. A
+	// transient failure it retries must leave the route alone; switching on a
+	// blip would drag the subagent onto another provider for no reason, and —
+	// because `select()` persists into the next step — it would do so even after
+	// the retry succeeded.
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeStepRouteAgent("sub-1");
+		const action = await dispatchRequestError(harness.root, agent, { downstream: { kind: "retry" } });
+		assert.deepEqual(action, { kind: "retry" }, "the downstream retry must be honoured");
+		assert.deepEqual(agent.selections, [], "a recovered request must not change the route");
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("0.2.2: an unrecovered failure selects the next pool route for the NEXT step", async (t) => {
+	// Nothing downstream retries, so this route is why the turn dies. The
+	// original error is surfaced (it names the real cause) and the next untried
+	// entry is recorded for whatever step or turn comes next.
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeStepRouteAgent("sub-1");
+		const action = await dispatchRequestError(harness.root, agent);
+		assert.equal(action, undefined, "the real error must surface, not a host-internal guard error");
+		assert.deepEqual(agent.selections, [{ provider: "deepseek-official", model: "deepseek-v4-flash" }]);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("0.2.2: agent/request returns the step's route untouched, so the host guard never fires", async (t) => {
+	// The regression this replaces: returning a different provider/model here
+	// made the host throw. Whatever the pool state, the seed must come back
+	// unchanged on a host that fixes the step's route.
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeStepRouteAgent("sub-1");
+		await dispatchRequestError(harness.root, agent);
+		const seed = { provider: "deepseek-official", model: "deepseek-v4-pro", maxTokens: 4096 };
+		const config = await dispatchRequest(harness.root, agent, seed);
+		assert.deepEqual(config, seed, "the step's route must be preserved exactly");
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("0.2.2: a route is selected at most once per step", async (t) => {
+	// Re-selecting on every retry of the same step would walk the pool while the
+	// step can never use any of it, leaving an arbitrary last entry pending.
+	const harness = await createHarness({
+		...SECTION_WITH_MODELS,
+		models: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-lite"]
+	});
+	try {
+		const agent = makeStepRouteAgent("sub-1");
+		await dispatchRequestError(harness.root, agent, { step: 1 });
+		await dispatchRequestError(harness.root, agent, { step: 1 });
+		assert.equal(agent.selections.length, 1, "one switch per step");
+		// A later step is a new decision point, so it may select again.
+		await dispatchRequestError(harness.root, agent, { step: 2 });
+		assert.equal(agent.selections.length, 2, "the next step may pick another entry");
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("0.2.2: the pool still bounds the switches, and exhaustion surfaces the real error", async (t) => {
+	const harness = await createHarness(SECTION_WITH_MODELS); // two entries
+	try {
+		const agent = makeStepRouteAgent("sub-1");
+		await dispatchRequestError(harness.root, agent, { step: 1 });
+		// entries.length - 1 === 1: the pool is spent.
+		const action = await dispatchRequestError(harness.root, agent, { step: 2 });
+		assert.equal(action, undefined, "an exhausted pool must not invent a retry");
+		assert.equal(agent.selections.length, 1, "no candidate beyond the pool may be selected");
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("0.2.2: a refused select() is reported and never swallows the original failure", async (t) => {
+	// If the host exposes `model.select` but rejects the call, the user must
+	// still see WHY the subagent died (quota/auth), not a secondary error.
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeStepRouteAgent("sub-1", { selectThrows: new Error("model/selection rejected") });
+		const action = await dispatchRequestError(harness.root, agent);
+		assert.equal(action, undefined, "the original error must still surface");
+		assert.ok(
+			harness.warnings.some((line) => line.includes("could not pre-select")),
+			`expected a diagnostic about the refused selection, got: ${JSON.stringify(harness.warnings)}`
+		);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("0.2.2: AUTH still switches but stays loudly visible", async (t) => {
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeStepRouteAgent("sub-1");
+		await dispatchRequestError(harness.root, agent, {
+			provider: "deepseek-official",
+			failure: { message: "unauthorised", code: "AUTH" }
+		});
+		assert.deepEqual(agent.selections, [{ provider: "deepseek-official", model: "deepseek-v4-flash" }]);
+		assert.ok(
+			harness.warnings.some((line) => line.includes("credentials") && line.includes("NOT a connection problem")),
+			"an auth switch must name the refused credentials"
+		);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("0.2.2: the main agent loop is still never touched", async (t) => {
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const rootAgent = makeStepRouteAgent("main-agent", { origin: "root" });
+		await dispatchRequestError(harness.root, rootAgent);
+		assert.deepEqual(rootAgent.selections, [], "the parent loop keeps its route");
 	} finally {
 		await disposeHarness(harness);
 	}

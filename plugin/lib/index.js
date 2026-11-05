@@ -200,6 +200,27 @@ const AUTH_FAILURE_CODES = ["AUTH", "INVALID_CREDENTIAL"];
 /** Every failure code that may trigger a switch. */
 const FAILOVER_ELIGIBLE_CODES = [...FAILOVER_TRIGGER_CODES, ...AUTH_FAILURE_CODES];
 
+/**
+ * Whether this host fixes the step's route and only sanctions changing it
+ * through `agent.model.select()`.
+ *
+ * DSH 0.2.2 replaced the per-request route with a STEP-FIXED selection:
+ * `preStep()` reads `agent.model.current()` once and hands the result to the
+ * `agent/request` waterfall as `modelSelection`, which the type documents as
+ * "captured step selection, retained across retries". A listener that returns
+ * a different provider/model now throws
+ * `agent "X": agent/request proposed "p/m" after step preparation fixed "a/b"`
+ * — the waterfall itself is marked `@deprecated` for this use ("a replacement
+ * may adjust controls but must keep the provider, model, and reasoning effort
+ * selection").
+ *
+ * `agent.model` does not exist before 0.2.2, so this is a capability probe
+ * rather than a version compare: one plugin build serves both hosts.
+ */
+function fixesStepRoute(agent) {
+	return typeof agent?.model?.select === "function";
+}
+
 /** True when a failure code is an auth-class failure (picks the log wording). */
 function isAuthFailure(code) {
 	return AUTH_FAILURE_CODES.includes(code);
@@ -381,6 +402,95 @@ function nextFailoverIndex(view, agent, current) {
 }
 
 /**
+ * Record a healthy route for the steps that FOLLOW a failure (DSH 0.2.2+).
+ *
+ * On these hosts the failed request cannot be re-routed: `preStep()` captured
+ * the step's selection and `agent/request` must hand it back unchanged, so a
+ * retry re-issues to the same dead route. The one sanctioned lever is
+ * `agent.model.select()`, whose result is read at the NEXT step preparation.
+ *
+ * Therefore:
+ *
+ * 1. ask the rest of the waterfall first. `dsh-llm-retry` owns backoff and is
+ *    mounted in the base composition; a transient failure it recovers must NOT
+ *    move the route, and pre-empting it here (as the pre-0.2.2 path does, where
+ *    the retry carried a new route) would strip the backoff for no gain.
+ * 2. if nothing retries, this route is the reason the turn dies. Select the
+ *    next untried pool entry so any later step or turn starts on a healthy
+ *    route, and let the ORIGINAL error surface — it names the real cause
+ *    (quota, auth), unlike the host's "after step preparation fixed" guard.
+ *
+ * The visible consequence, stated plainly: on 0.2.2 a permanently failing
+ * route ends the current turn instead of being transparently continued on
+ * another provider. The pool still governs every SUBSEQUENT request, so a
+ * continuable subagent resumes on a healthy route and the parent's next
+ * follow-up is not stuck on the dead one.
+ */
+async function switchForNextStep(ctx, state, pending, payload, next) {
+	const { agent, step, failure, signal } = payload;
+	const downstream = await next();
+	if (signal?.aborted) return downstream;
+	// Someone downstream (llm-retry) is recovering this request: leave the
+	// route alone, since the failure may be transient.
+	if (downstream?.kind === "retry") return downstream;
+	// Re-read the view: the settings may have changed while we awaited.
+	const view = failoverView(state);
+	if (view === void 0) return downstream;
+	const current = pending.get(agent.id);
+	if (current !== void 0 && current.step === step) return downstream; // already switched for this step
+	if (current !== void 0 && current.count >= view.entries.length - 1) return downstream; // pool exhausted
+	const index = nextFailoverIndex(view, agent, current);
+	const target = view.entries[index];
+	if (target === void 0) return downstream;
+	const tried = new Set(current?.tried ?? []);
+	tried.add(index);
+	pending.set(agent.id, {
+		index,
+		tried,
+		count: (current?.count ?? 0) + 1,
+		step
+	});
+	try {
+		agent.model.select({
+			provider: target.provider,
+			model: target.model,
+			...(target.reasoningEffort === void 0 ? {} : { reasoningEffort: target.reasoningEffort })
+		});
+	} catch (error) {
+		// A host that exposes `model.select` but refuses this call is not a
+		// reason to swallow the real failure — report it and let the original
+		// error through.
+		ctx.logger.warn(
+			`[dsh-subagent-default-model] could not pre-select %s/%s after %s; the subagent keeps its route: %s`,
+			target.provider,
+			target.model,
+			failure.code,
+			error instanceof Error ? error.message : String(error)
+		);
+		return downstream;
+	}
+	ctx.logger.warn(
+		`[dsh-subagent-default-model] subagent %s failed with %s on turn %d step %d; %s/%s is selected for its NEXT step (this host fixes the route of the failed step, so the current turn cannot continue on it)`,
+		agent.id,
+		failure.code,
+		payload.turn,
+		step,
+		target.provider,
+		target.model
+	);
+	if (isAuthFailure(failure.code)) {
+		ctx.logger.warn(
+			`[dsh-subagent-default-model] the credentials for the failing provider %s were refused (%s). This is NOT a connection problem: that provider's API key is likely invalid, expired, or unauthorised. The next step will use %s/%s — verify the failing provider's key, because every request routed to it will fail until it is fixed.`,
+			payload.provider ?? "(unknown)",
+			failure.code,
+			target.provider,
+			target.model
+		);
+	}
+	return downstream;
+}
+
+/**
  * Install the subagent-only failover waterfalls. Both listeners no-op for the
  * main agent (origin gate) and for subagents whose failure code is not a
  * connection failure, so a broken subagent primary is re-tried on the next
@@ -394,13 +504,17 @@ function installFailover(ctx, state) {
 	// After a model failure on a subagent loop: advance the pool index and ask
 	// the loop to rebuild the request (`{ kind: "retry" }`). When every pool
 	// entry has been tried, let the real error surface untouched.
-	const disposeRequestError = ctx.on("agent/request-error", (payload, next) => {
+	const disposeRequestError = ctx.on("agent/request-error", async (payload, next) => {
 		const view = failoverView(state);
 		if (view === void 0) return next();
 		const { agent, turn, step, failure, signal } = payload;
 		if (signal?.aborted) return next();
 		if (!isSubagentAgent(agent)) return next();
 		if (failure === void 0 || !FAILOVER_ELIGIBLE_CODES.includes(failure.code)) return next();
+		// 0.2.2+ fixed the route for the whole step, so the route cannot be
+		// swapped on the retry this hook used to request. See
+		// `switchForNextStep` for what replaces it.
+		if (fixesStepRoute(agent)) return switchForNextStep(ctx, state, pending, payload, next);
 		const current = pending.get(agent.id);
 		// The primary already failed (that triggered the first switch), so the
 		// remaining candidates are the other pool entries: at most
@@ -464,6 +578,11 @@ function installFailover(ctx, state) {
 		if (view === void 0) return next();
 		const { agent } = payload;
 		if (!isSubagentAgent(agent)) return next();
+		// 0.2.2+ : the route is fixed for the step and the host throws when a
+		// listener changes it. `switchForNextStep` already recorded the new
+		// selection, which the NEXT step reads; returning the seed untouched is
+		// the only correct answer here.
+		if (fixesStepRoute(agent)) return next();
 		const current = pending.get(agent.id);
 		if (current === void 0) return next();
 		const target = view.entries[current.index];

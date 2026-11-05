@@ -1,5 +1,70 @@
 # Changelog
 
+## 2.1.13 (2026-11-05)
+
+适配宿主 **0.2.2-rc.1**。这次不是行号位移，而是**一条契约收紧了语义**。
+
+### Fixed
+
+**故障转移在 0.2.2 上会抛宿主内部错误。**
+
+0.2.2 把模型路由从「每次请求由 `agent/request` 瀑布决定」改成「**每个 step 在准备阶段固定**」：
+
+- `preStep()` 里 `const selection = this.model.current()` 先捕获，随后一路传递，**重试复用同一份**（类型文档：*captured step selection, retained across retries*）；
+- `prepareRequest()` 用它拼出 `seedConfig`，并对瀑布返回的配置新增硬校验——改 provider/model 直接抛 `agent "X": agent/request proposed … after step preparation fixed …`；
+- 该瀑布本身被标 **`@deprecated`**：*a replacement may adjust controls but must keep the provider, model, and reasoning effort selection*，并指明唯一替代是 `agent.model.select()`。
+
+本插件的故障转移恰好就是「在 `agent/request` 里把 seed 换成池中下一个模型」，因此在 0.2.2 上**必然抛错**——一次额度耗尽会变成一句难懂的宿主内部错误，比不修更糟。
+
+### Changed
+
+**双路径故障转移，按能力探测自动选择**（`typeof agent.model?.select === "function"`；`agent.model` 在 0.2.2 之前不存在，无需版本比较）：
+
+- **旧宿主（≤0.2.1）**：行为完全不变，失败的那次请求当场换模型重试。
+- **新宿主（≥0.2.2）**：
+  1. 先 `await next()` 让下游处理。`dsh-llm-retry` 已在 `dsh-base` 组合里默认启用并负责退避；**瞬时失败不该换路**——`select()` 会持久化到下一步，重试成功后仍会留下一次无辜的切换。
+  2. 下游不重试才说明这条路真的死了：用 `agent.model.select()` 为**下一个 step / turn** 预选池中下一条健康路由，然后**放行原始错误**（它才说明真实原因：配额、密钥）。
+  3. 每个 step 最多选一次；`agent/request` 在新宿主上直接 `return next()`，绝不改写路由。
+  4. `select()` 被宿主拒绝时打 warn 并照常放行原始错误，绝不吞掉真实原因。
+
+**必须承认的代价**：0.2.2 上「同一次请求内透明续跑」无法实现——失败的那一步路由已锁定，`select()` 只影响下一步。因此永久性失败（配额耗尽、密钥失效）会结束当前 turn，而不再换供应商续跑；可续跑的 subagent 下次被唤醒时已在健康路由上。这是宿主收回的能力，不是实现取舍，README 中英文两版都已如实写明。
+
+### Compatibility
+
+`ADMITTED_HOST_VERSIONS` 补入 `0.2.2-rc.1`（自检用例先失败后通过，符合预期）。
+
+本轮逐包比对 rc.5 → 0.2.2-rc.1：`desktop-runtime.json` 的共享包从 305 增至 329，几乎所有包都有改动，但**只有 `dsh-agent-loop` 这一处契约收紧**。其余依赖面实测完好：
+
+| 依赖面 | 结论 |
+| --- | --- |
+| `agent/pre-step` 瀑布 | 完好（payload 新增 `modelSelection`，增量） |
+| `agent/request-error` 瀑布 | 完好（payload 新增 `provider` / `retryPolicy`） |
+| `agent.inbox.prepend/claim` | 完好（内部重构 `projections` → `readState`，API 未变） |
+| `subagents.getProvider` / `startActivation` | 完好 |
+| provider 的 `inheritsParentContext` | 完好（fork provider 仍为 `true`，`applyToForkChildren` 门禁依据不变） |
+| `session.requestContext()` | 完好（`:1627` → `:1636`） |
+| 客户端槽位 / locale / `settings.mutate` | 完好（`chat-subagent-model-notice` 实测 active） |
+| `request/header` 的 `reason` 取值 | 完好（`initial` / `resume` / `change` / `series` 未变，对话行仍正常） |
+
+实测（宿主机 0.2.2-rc.1）：`subagent` 子代理拿到池中 `minmax/MiniMax-M3.1-Flash`；`subagent_fork` 子代理按门禁继承父路由 `dsh-opencode-go`，未注入。
+
+### Tests
+
+`172/172`（164 → 172），`skip 0`。新增 8 个用例覆盖新宿主路径：
+
+- 下游重试成功时**不得**换路（否则重试成功后仍会留下一次无辜切换）
+- 无人重试时选中下一条池内路由，并**放行原始错误**（而非宿主 guard 错误）
+- `agent/request` 必须**原样返回**该 step 的路由（这条正是回归本体）
+- 同一 step 最多选一次；下一个 step 可再选
+- 池耗尽不再选新候选、不再伪造 retry
+- `select()` 被拒时打 warn 且不吞原始错误
+- AUTH 仍切换，且仍打「密钥可能无效」告警
+- 主代理循环仍不受影响
+
+变异验证 4/4 命中：①新宿主仍走旧的 `agent/request` 覆盖路径 → 5 个用例失败；②`agent/request` 不提前 return → 原样返回用例失败；③忽略下游 retry → 不换路用例失败；④去掉「每 step 一次」限制 → 该用例失败。
+
+> 夹具也被修了：原来它只驱动 `agent/request` 并断言返回值变了，模拟的是**旧宿主契约**，所以在会抛错的新宿主上依然全绿。当宿主给契约加硬校验时，夹具必须把校验也加进去，否则它只是在自证清白。
+
 ## 2.1.12 (2026-10-30)
 
 ### Fixed
