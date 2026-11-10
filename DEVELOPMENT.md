@@ -430,6 +430,28 @@ inject(key, callback) {
 
 > 这条教训的普遍形式：**探测失败必须往「能用」的方向失败**。写成「探测不到就不注册」，任何探测缺陷都会静默关闭功能；写成「拿不准就注册，让宿主决定」，最坏情况只是宿主忽略一次注册。
 
+### 案例七：往 inbox 里塞消息，永远慢一步（与案例一同一根源的另一面）
+
+**缺陷**：注入给子代理的路由行晚一步到达，两步以内结束的子代理完全看不到。
+
+案例一记的是「`claim()` 会把 inbox 抽干，所以用『队列里还有没有副本』去重恒为 false」。这次的教训是同一行的**另一面**：`claim()` 在 waterfall **之前**运行，所以在 `agent/pre-step` 里 `inbox.prepend("next-step", …)` 的消息，只能被**下一次** `preStep()` 认领。
+
+```js
+// preStep()
+const claimed = this.inbox.claim(target, position.turn);   // 先抽干 ← 此刻之前的 prepend 已被取走
+const decision = await this.dispatch.waterfall("agent/pre-step", { messages: claimed, ... });
+```
+
+**正确通道是 `decision.messages`**：它就是本步要发送的列表，而且 `step()` 会把它逐条 append 成 `user/message`，所以「当下可见」与「持久进历史」一次完成：
+
+```js
+for (const message of decision.messages) this.session.append("user/message", message, { surfaceOp: "append" });
+```
+
+**但这仍不能让它出现在第 1 步**：路由要等本步的请求发出后才有（`request/context`），`preStep` 在它之前。任何「第 1 步就报路由」的实现都只能拿派发时种子去猜，而那正是本项目修过的错标 bug。
+
+> 判据：**注入类需求先问「宿主在哪一刻读取我写入的东西」**，而不是「我在哪一刻写最方便」。写入时机早于读取时机 = 静默晚一步；晚于 = 永远不生效。这两个方向都只能靠读宿主源码确认，读不出来就该写一个探针用例。
+
 ### 案例六：把「界面上有东西」当成「新代码生效」
 
 不是夹具问题，但同样花了时间。

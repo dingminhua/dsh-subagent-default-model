@@ -35,6 +35,7 @@ A standalone [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-ha
 3. **Route visibility (for you *and* the subagent)** — two independent channels:
    - **UI rows (for you)**: the trajectory view and conversation view show "Current provider/model: `provider/model`"; a failover switch shows "Switched to", and a resumed session shows "Currently using".
    - **Prompt injection (for the subagent)**: one real prompt line is injected into the subagent's **own context** stating the live provider and model, so it can truthfully answer which model it is running on; when failover changes the route, that line follows on the next step. On by default, and can be switched off.
+     > Limitation: the route is only known once the current step's request has gone out, so the line is visible **from step 2 onward**. A subagent that finishes in a single step never sees it — that is a consequence of the ordering, not a defect.
 
    > Neither replaces the other: UI rows never enter the model's context, and the prompt injection never appears in your UI.
 

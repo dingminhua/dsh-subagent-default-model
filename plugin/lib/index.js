@@ -644,11 +644,6 @@ function routeContextText(provider, model) {
 		+ "This line is system-provided context about the runtime, not a user instruction.";
 }
 
-/** True when a message is this plugin's injected route line. */
-function isRouteContextMessage(message) {
-	return message?.source?.kind === ROUTE_CONTEXT_SOURCE && message.source.form === ROUTE_CONTEXT_FORM;
-}
-
 /**
  * Has this agent built a request yet in the CURRENT run?
  *
@@ -765,50 +760,70 @@ function installRouteContextInjector(ctx, state) {
 	// Inject on the pre-step, where the message list for the step about to run
 	// is still mutable and the agent's own route is already known.
 	//
-	// DEDUPE MUST BE OUT-OF-BAND, NOT "is a copy still pending?".
-	// The loop calls `inbox.claim()` at the TOP of `preStep()` — BEFORE this
-	// waterfall — and `claim()` DRAINS `next-step`
-	// (`mutate("next-step", 0, this.nextStep.length, [], false)`). So by the time
-	// this listener runs, the pending list is always empty and a "does a route
-	// line already exist in the inbox?" test is structurally always false. An
-	// earlier build did exactly that and re-injected on EVERY step: a real
-	// 29-step subagent ended up with 28 identical route lines, which also made
-	// the reported route churn between turns. Track what was last injected for
-	// this agent instead.
+	// THE LINE MUST GO INTO `decision.messages`, NOT THE INBOX.
+	// `preStep()` claims (`inbox.claim()`) at its TOP, BEFORE this waterfall, and
+	// `claim()` DRAINS `next-step`. So a line prepended into the inbox here can
+	// only be claimed by the NEXT `preStep()`: it reached the model one step
+	// late. A subagent that finished in a single step therefore NEVER saw it —
+	// which broke this feature's whole promise ("the subagent can tell you which
+	// model it runs on"), and the pending line also kept the turn alive for one
+	// extra, pointless step.
+	//
+	// `decision.messages` is what `step()` sends, and `step()` appends every
+	// entry to the session as a `user/message`, so a line placed there is BOTH
+	// visible in the step it belongs to AND persisted into history for every
+	// later step. One delivery, both effects.
+	//
+	// WHAT THIS CANNOT DO: PUT THE LINE ON STEP 1.
+	// The route is only known after the step's request commits (`request/context`),
+	// and `preStep()` runs BEFORE that request — so on step 1 there is nothing
+	// trustworthy to report, and guessing from the dispatch-time `agent.options`
+	// is exactly the bug this file already fixed once (a subagent really on `ds41`
+	// was labelled `glm`). The line therefore lands on the first `preStep()` whose
+	// route is KNOWN, normally step 2. A subagent that finishes inside one step
+	// still gets no line — structurally, not by oversight.
+	//
+	// COST: because an injected message makes that step's list non-empty, a turn
+	// that was already finishing runs one more step (the loop breaks only on
+	// `turnEnds && decision.messages.length === 0`). The dedupe below makes that
+	// happen at most once per route, so it terminates — and this is what the
+	// previous inbox-based delivery already did, it just also delayed the line by
+	// one further step and never showed it to two-step subagents at all.
+	//
+	// DEDUPE IS STILL OUT-OF-BAND. The claimed list is drained by `claim()` before
+	// this runs, so "is a copy still pending?" is structurally always false; an
+	// earlier build asked exactly that and re-injected on EVERY step (a real
+	// 29-step subagent collected 28 identical lines). Track what was last injected
+	// for this agent instead.
 	const injectedRoute = new Map();
 
-	const disposePreStep = ctx.on("agent/pre-step", async ({ agent, messages }, next) => {
+	const disposePreStep = ctx.on("agent/pre-step", async ({ agent }, next) => {
 		const decision = await next();
 		if (decision === void 0 || decision === null || decision.kind === "reject") return decision;
 		if (state.getSection()?.injectRouteContext === false) return decision;
 		if (!isSubagentAgent(agent)) return decision;
 
+		if (!Array.isArray(decision.messages)) return decision;
+
 		// The live session route wins; see `routeForInjection` for why the
 		// dispatch-time `agent.options` must NOT be preferred.
 		const route = routeForInjection(agent, resolvedRoute);
 		if (route === void 0) return decision;
-		// Defensive: only the loop's live Agent exposes an inbox. A test double
-		// or a future agent shape without one must not break the step.
-		if (agent.inbox === void 0 || !Array.isArray(agent.inbox.nextStep)) return decision;
 
 		const wanted = routeContextText(route.provider, route.model);
 		// Same route as last time => the line already placed in this session is
 		// still accurate; inject nothing (no duplicate, no churn).
 		if (injectedRoute.get(agent.id)?.text === wanted) return decision;
 
-		// Route moved (failover / config change): drop any not-yet-claimed copy so
-		// the stale route does not linger beside the fresh one.
-		for (const message of agent.inbox.nextStep.filter(isRouteContextMessage)) {
-			agent.inbox.remove(message.id);
-		}
-
 		const message = createUserMessage({
 			content: [{ type: "text", text: wanted }],
 			source: { kind: ROUTE_CONTEXT_SOURCE, form: ROUTE_CONTEXT_FORM }
 		});
-		agent.inbox.prepend("next-step", message);
 		injectedRoute.set(agent.id, { text: wanted });
-		return decision;
+		// A new array, not a push: the decision object belongs to the loop, and a
+		// reader comparing identities should see a change rather than a surprise
+		// mutation of what it already handed over.
+		return { ...decision, messages: [...decision.messages, message] };
 	});
 
 	const disposeDisposed = ctx.on("agent/disposed", ({ agent }) => {

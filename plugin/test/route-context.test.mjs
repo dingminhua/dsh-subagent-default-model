@@ -153,43 +153,75 @@ async function dispatchRequest(ctx, agent, seed, { turn = 1, step = 1 } = {}) {
  * @returns the decision, so callers can also assert the injector is transparent
  *   (it must not disturb the messages the loop itself assembled).
  */
-function dispatchPreStep(ctx, agent, messages = [], { turn = 1, step = 1 } = {}) {
+/**
+ * A message that makes a step "real work" the way a user prompt does.
+ *
+ * A step with an EMPTY message list is the loop's wrap-up `preStep()` after the
+ * final answer, and injecting there would defeat its termination test
+ * (`turnEnds && decision.messages.length === 0` => break), so the injector skips
+ * it by design. Tests that mean "a normal step" therefore must supply at least
+ * one message; pass `[]` only when the wrap-up step is the thing under test.
+ */
+function stepMessage(text = "do the task") {
+	return { id: `step-${++messageSeq}`, role: "user", content: [{ type: "text", text }], source: { kind: "user" } };
+}
+
+async function dispatchPreStep(ctx, agent, messages = [stepMessage()], { turn = 1, step = 1 } = {}) {
 	// Faithful ordering: the real loop CLAIMS (drains) the inbox at the top of
 	// `preStep()`, then runs this waterfall. Skipping the claim is what hid the
 	// duplicate-injection bug, so it is modelled here by default.
 	const claimed = agent.inbox.claim();
-	return ctx.waterfall("agent/pre-step", {
+	const decision = await ctx.waterfall("agent/pre-step", {
 		agent,
 		messages: [...claimed, ...messages],
 		turn,
 		step,
 		signal: new AbortController().signal
 	}, () => Promise.resolve({ messages: [...claimed, ...messages], kind: "continue" }));
+	// The REAL loop calls `step(decision)`, which appends EVERY entry of
+	// `decision.messages` to the session as a `user/message` (`firstAttempt`
+	// branch). That append is what makes an injected line permanent history for
+	// later steps, so the fixture must model it — otherwise "the line is still
+	// visible on step 3" could only be faked by re-injecting.
+	if (decision && Array.isArray(decision.messages)) {
+		for (const message of decision.messages) {
+			agent.history.push(message);
+			if (isRouteContext(message)) agent.injectedRouteLog.push(message);
+		}
+	}
+	return decision;
+}
+
+/** True when a message is this plugin's injected route line. */
+function isRouteContext(message) {
+	return message?.source?.kind === "plugin:dsh-subagent-default-model"
+		&& message.source.form === "route-context";
 }
 
 /**
- * Every route line the plugin has PLACED INTO this agent so far.
+ * Every route line the plugin has DELIVERED to this agent so far.
  *
- * Records at placement time rather than reading `inbox.nextStep` afterwards,
- * because the real loop drains that list at the top of every `preStep()`. A
- * post-hoc read therefore sees only the current step's line — which is exactly
- * the blind spot that let the duplicate-injection bug ship (28 copies in a
- * 29-step run all looked like "exactly one").
+ * "Delivered" means it was part of a step's `decision.messages` — the array the
+ * loop actually sends and then persists. Counting deliveries (not the inbox)
+ * is what makes "exactly once" meaningful: the old inbox-based bug shipped 28
+ * copies in a 29-step run precisely because a post-claim read could not see it.
  */
 function injectedRouteMessages(agent) {
 	return agent.injectedRouteLog ?? [];
 }
 
-/** Wrap an agent so every route line it receives is recorded. */
+/** Every route line still VISIBLE in the agent's context (persisted history). */
+function visibleRouteMessages(agent) {
+	return (agent.history ?? []).filter(isRouteContext);
+}
+
+/** Give an agent the two ledgers the fixture mirrors from the real loop. */
 function recordInjections(agent) {
-	const log = [];
-	agent.injectedRouteLog = log;
-	const originalPrepend = agent.inbox.prepend.bind(agent.inbox);
-	agent.inbox.prepend = (target, message) => {
-		if (message?.source?.kind === "plugin:dsh-subagent-default-model"
-			&& message.source.form === "route-context") log.push(message);
-		return originalPrepend(target, message);
-	};
+	agent.injectedRouteLog = [];
+	// `step()` appends `decision.messages` to the session; model that as history
+	// so "is the line still there on a later step?" is answerable without
+	// assuming re-injection.
+	agent.history = [];
 	return agent;
 }
 
@@ -439,7 +471,18 @@ test("the injector does not disturb the loop's own assembled messages", async ()
 	await dispatchRequest(harness.root, agent, { provider: "workbuddy", model: "deepseek-v4.1-flash" });
 	const decision = await dispatchPreStep(harness.root, agent, own);
 
-	assert.deepEqual(decision.messages, own, "the returned decision passes the loop's messages through");
+	// The contract is "preserve, then append" — not "return the same array".
+	// Dropping or reordering the loop's own messages would corrupt the step; the
+	// route line belongs at the END, after the real work it describes.
+	assert.deepEqual(
+		decision.messages.slice(0, own.length),
+		own,
+		"the loop's own messages must survive untouched and in order"
+	);
+	assert.equal(decision.messages.length, own.length + 1, "exactly one line is appended");
+	const tail = decision.messages[decision.messages.length - 1];
+	assert.ok(isRouteContext(tail), `the appended message must be the route line, got: ${JSON.stringify(tail)}`);
+	assert.notStrictEqual(decision.messages, own, "a new array is returned (the loop's array is not mutated)");
 	await disposeHarness(harness);
 });
 
@@ -630,5 +673,74 @@ test("REGRESSION (host 0.2.1-rc.2): a restored session whose PREVIOUS run reques
 		!injected[0].content[0].text.includes("old-provider"),
 		"the previous run's route must never surface"
 	);
+	await disposeHarness(harness);
+});
+
+// ── the delivery mechanism: same step, then persisted ──────────────────────
+
+test("the line is delivered in the SAME step whose route became known (not one step later)", async () => {
+	// The regression this guards: the injector used to prepend into
+	// `inbox.next-step`, but `preStep()` claims (drains) that list BEFORE this
+	// waterfall runs — so the line could only be claimed by the NEXT preStep and
+	// reached the model one step late. A two-step subagent never saw it at all.
+	const harness = await createHarness(ENABLED);
+	const agent = makeAgent("sub-same-step");
+
+	await dispatchRequest(harness.root, agent, { provider: "workbuddy", model: "deepseek-v4.1-flash" });
+	const decision = await dispatchPreStep(harness.root, agent, undefined, { step: 2 });
+
+	const delivered = decision.messages.filter(isRouteContext);
+	assert.equal(delivered.length, 1, "the line must be part of THIS step's messages");
+	assert.ok(
+		delivered[0].content[0].text.includes("workbuddy/deepseek-v4.1-flash"),
+		"and it must carry the live route"
+	);
+	// The old mechanism would have left it pending in the inbox instead.
+	assert.equal(agent.inbox.nextStep.length, 0, "nothing may be left pending in the inbox");
+	await disposeHarness(harness);
+});
+
+test("the delivered line is persisted, so later steps still see it without re-injecting", async () => {
+	// `step()` appends every `decision.messages` entry to the session as a
+	// `user/message`. That is why one delivery is enough: step 3 reads history.
+	const harness = await createHarness(ENABLED);
+	const agent = makeAgent("sub-persist");
+
+	await dispatchRequest(harness.root, agent, { provider: "workbuddy", model: "deepseek-v4.1-flash" });
+	await dispatchPreStep(harness.root, agent, undefined, { step: 2 });
+	// Steps 3 and 4 carry no new claimed messages (a tool-using step looks
+	// exactly like this), so nothing is injected again.
+	await dispatchPreStep(harness.root, agent, [], { step: 3 });
+	await dispatchPreStep(harness.root, agent, [], { step: 4 });
+
+	assert.equal(injectedRouteMessages(agent).length, 1, "exactly ONE delivery across the whole run");
+	assert.equal(
+		visibleRouteMessages(agent).length,
+		1,
+		"and exactly one copy in history — no pile-up, no disappearance"
+	);
+	await disposeHarness(harness);
+});
+
+test("a route change mid-run delivers the NEW route and keeps only one visible line per route", async () => {
+	const harness = await createHarness(ENABLED);
+	const agent = makeAgent("sub-change");
+
+	await dispatchRequest(harness.root, agent, { provider: "workbuddy", model: "deepseek-v4.1-flash" });
+	await dispatchPreStep(harness.root, agent, undefined, { step: 2 });
+
+	// Failover swaps the settled route.
+	await dispatchRequest(harness.root, agent, { provider: "other-provider", model: "gpt-5.6" });
+	const second = await dispatchPreStep(harness.root, agent, [], { step: 3 });
+
+	const delivered = second.messages.filter(isRouteContext);
+	assert.equal(delivered.length, 1, "the new route is delivered exactly once");
+	assert.ok(delivered[0].content[0].text.includes("other-provider/gpt-5.6"), "and it is the NEW route");
+
+	// History keeps the earlier line (it was already sent; a message cannot be
+	// unsent), but the new route is never duplicated.
+	const visible = visibleRouteMessages(agent).map((m) => m.content[0].text);
+	assert.equal(visible.filter((t) => t.includes("other-provider/gpt-5.6")).length, 1);
+	assert.equal(injectedRouteMessages(agent).length, 2, "one delivery per route, never per step");
 	await disposeHarness(harness);
 });
