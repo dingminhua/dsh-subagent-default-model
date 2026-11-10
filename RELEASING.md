@@ -443,6 +443,21 @@ npm notice Your package is being processed and may take a few minutes to become 
 
 > `npm notice` 前缀的行都是**信息**，不是错误。只有 `npm error` 开头才是失败。
 
+### `npm publish` 必须由人在终端里跑
+
+不要由脚本、后台任务或 agent 去执行 `npm publish`。npm 11 会把认证链接打码成 `***`：
+
+```text
+npm error Open this URL in your browser to authenticate:
+npm error   https://www.npmjs.com/auth/cli/***
+```
+
+也就是说**非交互环境下你拿不到那个链接**，命令只会以 `EOTP` 结束，什么都没上传（2.2.1 实际发生过一次）。交互终端里链接是完整的，人能点开完成 2FA。
+
+> 判别：`npm error code EOTP` 且链接含 `***` = 没人能完成认证，必然失败；链接完整 = 可正常授权。前者不要反复重试，改为让人在终端里跑。
+>
+> 另外，`+ pkg@X.Y.Z` 回执之后 registry 仍可能查不到（2.2.1 的元数据约 2 分钟后才出现，期间 `PRESENT=False`）。按上面的判据轮询即可，不要据此改版本号。
+
 ### 等发布传播：不要用后台任务等，直接查
 
 「元数据先到、tarball 后到」意味着发布后往往需要等几分钟到十几分钟。**等待本身不需要脚本托管**——不要为此起一个 `sleep 300` 的后台进程：会话重启、进程收尾都会让它消失，届时你既拿不到结果、也不知道它是否跑过（本仓实际发生过一次）。
