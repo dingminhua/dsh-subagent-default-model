@@ -278,7 +278,7 @@ test("round-robin: walks the pool and passes through when exhausted", async () =
 
 // ── random strategy ─────────────────────────────────────────────────────────
 
-test("random strategy picks a model from the pool (no dedup check)", async () => {
+test("random strategy picks a model from the pool, never the one that just failed", async () => {
 	const harness = await createHarness({
 			provider: "deepseek-official",
 			model: "deepseek-v4-pro",
@@ -298,8 +298,11 @@ test("random strategy picks a model from the pool (no dedup check)", async () =>
 		// Randomly picked from the 3-entry pool; the provider/model should resolve.
 		assert.ok(config.provider !== void 0);
 		assert.ok(config.model !== void 0);
-		// The model must be one of the entries in the pool.
+		// The model must be one of the entries in the pool, and NOT the served
+		// route: a random pick that repeats the failing entry makes
+		// `model.select()` a no-op (it compares equal and appends nothing).
 		assert.ok(["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-reasoner"].includes(config.model));
+		assert.notStrictEqual(config.model, "deepseek-v4-pro");
 	} finally {
 		await disposeHarness(harness);
 	}
@@ -602,3 +605,490 @@ test("0.2.2: a refused select() does not retire the candidate or spend the pool"
 		await disposeHarness(harness);
 	}
 });
+
+// ── auto-continuation after a switch (2.2.3) ────────────────────────────────
+//
+// THE FAILURE THESE COVER. `agent.model.select()` only affects the NEXT step
+// preparation. A one-shot subagent never starts one, so without a wake the pool
+// switches to a healthy route that is never used and the child's task simply
+// ends. Measured live before this existed: minmax returned 429 (quota), failover
+// selected the healthy entry, and the child still ended `error` with no further
+// request.
+
+/** An agent that records `followup` calls, as the host's continuable children do. */
+function makeContinuableAgent(id, options = {}) {
+	const agent = makeStepRouteAgent(id, options);
+	agent.followups = [];
+	agent.followup = (message) => { agent.followups.push(message); };
+	// The real host exposes a per-agent Cordis context. The wake subscribes to
+	// `agent/status` and fires when the agent goes idle — after the failed turn
+	// has retired and outside any session append (a `turn/end` listener would be
+	// rejected by the store's reentrancy guard, see lib/index.js). This fixture
+	// records listeners so a test can emit that transition deterministically.
+	const listeners = new Map();
+	agent.ctx = {
+		on(name, handler) {
+			const set = listeners.get(name) ?? new Set();
+			set.add(handler);
+			listeners.set(name, set);
+			return () => set.delete(handler);
+		}
+	};
+	agent.emitSession = (session, event) => {
+		for (const handler of [...(listeners.get("session/event") ?? [])]) handler(session, event);
+	};
+	// The wake listens on `agent/status`, not `session/event`.
+	agent.emitStatus = (payload) => {
+		for (const handler of [...(listeners.get("agent/status") ?? [])]) handler(payload);
+	};
+	return agent;
+}
+
+/**
+ * Emit the idle transition that releases the queued wake.
+ *
+ * `turn` is accepted (and ignored) so existing tests read naturally: the wake
+ * no longer keys on a turn number, it keys on the agent going idle.
+ */
+function finishTurn(agent, _turn = 1) {
+	agent.inbox = agent.inbox ?? { nextTurn: [], nextStep: [] };
+	// The host emits `agent/status` only on a TRANSITION (setPhase compares
+	// before/after). Model the real sequence: the failed step is running, and
+	// `kick()`'s finally moves it to idle — that transition is the wake trigger.
+	agent.status = "running";
+	agent.emitStatus({ status: "running" });
+	agent.status = "idle";
+	agent.emitStatus({ status: "idle" });
+}
+
+/** Let pending microtasks/macrotasks settle (fallback timer path). */
+const tick = () => new Promise((resolve) => { setImmediate(resolve); });
+
+test("a switched subagent is woken for a continuation turn", async () => {
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeContinuableAgent("sub-continue");
+		await dispatchRequestError(harness.root, agent, {
+			failure: { message: "429 quota", code: "QUOTA" }
+		});
+		// Queued on the agent's `agent/status` transition to idle: after the failed
+		// turn's `turn/end` committed (which clears the host's `failureAt`), and
+		// outside any session append (a `turn/end` listener is rejected).
+		finishTurn(agent);
+		await tick();
+		assert.strictEqual(agent.followups.length, 1);
+		// The wake must be this plugin's own source, never "user": a transcript
+		// must not present it as something the human typed.
+		assert.strictEqual(agent.followups[0].source.kind, "plugin:dsh-subagent-default-model");
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("an exhausted pool never wakes the child (the next turn would be the same dead route)", async () => {
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeContinuableAgent("sub-exhausted");
+		// Two entries => at most ONE switch. Each failure must be a DIFFERENT step,
+		// otherwise the per-step guard swallows failures 2 and 3 before the pool
+		// guard is ever consulted — which made an earlier version of this test pass
+		// even with the exhaustion guard deleted.
+		await dispatchRequestError(harness.root, agent, { turn: 1, step: 1, failure: { message: "429", code: "RATE_LIMIT" } });
+		finishTurn(agent, 1);
+		await tick();
+		assert.strictEqual(agent.followups.length, 1, "the single allowed switch wakes once");
+
+		await dispatchRequestError(harness.root, agent, { turn: 2, step: 1, failure: { message: "429", code: "RATE_LIMIT" } });
+		finishTurn(agent, 2);
+		await tick();
+		assert.strictEqual(agent.followups.length, 1, "the pool is exhausted: no further wake");
+
+		await dispatchRequestError(harness.root, agent, { turn: 3, step: 1, failure: { message: "429", code: "RATE_LIMIT" } });
+		finishTurn(agent, 3);
+		await tick();
+		assert.strictEqual(agent.followups.length, 1);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("the main agent is never woken, even on an eligible failure code", async () => {
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeContinuableAgent("main", { origin: "root" });
+		await dispatchRequestError(harness.root, agent, { failure: { message: "429", code: "QUOTA" } });
+		finishTurn(agent);
+		await tick();
+		assert.strictEqual(agent.followups.length, 0);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("a fork child is never woken: its inherited prefix would be billed again", async () => {
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeContinuableAgent("forked");
+		// `isSeeded` is the only durable proof of a fork-inherited prefix.
+		agent.session.header.isSeeded = true;
+		await dispatchRequestError(harness.root, agent, { failure: { message: "429", code: "QUOTA" } });
+		finishTurn(agent);
+		await tick();
+		assert.strictEqual(agent.followups.length, 0);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("continueAfterFailover: false restores the switch-without-wake behaviour", async () => {
+	const harness = await createHarness({ ...SECTION_WITH_MODELS, continueAfterFailover: false });
+	try {
+		const agent = makeContinuableAgent("sub-off");
+		await dispatchRequestError(harness.root, agent, { failure: { message: "429", code: "QUOTA" } });
+		finishTurn(agent);
+		await tick();
+		assert.strictEqual(agent.followups.length, 0);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("a failure code that is not failover-eligible never wakes the child", async () => {
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeContinuableAgent("sub-invalid");
+		await dispatchRequestError(harness.root, agent, {
+			failure: { message: "400 bad request", code: "INVALID_REQUEST" }
+		});
+		finishTurn(agent);
+		await tick();
+		assert.strictEqual(agent.followups.length, 0);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("a child that is already running again is not woken a second time", async () => {
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeContinuableAgent("sub-racing");
+		// Somebody already queued the child's next turn, so a second wake would
+		// stack a duplicate intent on top of theirs.
+		agent.inbox = { nextTurn: [{}], nextStep: [] };
+		await dispatchRequestError(harness.root, agent, { failure: { message: "429", code: "QUOTA" } });
+		finishTurn(agent);
+		await tick();
+		assert.strictEqual(agent.followups.length, 0);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("maxAutoContinues: 0 disables the wake entirely", async () => {
+	const harness = await createHarness({ ...SECTION_WITH_MODELS, maxAutoContinues: 0 });
+	try {
+		const agent = makeContinuableAgent("sub-capped");
+		await dispatchRequestError(harness.root, agent, { failure: { message: "429", code: "QUOTA" } });
+		finishTurn(agent);
+		await tick();
+		assert.strictEqual(agent.followups.length, 0);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("a RUNNING status at failure time does not suppress the wake (the host fires inside the failed step)", async () => {
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeContinuableAgent("sub-running");
+		// Measured on the real host: `agent/request-error` runs while the failed
+		// step is still the active phase, so status is "running" on every failure.
+		agent.status = "running";
+		await dispatchRequestError(harness.root, agent, { failure: { message: "429", code: "QUOTA" } });
+		finishTurn(agent);
+		await tick();
+		assert.strictEqual(agent.followups.length, 1);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+// ── random strategy must never re-pick the failing route (2.2.3) ────────────
+//
+// MEASURED BUG. `nextFailoverIndex` returned a bare
+// `Math.floor(Math.random() * entries.length)` for `strategy: "random"`: it
+// ignored both `tried` and the route that had just failed. When it picked the
+// dead entry again, `model.select()` compared the "new" selection with the
+// current one, found them equal and returned WITHOUT appending
+// `model/selection` — the switch did nothing, the continuation turn re-requested
+// the same dead route, and the child failed again. The live diagnostic read:
+//
+//   selecting minmax/MiniMax-M3.1-Flash (before=minmax/MiniMax-M3.1-Flash)
+//   after select, current() unchanged, seq unchanged
+//
+// These tests pin the contract that a random pick is always a USEFUL pick.
+
+const RANDOM_TWO = {
+	provider: "deepseek-official",
+	models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+	strategy: "random",
+	failoverEnabled: true
+};
+
+test("random: never selects the route that just failed (repeated)", async () => {
+	const harness = await createHarness(RANDOM_TWO);
+	try {
+		// 200 independent runs: a 1/2 chance of picking the dead route would show
+		// up immediately, and this is deterministic enough to be a real guard.
+		for (let run = 0; run < 200; run += 1) {
+			const agent = makeStepRouteAgent(`rand-${run}`);
+			await dispatchRequestError(harness.root, agent, {
+				provider: "deepseek-official",
+				failure: { message: "429", code: "RATE_LIMIT" }
+			});
+			assert.strictEqual(agent.selections.length, 1);
+			// The served route is deepseek-v4-pro; the pick must be the other one.
+			assert.strictEqual(agent.selections[0].model, "deepseek-v4-flash");
+		}
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("random: a pool of three still avoids the served route", async () => {
+	const harness = await createHarness({
+		provider: "p",
+		models: ["a", "b", "c"],
+		strategy: "random",
+		failoverEnabled: true
+	});
+	try {
+		for (let run = 0; run < 100; run += 1) {
+			const agent = makeStepRouteAgent(`rand3-${run}`, { provider: "p", model: "a" });
+			await dispatchRequestError(harness.root, agent, { provider: "p", failure: { message: "x", code: "RATE_LIMIT" } });
+			assert.strictEqual(agent.selections.length, 1);
+			assert.notStrictEqual(agent.selections[0].model, "a");
+		}
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("random: later rounds never re-pick the ORIGINAL failing route", async () => {
+	// MEASURED HOLE. `tried` only records SELECTED entries, so the route that
+	// failed FIRST is never in it. An earlier version excluded the served route
+	// only while `tried` was still empty, so round 2 onward could pick that
+	// original dead route again — reproduced at ~50% with a three-entry pool.
+	const harness = await createHarness({
+		provider: "p",
+		models: ["a", "b", "c"],
+		strategy: "random",
+		failoverEnabled: true
+	});
+	try {
+		for (let run = 0; run < 100; run += 1) {
+			const agent = makeStepRouteAgent(`rand-rounds-${run}`, { provider: "p", model: "a" });
+			// Failure 1: served = "a"; the pick must not be "a".
+			await dispatchRequestError(harness.root, agent, { provider: "p", failure: { message: "x", code: "RATE_LIMIT" } });
+			assert.strictEqual(agent.selections.length, 1);
+			assert.notStrictEqual(agent.selections[0].model, "a", "round 1 must not re-pick the served route");
+
+			// Failure 2 must be a DIFFERENT step: the per-step guard treats two
+			// failures inside one step as a single switch. The fixture's route
+			// follows the selection, mirroring the host's own fold.
+			agent.session.requestContext = () => ({ provider: "p", model: agent.selections.at(-1)?.model ?? "a" });
+			await dispatchRequestError(harness.root, agent, { step: 2, provider: "p", failure: { message: "x", code: "RATE_LIMIT" } });
+			assert.strictEqual(agent.selections.length, 2);
+			assert.notStrictEqual(agent.selections[1].model, "a", "round 2 must not resurrect the original dead route");
+			assert.notStrictEqual(agent.selections[1].model, agent.selections[0].model, "round 2 must not repeat round 1's pick");
+		}
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("maxAutoContinues is a PER-RUN budget, not a per-turn one", async () => {
+	// MEASURED BUG. The engine used to delete its bookkeeping entry on every
+	// `agent/pre-step`, i.e. at the start of each continuation turn, restarting
+	// the budget. With `maxAutoContinues: 1` a run still queued a second
+	// continuation — the documented ceiling was inert.
+	//
+	// Three routes, and the second failure arrives in a genuine CONTINUATION TURN
+	// (turn 2, step 1). With a 2-entry pool the pool guard would intercept it
+	// before `onSwitched` ran, which made an earlier version of this test pass
+	// even with the pre-step reset reintroduced.
+	const harness = await createHarness({
+		provider: "p",
+		models: ["a", "b", "c", "d"],
+		strategy: "round-robin",
+		failoverEnabled: true,
+		maxAutoContinues: 2
+	});
+	try {
+		const agent = makeContinuableAgent("sub-cap-run", { provider: "p", model: "a" });
+		await dispatchRequestError(harness.root, agent, { turn: 1, step: 1, provider: "p", failure: { message: "x", code: "QUOTA" } });
+		finishTurn(agent, 1);
+		await tick();
+		assert.strictEqual(agent.followups.length, 1, "the first wake is used");
+
+		// Turn 2 is the continuation turn; its failure must NOT buy a second wake.
+		agent.inbox = { nextTurn: [], nextStep: [] };
+		agent.session.requestContext = () => ({ provider: "p", model: agent.selections.at(-1)?.model ?? "a" });
+		agent.model.current = () => ({ provider: "p", model: agent.selections.at(-1)?.model ?? "a" });
+		await dispatchRequestError(harness.root, agent, { turn: 2, step: 1, provider: "p", failure: { message: "x", code: "QUOTA" } });
+		finishTurn(agent, 2);
+		await tick();
+		// Count is now 2 of 2, so no further wake is allowed. With a per-turn
+		// reset (the old bug) the counter returns to 0 and this becomes 2.
+		assert.strictEqual(agent.followups.length, 2, "the second allowed wake is used");
+
+		agent.inbox = { nextTurn: [], nextStep: [] };
+		await dispatchRequestError(harness.root, agent, { turn: 3, step: 1, provider: "p", failure: { message: "x", code: "QUOTA" } });
+		finishTurn(agent, 3);
+		await tick();
+		assert.strictEqual(agent.followups.length, 2, "the per-run budget is exhausted and must not reset");
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+
+test("apply() installs the auto-continue engine exactly once", async () => {
+	// MEASURED BUG. `installFailover` also called `installAutoContinue` at its
+	// end (a leftover from the refactor that replaced the timer with a callback),
+	// so TWO engines were constructed: two `agent/pre-step` wrappers and two
+	// `agent/disposed` listeners, with the first engine's `onSwitched` discarded.
+	const root = new Context();
+	root.provide("subagents", {
+		async start(name, request) { return { name, request }; },
+		async startContinuable(spec) { return spec; }
+	});
+	const registered = [];
+	const originalOn = root.on.bind(root);
+	root.on = (name, ...rest) => { registered.push(name); return originalOn(name, ...rest); };
+	await root[Symbol.for("cordis.init")]?.();
+	const fiber = root.registry.plugin(defaultModelPlugin, SECTION_WITH_MODELS);
+	await fiber;
+	try {
+		// The route-context injector registers its own pre-step, so the count is
+		// two when exactly one auto-continue engine is mounted.
+		// One auto-continue engine + the failover waterfall + the route-context
+		// injector = three `agent/disposed` cleanup listeners. A second
+		// `installAutoContinue` would make it four.
+		assert.strictEqual(registered.filter((n) => n === "agent/disposed").length, 3);
+		// Exactly one failure waterfall: the auto-continue engine hooks the
+		// request-error feed only through the callback the failover path invokes.
+		assert.strictEqual(registered.filter((n) => n === "agent/request-error").length, 1);
+	} finally {
+		await fiber.dispose();
+		await root.fiber.dispose();
+	}
+});
+
+test("a pool of DUPLICATE routes is not a switchable pool", async () => {
+	// `AgentModel.select()` is a silent no-op when the new selection equals the
+	// recorded one, so a pool like ["a","a"] would switch to the same dead route,
+	// record a switch, and wake the child for nothing.
+	const harness = await createHarness({ provider: "p", models: ["a", "a"], strategy: "round-robin", failoverEnabled: true });
+	try {
+		const agent = makeContinuableAgent("sub-dup", { provider: "p", model: "a" });
+		await dispatchRequestError(harness.root, agent, { provider: "p", failure: { message: "x", code: "RATE_LIMIT" } });
+		await tick();
+		assert.strictEqual(agent.selections.length, 0, "no distinct candidate exists, so no selection is attempted");
+		assert.strictEqual(agent.followups.length, 0, "and the child is not woken for a route it is already on");
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("an effort-only pool switches to the OTHER effort, not the one it is on", async () => {
+	// MEASURED. `session.requestContext()` carries no `reasoningEffort`, so
+	// locating the served entry by provider+model alone resolved to the wrong
+	// entry and the picker returned the effort the child was ALREADY on.
+	// `AgentModel.select()` compares effort, so that selection is a silent no-op
+	// — a wasted wake on the dead route. The child here is on `low`.
+	const harness = await createHarness({
+		models: [
+			{ provider: "p", model: "a", reasoningEffort: "high" },
+			{ provider: "p", model: "a", reasoningEffort: "low" }
+		],
+		strategy: "round-robin",
+		failoverEnabled: true
+	});
+	try {
+		const agent = makeContinuableAgent("sub-effort", { provider: "p", model: "a" });
+		agent.options.reasoningEffort = "low";
+		agent.model.current = () => ({ provider: "p", model: "a", reasoningEffort: "low" });
+		await dispatchRequestError(harness.root, agent, { provider: "p", failure: { message: "x", code: "RATE_LIMIT" } });
+		assert.strictEqual(agent.selections.length, 1);
+		assert.strictEqual(agent.selections[0].reasoningEffort, "high", "must not re-select the effort it is already running");
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("a host without a per-agent context reports instead of arming nothing", async () => {
+	// Every host in the peer range exposes `agent.ctx`, so this arm is
+	// unreachable in practice. It exists so a future host that drops it fails
+	// LOUDLY rather than disabling the feature with no trace — and so the budget
+	// is refunded instead of being silently spent on a wake that cannot happen.
+	const harness = await createHarness(SECTION_WITH_MODELS);
+	try {
+		const agent = makeContinuableAgent("sub-noctx");
+		delete agent.ctx;
+		await dispatchRequestError(harness.root, agent, { failure: { message: "x", code: "QUOTA" } });
+		finishTurn(agent);
+		await tick();
+		assert.strictEqual(agent.followups.length, 0, "no wake is possible without a status feed");
+		assert.ok(
+			harness.warnings.some((line) => line.includes("exposes no per-agent context")),
+			"the situation must be reported, not swallowed"
+		);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+
+test("a SUPPRESSED wake does not spend the run's continuation budget", async () => {
+	// The budget used to be charged BEFORE the inbox guard, so a wake that was
+	// suppressed (somebody had already queued the child's next turn) still burned
+	// one of the allowed continuations.
+	//
+	// Same agent, same run, so the budget ledger is shared: a fresh agent would
+	// trivially pass and prove nothing.
+	// Three routes so the second failure can still switch (the pool guard allows
+	// `entries.length - 1` switches, and the first failure already spent one).
+	const harness = await createHarness({
+		provider: "p",
+		models: ["a", "b", "c"],
+		strategy: "round-robin",
+		failoverEnabled: true,
+		maxAutoContinues: 1
+	});
+	try {
+		const agent = makeContinuableAgent("sub-suppressed", { provider: "p", model: "a" });
+		agent.inbox = { nextTurn: [{}], nextStep: [] }; // already queued -> suppressed
+		await dispatchRequestError(harness.root, agent, { step: 1, failure: { message: "x", code: "QUOTA" } });
+		finishTurn(agent, 1);
+		await tick();
+		assert.strictEqual(agent.followups.length, 0, "suppressed as expected");
+
+		// Drain the queue and force a second failure on a LATER step. Reset the
+		// failover bookkeeping so the pool guard is not what blocks this.
+		agent.inbox = { nextTurn: [], nextStep: [] };
+		// A later turn: the per-turn/per-step guard must not treat this as the
+		// same failure as the one above.
+		await dispatchRequestError(harness.root, agent, { turn: 2, step: 5, failure: { message: "x", code: "QUOTA" } });
+		finishTurn(agent, 2);
+		await tick();
+		assert.strictEqual(
+			agent.followups.length,
+			1,
+			"the suppressed wake must not have consumed the single allowed continuation"
+		);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+

@@ -31,7 +31,6 @@ vm.runInNewContext(clientSource, sandbox, { filename: "client.js" });
 // tautological. It must stay in lockstep with `CHAT_MODEL_NODE_KIND` in
 // lib/client.js — and must NOT be the host's `"context"` kind, which
 // `isVisibleChatNode()` filters out of the visible Chat rows.
-const CHAT_NODE_KIND = "chat-subagent-model-notice";
 
 function factoryRequire(id) {
 	if (id === "react") return {};
@@ -180,14 +179,6 @@ function trajectoryDefinition() {
 	return definition;
 }
 
-function chatDefinition() {
-	const { ctx, registrations } = makeCtx();
-	const { apply } = capturedModule.factory(factoryRequire);
-	apply(ctx);
-	const definition = registrations.find((d) => d.kind === "chat-subagent-model");
-	assert.ok(definition, "expected a chat-subagent-model definition to be registered");
-	return definition;
-}
 
 test("client registers the subagent-default-model settings card and loads the model catalog", async () => {
 	const { ctx, slotRegistrations } = makeCtx();
@@ -379,276 +370,6 @@ test("applying the client never registers the trajectory definition when uiConve
 	delete ctx.uiConversation;
 	const { apply } = capturedModule.factory(factoryRequire);
 	assert.doesNotThrow(() => apply(ctx));
-});
-
-// ── chat view definition (target:"chat") ───────────────────────────────────
-
-test("client registers a chat-subagent-model definition", () => {
-	const definition = chatDefinition();
-	assert.equal(definition.target, "chat");
-	assert.equal(typeof definition.match, "function");
-	assert.equal(typeof definition.start, "function");
-	assert.equal(typeof definition.update, "function");
-	assert.equal(typeof definition.buildViewNode, "function");
-});
-
-test("client locales include the chat model labels (zh/en)", () => {
-	const { ctx, dictionaries } = makeCtx();
-	const { apply } = capturedModule.factory(factoryRequire);
-	apply(ctx);
-	assert.equal(dictionaries.zh["row.chatModelInitial"], "当前供应商/模型");
-	assert.equal(dictionaries.zh["row.chatModelChange"], "已切换到");
-	assert.equal(dictionaries.zh["row.chatModelResume"], "当前使用");
-	assert.equal(dictionaries.en["row.chatModelInitial"], "Current provider/model");
-	assert.equal(dictionaries.en["row.chatModelChange"], "Switched to");
-	assert.equal(dictionaries.en["row.chatModelResume"], "Currently using");
-	assert.ok(dictionaries.zh["row.noticeLabel"], "zh missing row.noticeLabel");
-	assert.ok(dictionaries.en["row.noticeLabel"], "en missing row.noticeLabel");
-});
-
-test("chat match only claims request/header frames", () => {
-	const definition = chatDefinition();
-	const claimed = definition.match({ type: "request/header", seq: 42 });
-	deepEqual(claimed, { id: "42", role: "start" });
-	assert.equal(definition.match({ type: "request/context", seq: 43 }), null);
-	assert.equal(definition.match({ type: "assistant/message", seq: 44 }), null);
-});
-
-test("chat match skips request/header frames that merely start a new series", () => {
-	const definition = chatDefinition();
-	// DSH 0.1.2 appends reason:"series" when a follow-up turn starts a new
-	// request series with an unchanged config — no route change to surface.
-	assert.equal(
-		definition.match({
-			type: "request/header",
-			seq: 50,
-			data: { reason: "series", header: { config: { provider: "mock-local", model: "deepseek-v4-flash" } } }
-		}),
-		null
-	);
-	// The informational reasons still claim their frames.
-	deepEqual(definition.match({ type: "request/header", seq: 51, data: { reason: "initial" } }), { id: "51", role: "start" });
-	deepEqual(definition.match({ type: "request/header", seq: 52, data: { reason: "change" } }), { id: "52", role: "start" });
-	deepEqual(definition.match({ type: "request/header", seq: 53, data: { reason: "resume" } }), { id: "53", role: "start" });
-	// A frame without a data payload (older DSH builds) keeps claiming.
-	deepEqual(definition.match({ type: "request/header", seq: 54 }), { id: "54", role: "start" });
-});
-
-test("chat start labels the initial request with the route (zh)", () => {
-	const definition = chatDefinition();
-	const event = {
-		type: "request/header",
-		seq: 9,
-		time: 3000,
-		data: {
-			reason: "initial",
-			header: { config: { provider: "mock-local", model: "deepseek-v4-flash" } }
-		}
-	};
-	const state = definition.start(undefined, { event });
-	assert.equal(state.kind, CHAT_NODE_KIND);
-	assert.equal(state.seq, 9);
-	assert.equal(state.form, "notice");
-	assert.equal(state.source.kind, "plugin:dsh-subagent-default-model");
-	assert.equal(state.source.summary, state.content[0].text);
-	assert.equal(state.provenance.role, "inject");
-	assert.match(state.content[0].text, /当前供应商\/模型/);
-	assert.match(state.content[0].text, /mock-local/);
-	assert.match(state.content[0].text, /deepseek-v4-flash/);
-});
-
-test("chat start labels a failover change with the switched-to route", () => {
-	const definition = chatDefinition();
-	const event = {
-		type: "request/header",
-		seq: 10,
-		time: 4000,
-		data: {
-			reason: "change",
-			header: { config: { provider: "mock-local", model: "deepseek-v4-pro" } }
-		}
-	};
-	const state = definition.start(undefined, { event });
-	assert.match(state.content[0].text, /已切换到/);
-	assert.match(state.content[0].text, /mock-local/);
-	assert.match(state.content[0].text, /deepseek-v4-pro/);
-});
-
-test("chat start labels a resumed session with the route", () => {
-	const definition = chatDefinition();
-	const event = {
-		type: "request/header",
-		seq: 11,
-		time: 5000,
-		data: {
-			reason: "resume",
-			header: { config: { provider: "mock-local", model: "deepseek-v4-flash" } }
-		}
-	};
-	const state = definition.start(undefined, { event });
-	assert.match(state.content[0].text, /当前使用/);
-	assert.match(state.content[0].text, /deepseek-v4-flash/);
-});
-
-test("chat update is a passthrough and buildViewNode emits a chat context node", () => {
-	const definition = chatDefinition();
-	const state = {
-		kind: CHAT_NODE_KIND,
-		seq: 9,
-		time: 3000,
-		content: [{ type: "text", text: "当前供应商/模型：mock-local/deepseek-v4-flash" }],
-		source: { kind: "plugin:dsh-subagent-default-model" },
-		provenance: { role: "inject", label: "dsh-subagent-default-model" },
-		form: "notice"
-	};
-	assert.equal(definition.update({ state }), state);
-
-	const node = definition.buildViewNode({
-		key: "k",
-		kind: "chat-subagent-model",
-		id: "9",
-		start: { location: { kind: "unresolved" } },
-		state
-	});
-	assert.equal(node.target, "chat");
-	assert.equal(node.kind, CHAT_NODE_KIND);
-	assert.equal(node.anchorSeq, 9);
-	assert.equal(node.visibility, "visible");
-	assert.equal(node.data.kind, CHAT_NODE_KIND);
-	assert.equal(node.data.content[0].text, "当前供应商/模型：mock-local/deepseek-v4-flash");
-});
-
-test("chat buildViewNode returns null when no state has been started", () => {
-	const definition = chatDefinition();
-	assert.equal(definition.buildViewNode({ state: undefined }), null);
-});
-
-test("chat row does NOT reuse the host context kind (which is filtered out of the Chat flow)", () => {
-	// Regression guard for a real defect: the chat definition originally emitted
-	// `kind: "context"` to "reuse the built-in injection row". The host
-	// `dsh-client-ui-chat` classifies any non-user source as `context` and then
-	// `isVisibleChatNode()` excludes `kind === "context"` (unless it carries a
-	// tool-addition/removal block). The row therefore reached Trajectory only and
-	// never appeared in the conversation flow — the mechanism looked complete
-	// while being invisible in practice. A self-owned kind is not on that
-	// blacklist, so it stays visible.
-	const definition = chatDefinition();
-	assert.notEqual(definition.kind, "context");
-	const state = definition.start(undefined, {
-		event: {
-			type: "request/header",
-			seq: 9,
-			time: 3000,
-			data: { reason: "initial", header: { config: { provider: "p", model: "m" } } }
-		}
-	});
-	assert.notEqual(state.kind, "context", "state kind must match the node kind the host dispatches on");
-	assert.equal(state.kind, CHAT_NODE_KIND);
-
-	// The message SOURCE stays a distinct thing from the node kind: it identifies
-	// which plugin injected the message and must not be renamed alongside it.
-	assert.equal(state.source.kind, "plugin:dsh-subagent-default-model");
-
-	const node = definition.buildViewNode({
-		key: "k",
-		kind: definition.kind,
-		id: "9",
-		start: { location: { kind: "unresolved" } },
-		state
-	});
-	assert.notEqual(node.kind, "context");
-	assert.equal(node.kind, CHAT_NODE_KIND);
-	assert.equal(node.data.kind, CHAT_NODE_KIND);
-	// Host contract: `buildViewNode` must echo the definition's own target and
-	// the context key, or the Conversation layer rejects the node.
-	assert.equal(node.target, definition.target);
-	assert.equal(node.key, "k");
-});
-
-test("chat row registers a renderer for its own node kind", () => {
-	// Dispatch is runtime string matching on `entryKey = node.kind`. The slot is
-	// `keyed`, and `ChatNodeSeat` passes a `fallback` (a JsonBlock labeled
-	// "unknown surface"), so changing the kind without registering a renderer
-	// would trade "filtered out" for "a raw JSON dump in the conversation flow".
-	const { ctx, slotRegistrations } = makeCtx();
-	capturedModule.factory(factoryRequire).apply(ctx);
-	const notice = slotRegistrations.filter((entry) => entry.name === "conversation.chat.node");
-	assert.equal(notice.length, 1, "exactly one chat node renderer registration expected");
-	assert.equal(notice[0].value.options.key, CHAT_NODE_KIND, "renderer key must equal the node kind");
-	assert.equal(typeof notice[0].value.component, "function", "the renderer must be a component");
-});
-
-test("chat renderer shows the summary collapsed and the full text when open", () => {
-	// Load the module with a React double so the row component's `useState` works
-	// without a real renderer (same technique as the settings-card render tests).
-	const react = makeReactDouble();
-	const reactRequire = (id) => {
-		if (id === "react") return react;
-		if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Toast: function Toast() {} };
-		throw new Error(`unexpected require: ${id}`);
-	};
-	const { ctx, slotRegistrations, dictionaries } = makeCtx();
-	capturedModule.factory(reactRequire).apply(ctx);
-	const Row = slotRegistrations
-		.filter((entry) => entry.name === "conversation.chat.node")[0].value.component;
-
-	// The registration declares `locale:`, so the host injects `t`. Supply the
-	// REAL dictionary through that seat: asserting against a hardcoded string
-	// would pass even if the component ignored the locale seat entirely.
-	const t = (key) => (dictionaries.zh ?? {})[key] ?? key;
-	assert.equal(dictionaries.zh["row.noticeLabel"], "上下文注入 · dsh-subagent-default-model");
-	const full = "当前供应商/模型：mock-local/deepseek-v4-flash";
-	const node = {
-		kind: CHAT_NODE_KIND,
-		data: {
-			content: [{ type: "text", text: full }],
-			source: { kind: "plugin:dsh-subagent-default-model", summary: full }
-		}
-	};
-
-	// Collapsed (initial state): the summary is the always-visible line, and the
-	// full body is NOT mounted (collapsed means no <pre> at all, not hidden CSS).
-	react.beginPass();
-	const collapsedTree = expand(Row({ node, t }));
-	assert.match(treeText(collapsedTree), /上下文注入/);
-	assert.match(treeText(collapsedTree), /mock-local\/deepseek-v4-flash/);
-	assert.equal(collect(collapsedTree, (n) => n.type === "pre").length, 0, "collapsed row must not mount the body");
-
-	// Drive the real toggle: click the button the row rendered, then re-render.
-	const toggle = collect(collapsedTree, (n) => n.type === "button")[0];
-	assert.ok(toggle, "the row must expose a toggle button");
-	toggle.props.onClick();
-
-	react.beginPass();
-	const expandedTree = expand(Row({ node, t }));
-	const pre = collect(expandedTree, (n) => n.type === "pre");
-	assert.equal(pre.length, 1, "the expandable body must render once after expanding");
-	assert.equal(pre[0].text, full);
-	// aria-expanded must track the same state the body does.
-	const expandedToggle = collect(expandedTree, (n) => n.type === "button")[0];
-	assert.equal(expandedToggle.props["aria-expanded"], true);
-});
-
-test("chat renderer tolerates a node without content or summary", () => {
-	// The row must not throw on a partially-populated node: `buildViewNode`
-	// returns null only when NO state was started, so a node whose data lacks
-	// `content` can still reach the renderer.
-	const react = makeReactDouble();
-	const reactRequire = (id) => {
-		if (id === "react") return react;
-		if (id === "@deepseek-ai/dsh-client-ui-primitives") return { Toast: function Toast() {} };
-		throw new Error(`unexpected require: ${id}`);
-	};
-	const { ctx, slotRegistrations } = makeCtx();
-	capturedModule.factory(reactRequire).apply(ctx);
-	const Row = slotRegistrations
-		.filter((entry) => entry.name === "conversation.chat.node")[0].value.component;
-
-	react.beginPass();
-	// No `t` seat supplied at all: the component must fall back to the key
-	// instead of throwing, since a partially-populated node can still arrive.
-	const tree = expand(Row({ node: { kind: CHAT_NODE_KIND, data: {} } }));
-	assert.match(treeText(tree), /row\.noticeLabel/);
 });
 
 // ── effort capability check (option A) ─────────────────────────────────────
@@ -1278,21 +999,16 @@ function emittedSources() {
 		}).source
 	]);
 
-	const chat = registrations.find((d) => d.kind === "chat-subagent-model");
-	for (const reason of ["initial", "change", "resume"]) {
-		out.push([
-			`chat request/header (${reason})`,
-			chat.start(undefined, {
-				event: { type: "request/header", seq: 2, time: 2, data: { reason, header: { config: { provider: "p", model: "m" } } } }
-			}).source
-		]);
-	}
+	// The CHAT view no longer contributes a definition: the injected line is a
+	// real `user/message` and the HOST draws its own context row for it. The
+	// trajectory definition below stays, because the trajectory target renders
+	// `request/context` frames that the Host does not otherwise surface.
 	return out;
 }
 
 test("every emitted message source is producer-owned (V4 admission)", () => {
 	const sources = emittedSources();
-	assert.ok(sources.length >= 4, "must exercise both definitions");
+	assert.ok(sources.length >= 1, "must exercise the trajectory definition");
 	for (const [label, sourceValue] of sources) assertProducerOwnedSource(sourceValue, label);
 });
 
@@ -2160,33 +1876,36 @@ test("both conversation definitions survive a fiber replacement (re-apply)", () 
 		}
 	};
 
-	assert.doesNotThrow(() => apply(ctx), "first apply must register both definitions");
+	assert.doesNotThrow(() => apply(ctx), "first apply must register the trajectory definition");
 	assert.deepEqual(
 		[...reg.registered.keys()].sort(),
-		["chat-subagent-model", "trajectory-subagent-model"],
-		"both rows must be registered"
+		["trajectory-subagent-model"],
+		"the trajectory row must be registered"
 	);
 
 	// A fiber replacement tears down the previous effects, then re-applies.
 	for (const pass of [2, 3]) {
 		teardown();
-		assert.equal(reg.registered.size, 0, `teardown before pass ${pass} must release both kinds`);
+		assert.equal(reg.registered.size, 0, `teardown before pass ${pass} must release the kind`);
 		assert.doesNotThrow(
 			() => apply(ctx),
 			`apply pass ${pass} must not hit "already registered"`
 		);
-		assert.equal(reg.registered.size, 2, `both definitions are live again after pass ${pass}`);
+		assert.equal(reg.registered.size, 1, `the definition is live again after pass ${pass}`);
 	}
 });
 
-test("both conversation definitions are registered inside ctx.effect", () => {
+test("the conversation definition is registered inside ctx.effect", () => {
 	// The registration must be fiber-scoped or the duplicate-kind throw returns.
+	// Only the TRAJECTORY view registers a definition now: the Chat row comes
+	// from the Host itself (the injection is a real `user/message`), so a second
+	// definition there would duplicate the native context row.
 	const calls = clientSource.match(/ctx\.uiConversation\.events\.register\(/g) ?? [];
 	const scoped = clientSource.match(/ctx\.effect\(function \(\) \{\s*return ctx\.uiConversation\.events\.register\(/g) ?? [];
-	assert.equal(calls.length, 2, "expected exactly two conversation registrations");
+	assert.equal(calls.length, 1, "expected exactly one conversation registration");
 	assert.equal(
 		scoped.length,
-		2,
+		1,
 		"every conversation registration must be wrapped in ctx.effect (bare calls throw on re-apply)"
 	);
 });

@@ -131,7 +131,7 @@ const SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA = z.object({
 	//
 	// Declared volatile like every other configurable field: the settings write
 	// gate rejects any path that is not a declared volatile field.
-	injectRouteContext: volatileField(z.boolean().default(true).description("Inject the actually-used provider/model into each subagent's context")),
+	injectRouteContext: volatileField(z.boolean().default(true).description("Tell a subagent the route it is actually running on, and the main agent which model its delegations will use")),
 	// Must be DECLARED and volatile: the settings write gate rejects every path
 	// that is not a declared volatile field (`@deepseek-ai/dsh-settings`
 	// `write()` throws `Config field "…" is not volatile`). The client card
@@ -158,7 +158,29 @@ const SUBAGENT_DEFAULT_MODEL_SETTINGS_SCHEMA = z.object({
 	//
 	// Opting IN is a deliberate trade: you want fork children on the pool route
 	// and accept paying to re-run the inherited prefix once.
-	applyToForkChildren: volatileField(z.boolean().default(false).description("Let same-context channels (subagent_fork) follow the configured route instead of inheriting the parent's; off keeps the host's KV-cache reuse"))
+	applyToForkChildren: volatileField(z.boolean().default(false).description("Let same-context channels (subagent_fork) follow the configured route instead of inheriting the parent's; off keeps the host's KV-cache reuse")),
+	// Whether a subagent whose turn died on a FAILOVER-ELIGIBLE failure is woken
+	// for one more turn, so the route `agent.model.select()` just chose is
+	// actually used instead of waiting for somebody to send more input.
+	//
+	// WHY THIS IS NEEDED AT ALL. On DSH 0.2.2+ the failing step keeps its fixed
+	// route, so the switch only takes effect on a LATER turn. Without a wake, a
+	// one-shot `subagent` simply ends: the pool is switched to a healthy route
+	// that never gets used, and the parent is told the child failed. Measured
+	// before this existed: a pool route returned 429, failover selected the
+	// healthy entry, and the child still ended `error` with zero further
+	// requests.
+	//
+	// Default ON, because "switch, then keep working" is the whole point of the
+	// failover feature; `false` restores the pre-2.2.3 behaviour (switch recorded,
+	// current turn ends).
+	continueAfterFailover: volatileField(z.boolean().default(true).description("Wake a subagent for one more turn after a failover switch, so the healthy route is actually used instead of ending the task")),
+	// How many consecutive automatic continuations one subagent run may have.
+	// A pool of N entries can only switch N-1 times, so a cap above that would
+	// never be reached; the failover pool-exhaustion rule is the real bound.
+	// Kept separate because it is what stops a pathological loop when the pool
+	// keeps being edited while the run is alive.
+	maxAutoContinues: volatileField(z.number().default(2).description("Maximum consecutive automatic continuations per subagent run (0 disables)"))
 }).default({});
 
 /** The plugin's Cordis Config — on DSH 0.1.7+ this IS the settings section. */
@@ -351,10 +373,27 @@ function failoverView(state) {
 	const section = state.getSection?.();
 	if (section === void 0 || section === null) return void 0;
 	if (section.failoverEnabled === false) return void 0;
-	const entries = Array.isArray(section.models)
+	// Deduplicate by provider+model.
+	//
+	// A pool such as `["a", "a"]` — or two entries that happen to resolve to the
+	// same route — is not a two-route pool: `AgentModel.select()` compares the
+	// new selection with the recorded one and returns WITHOUT appending
+	// `model/selection` when they match. The "switch" would then be a silent
+	// no-op while this plugin still recorded a switch and woke the child, so the
+	// continuation re-requested the same dead route. Distinct
+	// `reasoningEffort` values still count as distinct selections (the host
+	// compares effort too), so the key includes it.
+	const resolved = Array.isArray(section.models)
 		? section.models.map((entry) => resolveEntry(section, entry)).filter((entry) => entry !== void 0)
 		: [];
-	// A pool of <2 models has nothing to switch to; keep the parent route.
+	const seen = new Set();
+	const entries = resolved.filter((entry) => {
+		const key = `${entry.provider}\u0000${entry.model}\u0000${entry.reasoningEffort ?? ""}`;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+	// A pool of <2 DISTINCT models has nothing to switch to; keep the parent route.
 	if (entries.length < 2) return void 0;
 	return { entries, strategy: section.strategy === "random" ? "random" : "round-robin" };
 }
@@ -370,15 +409,52 @@ function isSubagentAgent(agent) {
  * - round-robin: the next entry after the currently-served model, wrapping
  *   around the list (the "queue"), skipping entries this run already tried so a
  *   single bad candidate is not re-selected while an untried one remains.
- * - random: any entry, without checking whether it was used before — a random
- *   pick may repeat the failing model, which is fine by design (simplest).
+ * - random: uniformly among the entries this run has NOT already tried.
+ *   Deliberately NOT "any entry": `model.select()` is a silent no-op when the
+ *   selection equals the current one, so picking a dead route again records
+ *   nothing and the continuation re-requests it. `tried` therefore carries both
+ *   the routes switched to and the route that failed (seeded by the caller).
+ *
+ * @param view - pool entries and strategy.
+ * @param agent - the failing subagent (its live route is the fallback anchor).
+ * @param current - this run's switch bookkeeping, if any.
+ * @param seededTried - `current.tried` already extended with the failed route.
+ * @returns the chosen pool index.
  */
-function nextFailoverIndex(view, agent, current) {
+function nextFailoverIndex(view, agent, current, seededTried = undefined) {
 	const { entries, strategy } = view;
+	const tried = seededTried ?? current?.tried;
 	if (strategy === "random") {
-		return Math.floor(Math.random() * entries.length);
+		// A random pick must still be a USEFUL pick. The naive
+		// `Math.random() * entries.length` ignored both `tried` and the route
+		// that just failed, so it re-selected the dead entry with probability
+		// 1/entries.length — and worse, it could return the very entry the
+		// failure came from.
+		//
+		// Measured consequence: `model.select()` compared the "new" selection
+		// with the current one, found them equal, and returned WITHOUT appending
+		// `model/selection`. The switch silently did nothing, the continuation
+		// turn re-requested the same dead route, and the child failed again.
+		// The diagnostic read exactly that: `selecting minmax/… (before=minmax/…)`
+		// followed by an unchanged `current()` and an unchanged session seq.
+		//
+		// Only entries this run has not already tried are candidates. `tried` is
+		// seeded by `switchForNextStep` with BOTH the route that just failed and
+		// every route it has switched to, so "already failed here" is fully
+		// represented — that is what keeps a random pick useful instead of
+		// re-selecting a dead entry (which makes `model.select()` a silent no-op).
+		const blocked = new Set(tried ?? []);
+		const candidates = entries
+			.map((entry, index) => index)
+			.filter((index) => !blocked.has(index));
+		// DEFENSIVE, currently unreachable: the caller returns on
+		// `count >= entries.length - 1` before calling, and every switch adds a
+		// distinct index, so at least one candidate always remains. Kept anyway —
+		// if that guard ever changes, returning `undefined` here would silently
+		// select nothing, whereas an index still lets the caller decide.
+		if (candidates.length === 0) return Math.floor(Math.random() * entries.length);
+		return candidates[Math.floor(Math.random() * candidates.length)];
 	}
-	const tried = current?.tried;
 	if (current !== void 0) {
 		// Advance from the last pick, taking the first entry this run has not used.
 		for (let step = 1; step <= entries.length; step += 1) {
@@ -421,12 +497,13 @@ function nextFailoverIndex(view, agent, current) {
  *    (quota, auth), unlike the host's "after step preparation fixed" guard.
  *
  * The visible consequence, stated plainly: on 0.2.2 a permanently failing
- * route ends the current turn instead of being transparently continued on
- * another provider. The pool still governs every SUBSEQUENT request, so a
- * continuable subagent resumes on a healthy route and the parent's next
- * follow-up is not stuck on the dead one.
+ * route still ends the CURRENT turn — the host fixes its route, so that turn
+ * cannot continue elsewhere. What the selection buys is everything after it,
+ * and `onSwitched` (see `installAutoContinue`) is what makes "after it" happen
+ * without waiting for the parent: it wakes the child for one more turn once the
+ * agent goes idle, so the new route is actually used.
  */
-async function switchForNextStep(ctx, state, pending, payload, next) {
+async function switchForNextStep(ctx, state, pending, payload, next, onSwitched) {
 	const { agent, step, failure, signal } = payload;
 	const downstream = await next();
 	if (signal?.aborted) return downstream;
@@ -437,12 +514,59 @@ async function switchForNextStep(ctx, state, pending, payload, next) {
 	const view = failoverView(state);
 	if (view === void 0) return downstream;
 	const current = pending.get(agent.id);
-	if (current !== void 0 && current.step === step) return downstream; // already switched for this step
+	// Guard on turn AND step. A continuation turn restarts at step 1, so a
+	// step-only guard treats a fresh turn's first failure as "already switched
+	// for this step" and silently refuses to switch again — capping a one-shot
+	// child at ONE failover no matter how large the pool is (measured: a 3-entry
+	// pool only ever reached the second entry).
+	if (current !== void 0 && current.turn === payload.turn && current.step === step) return downstream;
 	if (current !== void 0 && current.count >= view.entries.length - 1) return downstream; // pool exhausted
-	const index = nextFailoverIndex(view, agent, current);
+	// Seed `tried` with the route that FAILED, not just the ones already switched
+	// to.
+	//
+	// `tried` used to record only switch targets, so the route that failed FIRST
+	// never entered it. From the second switch onward that dead route was a legal
+	// candidate again — no longer `served`, and filtered by nothing — so `random`
+	// could send the child straight back to it. Measured with a fixture whose
+	// route follows `select` (as the host's own fold does) and a three-entry
+	// pool: 136 of 300 second switches returned to the original dead route, and
+	// the `entries.length - 1` cap then left the third entry never tried.
+	//
+	// This must run BEFORE `nextFailoverIndex`, which is the only consumer.
+	const tried = new Set(current?.tried ?? []);
+	if (current === undefined) {
+		// Identify the served entry by provider + model + effort.
+		//
+		// Locate the served entry by provider + model + effort.
+		//
+		// `session.requestContext()` carries no `reasoningEffort`, but the host's
+		// `AgentModel.select()` compares effort as part of the selection. A pool
+		// differing only by effort (`[a/high, a/low]`) would then resolve the
+		// served route to the WRONG entry and pick the very selection the child is
+		// already on — a silent no-op that still costs a wake.
+		//
+		// `requestHeader().config` is the route the LAST REQUEST actually used,
+		// including effort, and is exactly what `selectionOfHeader()` feeds the
+		// host's comparison. `model.current()` would also carry effort but reads
+		// `pending ?? lastUsed`, so another plugin's not-yet-used selection could
+		// name an entry this run never actually served.
+		const live = agent?.session?.requestHeader?.()?.config
+			?? agent?.model?.current?.()
+			?? agent?.session?.requestContext?.();
+		if (live !== void 0 && live !== null) {
+			const servedIndex = view.entries.findIndex((entry) =>
+				entry.provider === live.provider
+				&& entry.model === live.model
+				&& (entry.reasoningEffort ?? void 0) === (live.reasoningEffort ?? void 0)
+			);
+			if (servedIndex >= 0) tried.add(servedIndex);
+		}
+	}
+	const index = nextFailoverIndex(view, agent, current, tried);
 	const target = view.entries[index];
 	if (target === void 0) return downstream;
-	const tried = new Set(current?.tried ?? []);
+	// Record the route that FAILED too, not just the one being selected.
+	//
 	tried.add(index);
 	try {
 		agent.model.select({
@@ -470,7 +594,8 @@ async function switchForNextStep(ctx, state, pending, payload, next) {
 		index,
 		tried,
 		count: (current?.count ?? 0) + 1,
-		step
+		step,
+		turn: payload.turn
 	});
 	ctx.logger.warn(
 		`[dsh-subagent-default-model] subagent %s failed with %s on turn %d step %d; %s/%s is selected for its NEXT step (this host fixes the route of the failed step, so the current turn cannot continue on it)`,
@@ -490,6 +615,23 @@ async function switchForNextStep(ctx, state, pending, payload, next) {
 			target.model
 		);
 	}
+	// The selection only lands on the NEXT step. A one-shot subagent never
+	// starts one, so without this the switch would be recorded and wasted.
+	// Told from HERE rather than from a second listener on the same waterfall:
+	// that would depend on listener order and on re-reading `pending`, which is
+	// exactly the coupling this call avoids. It runs after the selection landed.
+	// A throw here must not abort the host's failure waterfall and replace a real
+	// provider error with a plugin crash; the switch has already landed.
+	try {
+		onSwitched?.(agent, failure);
+	} catch (error) {
+		ctx.logger?.warn?.(
+			`[dsh-subagent-default-model] could not schedule a continuation for subagent %s after %s: %s`,
+			agent?.id,
+			failure?.code,
+			error instanceof Error ? error.message : String(error)
+		);
+	}
 	return downstream;
 }
 
@@ -501,7 +643,7 @@ async function switchForNextStep(ctx, state, pending, payload, next) {
  * subagent run (`agent.id`) and cleaned on `agent/disposed`, so a persistently
  * broken primary is not re-tried on every step of the same run.
  */
-function installFailover(ctx, state) {
+function installFailover(ctx, state, onSwitched) {
 	const pending = new Map();
 
 	// After a model failure on a subagent loop: advance the pool index and ask
@@ -517,16 +659,27 @@ function installFailover(ctx, state) {
 		// 0.2.2+ fixed the route for the whole step, so the route cannot be
 		// swapped on the retry this hook used to request. See
 		// `switchForNextStep` for what replaces it.
-		if (fixesStepRoute(agent)) return switchForNextStep(ctx, state, pending, payload, next);
+		if (fixesStepRoute(agent)) return switchForNextStep(ctx, state, pending, payload, next, onSwitched);
 		const current = pending.get(agent.id);
 		// The primary already failed (that triggered the first switch), so the
 		// remaining candidates are the other pool entries: at most
 		// `entries.length - 1` switches, then let the real error surface.
 		if (current !== void 0 && current.count >= view.entries.length - 1) return next(); // pool exhausted
-		const index = nextFailoverIndex(view, agent, current);
+		// Same seeding as the 0.2.2+ path: the route that failed FIRST is in
+		// `tried` too, so it cannot be picked again on a later failure.
+		const tried = new Set(current?.tried ?? []);
+		if (current === undefined) {
+			const served = agent.session?.requestContext?.();
+			if (served !== void 0) {
+				const servedIndex = view.entries.findIndex((entry) =>
+					entry.provider === served.provider && entry.model === served.model
+				);
+				if (servedIndex >= 0) tried.add(servedIndex);
+			}
+		}
+		const index = nextFailoverIndex(view, agent, current, tried);
 		// Remember every pool entry this run has already been switched to, so a
 		// candidate that fails again is not selected a second time.
-		const tried = new Set(current?.tried ?? []);
 		tried.add(index);
 		pending.set(agent.id, {
 			index,
@@ -611,6 +764,274 @@ function installFailover(ctx, state) {
 	}, "dsh-subagent-default-model: failover listeners");
 }
 
+// ── automatic continuation after a failover switch ───────────────────────────
+
+/**
+ * The producer-owned source kind for this plugin's automatic continuation turn.
+ *
+ * NOT `"user"`: that would claim the human typed it, and the transcript would
+ * render it as their own message — they never said it, and they could not tell
+ * it apart from their own input. `MessageSourceMap` is merge-extensible and each
+ * producer declares its own kind; `dsh-purge` / `dsh-connect-workbuddy` do the
+ * same. It also keeps the plugin's own messages distinguishable from the user's
+ * in the transcript, which is what the continuation cap has to key on.
+ */
+const CONTINUE_SOURCE = "plugin:dsh-subagent-default-model";
+/**
+ * The instruction a continued subagent receives.
+ *
+ * Deliberately free of route details AND of any claim that the new provider is
+ * healthy: the selection can be a no-op (a duplicate pool entry) or the target
+ * can fail immediately, and a prompt that asserts "you are now on a healthy
+ * provider" would then be simply false to the model reading it.
+ */
+const CONTINUE_TEXT = "Continue the task from where it stopped. The previous model request failed before your work was finished, so this is a fresh attempt. Do not restart from scratch and do not repeat work you already completed.";
+
+/** Message handed to a failed subagent so it takes one more turn on the healthy route. */
+function continuationMessage() {
+	return createUserMessage({
+		content: [{ type: "text", text: CONTINUE_TEXT }],
+		source: { kind: CONTINUE_SOURCE, form: "notice", summary: "failover-continue" }
+	});
+}
+
+/**
+ * Whether this agent may be woken automatically after a switch.
+ *
+ * ONLY `subagent` origin. The main agent's loop is never touched by this plugin,
+ * and its failures are the user's business, not a place to inject turns.
+ *
+ * `fork` children are EXCLUDED on purpose. The only durable proof that a child
+ * carries a fork-inherited prefix is `header.isSeeded` (the header has no
+ * `backend` field), and an extra turn on top of that inherited prefix is billed
+ * again in full on the new provider — the same cost this plugin already refuses
+ * to pay for `applyToForkChildren`. The pool route still governs its next
+ * genuine turn, which is the host's own intended behaviour.
+ */
+function continuationEligible(agent) {
+	// Kept even though the only caller already applies the same origin gate: this
+	// is the function's own precondition, and a future caller (or a refactor that
+	// moves the gate) must not be able to wake the main agent by accident.
+	if (!isSubagentAgent(agent)) return false;
+	if (agent?.session?.header?.isSeeded === true) return false;
+	return typeof agent?.followup === "function";
+}
+
+/**
+ * Whether somebody already queued this child's next turn.
+ *
+ * Both the duplicate guard and the deferred re-check ask exactly this, so it
+ * lives in one place. `nextTurn` is the host's own pending-turn list — reading
+ * it cannot disagree with what the manager will do next.
+ */
+function hasQueuedTurn(agent) {
+	const inbox = agent?.inbox;
+	return Array.isArray(inbox?.nextTurn) && inbox.nextTurn.length > 0;
+}
+
+/**
+ * Wake a switched subagent for exactly one more turn.
+ *
+ * THE POINT. `switchForNextStep` writes the healthy route through
+ * `agent.model.select()`, which the NEXT step reads. On a one-shot subagent
+ * nothing ever starts that next step, so the switch is recorded and wasted: the
+ * measured symptom was a child that ended `error` while a healthy pool entry sat
+ * selected and unused. This is the missing half of "switch to another provider
+ * and keep working".
+ *
+ * WHY A `followup` AND NOT A RETRY. The host's contract is explicit — every
+ * `followup` message "becomes the sole ordinary message of its own turn". That
+ * is the only sanctioned way to start a turn whose route is re-read, and it is
+ * also what the host's own settlement gives a continuable child ("will do no
+ * further work unless you send it more"). This plugin supplies the "more".
+ *
+ * BOUNDED BY CONSTRUCTION. It only fires when `switchForNextStep` recorded a
+ * real selection for this agent (so the pool had an untried entry and the host
+ * accepted the selection), and the switch bookkeeping caps that at
+ * `entries.length - 1` per run. `maxAutoContinues` is a second, independent
+ * ceiling for the case where settings are edited mid-run.
+ */
+function installAutoContinue(ctx, state) {
+	/** Continuations already spent by each agent run. */
+	const runs = new Map();
+	/** Teardown of the pending wake listener per agent. */
+	const pendingWake = new Map();
+
+	const section = () => state.getSection?.() ?? {};
+	const enabled = () => section().continueAfterFailover !== false;
+	const ceiling = () => {
+		const raw = section().maxAutoContinues;
+		if (typeof raw !== "number" || !Number.isFinite(raw)) return 2;
+		return Math.max(0, Math.min(10, Math.trunc(raw)));
+	};
+
+	/**
+	 * Called by the failover path AFTER `agent.model.select()` landed.
+	 *
+	 * That ordering is the whole point: a selection is only useful to a LATER
+	 * step, and a one-shot subagent never starts one. Arriving through a direct
+	 * call — not a second listener on the same waterfall — also means this never
+	 * depends on listener registration order, and it cannot fire for a failure
+	 * that was not actually switched (exhausted pool, refused selection).
+	 */
+	function onSwitched(agent, failure) {
+		if (!enabled() || !continuationEligible(agent)) return;
+		const run = runs.get(agent.id);
+		const done = run?.count ?? 0;
+		if (done >= ceiling()) {
+			ctx.logger?.warn?.(
+				`[dsh-subagent-default-model] subagent %s failed with %s and was switched, but it already used %d automatic continuation(s); ending the task instead`,
+				agent.id,
+				failure.code,
+				done
+			);
+			return;
+		}
+		// THE DUPLICATE CHECK IS THE INBOX, NOT `agent.status`.
+		//
+		// Measured the hard way: `agent/request-error` fires INSIDE the failed
+		// step, so `phase.kind` is still the running step and
+		// `agent.status === "running"` is true on EVERY failure. Gating on it
+		// silently suppressed every wake, and nothing ever continued. The honest
+		// question is "has somebody already queued the child's next turn?", and
+		// the inbox is both the only place that shows it and the exact state the
+		// host's own settlement check reads — so the two cannot disagree.
+		if (hasQueuedTurn(agent)) return;
+
+		// Budget is charged only once a wake is actually going to be queued.
+		// Charging it before the guard made a SUPPRESSED wake spend a
+		// continuation the child never received, so a child whose parent had
+		// already queued work could lose its remaining budget to nothing.
+		const runState = { count: done + 1 };
+		runs.set(agent.id, runState);
+
+		// WAKE WHEN THE AGENT GOES IDLE — not inside a session append, not on a timer.
+		//
+		// Two hard constraints meet here, and only one moment satisfies both:
+		//
+		// 1. The host's settlement check is
+		//
+		//        if (activation.failureAt === undefined &&
+		//            (inbox.nextTurn.length > 0 || inbox.nextStep.length > 0)) return "wait";
+		//        return "ready";
+		//
+		//    `failureAt` is set by `agent/error` and cleared by the failed turn's
+		//    `turn/end`. Queuing BEFORE that clears it is discarded with the inbox;
+		//    queuing after the manager has settled is wasted (the agent is gone).
+		//
+		// 2. `session/event` listeners run INSIDE `Session.append()`, while the
+		//    store still marks the entry as publishing:
+		//
+		//        entry.appending = true;
+		//        …
+		//        invokeContainedSessionObservers(… "session/event" …);   // our hook
+		//        finally { entry.appending = false; }
+		//
+		//    and any nested append throws
+		//        "session append cannot reenter while another append is being
+		//         published".
+		//
+		//    `agent.followup()` appends `agent/inbox/spliced`, so doing it from a
+		//    `turn/end` listener is REJECTED — measured on this host: the wake
+		//    threw, was logged, and every continuation silently disappeared. That
+		//    is exactly the class of failure this feature exists to remove, so it
+		//    is not acceptable even though a `setImmediate` happens to dodge it.
+		//
+		// `agent/status` is the one signal that satisfies both: `setPhase()` emits
+		// it synchronously from `kick()`'s `finally`, i.e. after the failed turn's
+		// `turn/end` has been committed AND outside any append, and before the
+		// manager's settlement watcher runs. Queuing here both survives and is
+		// honoured.
+		const wake = () => {
+			unsubscribe();
+			try {
+				if (hasQueuedTurn(agent)) {
+					// Nothing was queued, so nothing was spent.
+					refund();
+					return;
+				}
+				agent.followup(continuationMessage());
+				ctx.logger?.warn?.(
+					`[dsh-subagent-default-model] subagent %s failed with %s; queued continuation %d/%d on the newly selected route`,
+					agent.id,
+					failure.code,
+					runState.count,
+					ceiling()
+				);
+			} catch (error) {
+				// The switch has already landed; losing the wake must not turn a
+				// clean provider error into an unexplained plugin crash.
+				refund();
+				ctx.logger?.warn?.(
+					`[dsh-subagent-default-model] could not wake subagent %s after %s: %s`,
+					agent.id,
+					failure.code,
+					error instanceof Error ? error.message : String(error)
+				);
+			}
+		};
+		// Drop any listener left over from an earlier failure of this same agent.
+		pendingWake.get(agent.id)?.();
+		const disposers = [];
+		const unsubscribe = () => {
+			for (const dispose of disposers.splice(0)) {
+				try { dispose(); } catch { /* teardown must not throw */ }
+			}
+		};
+		// Give the budget back when the wake did not actually queue anything.
+		//
+		// Restore the PREVIOUS count rather than deleting the entry: deleting also
+		// forgets the charge made by an earlier, real wake in this run, so a run
+		// that was suppressed twice could exceed `maxAutoContinues` by one.
+		const refund = () => {
+			if (runs.get(agent.id) !== runState) return; // superseded by a newer wake
+			if (done === 0) runs.delete(agent.id);
+			else runs.set(agent.id, { count: done });
+		};
+		const childOn = agent?.ctx?.on;
+		if (typeof childOn === "function") {
+			// `agent/status` is per-agent, so no id filter is needed; "idle" means
+			// the failed turn has fully retired.
+			disposers.push(childOn.call(agent.ctx, "agent/status", ({ status }) => {
+				if (status === "idle") wake();
+			}));
+		} else {
+			// Unreachable on every host in the peer range (`agent.ctx` exists from
+			// 0.1.7 on, and this path only runs where `agent.model.select` exists),
+			// but say so instead of silently arming nothing: a future host that
+			// drops `ctx` would otherwise disable the feature with no trace.
+			refund();
+			ctx.logger?.warn?.(
+				`[dsh-subagent-default-model] subagent %s was switched after %s but exposes no per-agent context to hook; no continuation was queued`,
+				agent.id,
+				failure.code
+			);
+			return;
+		}
+		pendingWake.set(agent.id, unsubscribe);
+	}
+
+	// `count` is the PER-RUN budget: it is released only on `agent/disposed`.
+	// Clearing it on the continuation turn's first step (the old behaviour)
+	// restarted the budget every turn and made `maxAutoContinues` a per-turn cap
+	// — the documented "run" ceiling became a no-op. Duplicate suppression does
+	// not need that hook either: `hasQueuedTurn` reads the host's live inbox.
+	const disposeDisposed = ctx.on("agent/disposed", ({ agent }) => {
+		runs.delete(agent.id);
+		pendingWake.get(agent.id)?.();
+		pendingWake.delete(agent.id);
+	});
+
+	ctx.effect(() => () => {
+		disposeDisposed();
+		for (const dispose of pendingWake.values()) dispose();
+		pendingWake.clear();
+		runs.clear();
+	}, "dsh-subagent-default-model: auto-continue");
+
+	return onSwitched;
+}
+
 // ── subagent route context injection ─────────────────────────────────────────
 
 /**
@@ -623,8 +1044,39 @@ function installFailover(ctx, state) {
  */
 const ROUTE_CONTEXT_SOURCE = "plugin:dsh-subagent-default-model";
 
-/** Marker so the injected line is recognised and replaced, never duplicated. */
-const ROUTE_CONTEXT_FORM = "route-context";
+/**
+ * The declared context form of the injected lines.
+ *
+ * MUST be one of the Host's `KnownContextForm` values
+ * (`instructions | catalog | snapshot | notice | relay | recall`,
+ * `dsh-client-ui-chat` `event-projection.ts`). Anything else is
+ * `contextForm(source) === null`, which the Host renders through `OpaqueBody` —
+ * the row exists but shows a raw JSON dump instead of the summary, and
+ * `noticeSummary()` never runs at all.
+ *
+ * `notice` is the FORM whose collapsed row renders `source.summary` beside the
+ * producer label, which is exactly this plugin's shape: one short line the
+ * human reads without expanding. The old marker (`route-context`) was a private
+ * string that no Host version knows, which is why the injected line was only
+ * ever visible to the model and never as a Host-drawn row.
+ */
+const ROUTE_CONTEXT_FORM = "notice";
+
+/**
+ * The human-facing one-line summary of a route (`provider/model`).
+ *
+ * Separate from {@link routeContextText} on purpose: the TEXT is what the model
+ * reads and must stay self-describing, while the SUMMARY is what the Host puts
+ * on the collapsed row next to the producer label, where the same sentence
+ * repeated would be noise.
+ *
+ * @param {string} provider - resolved provider id.
+ * @param {string} model - resolved model id.
+ * @returns {string} the row summary.
+ */
+function routeSummary(provider, model) {
+	return provider && model ? `${provider}/${model}` : provider || model || "unknown";
+}
 
 /**
  * Build the one-line, human/model-readable route notice.
@@ -720,23 +1172,140 @@ function routeForInjection(agent, settled) {
 }
 
 /**
- * Install the subagent route-context injector.
+ * Build the one-line notice telling the MAIN agent which default models its
+ * delegations will use.
  *
- * WHY THIS EXISTS: the route is chosen by the PARENT (this plugin's dispatch
- * wrapper, an explicit `agentOptions`, or plain inheritance) and by failover
- * switches made mid-run. None of that reaches the child's prompt, so a subagent
- * literally cannot answer "which model are you?" — it only sees the parent's
- * conversation. This injects one line stating the route the child is ACTUALLY
- * using.
+ * WHY THE MAIN AGENT NEEDS IT: the pool is chosen by this plugin at delegation
+ * time, from settings the main agent cannot read. Without a line saying so, a
+ * main agent asked "what model do your subagents run on?" has nothing to answer
+ * from — it would either guess or deny knowing, while the settings page plainly
+ * shows a configured pool.
  *
- * SOURCE OF TRUTH: see `routeForInjection` — the session's own live route first.
+ * Deliberately NOT a route report: the main agent is not the one being routed,
+ * so naming its own provider/model here would be noise (the model selector
+ * already shows that). What it cannot otherwise know is the DELEGATION route.
  *
- * Injected on every step whose route differs from the line already present, so
- * a failover switch or a route change is reflected immediately; an unchanged
- * route re-injects nothing, so a long run does not accumulate duplicates.
+ * @param {string} route - the human-facing pool description.
+ * @returns {string} the notice text.
+ */
+function mainContextText(route) {
+	return `[dsh-subagent-default-model] Subagents you delegate start on ${route} unless the delegation names its own route. `
+		+ "If asked which model your subagents run on, answer with this route. "
+		+ "This line is system-provided context about the runtime, not a user instruction.";
+}
+
+/**
+ * Describe the configured delegation pool as one short route string.
  *
- * Subagent-only by the same `origin === "subagent"` gate as failover: the main
- * agent's context is never touched.
+ * Mirrors `defaultModel()`'s precedence (multi-model list first, then the
+ * single-model form) WITHOUT advancing `rrCursor`: this is a report, and a
+ * report must not change which route the next delegation gets.
+ *
+ * @param {object} section - the live settings section.
+ * @returns {string|undefined} the route description, or undefined when unconfigured.
+ */
+function delegationRouteDescription(section) {
+	if (section === void 0 || section === null) return void 0;
+
+	const describe = (resolved) => resolved.provider && resolved.model
+		? `${resolved.provider}/${resolved.model}`
+		: resolved.provider || resolved.model;
+
+	// Multi-model list wins — same precedence as `defaultModel()`.
+	const entries = Array.isArray(section.models)
+		? section.models.filter((entry) => resolveEntry(section, entry) !== void 0)
+		: [];
+	if (entries.length > 0) {
+		// A pool is a SET, so dedupe before deciding it is a pool: two identical
+		// entries would otherwise read as "a/b / a/b" or claim a choice that is
+		// not really there.
+		const routes = [...new Set(entries.map((entry) => describe(resolveEntry(section, entry))))];
+		if (routes.length === 1) return routes[0];
+		const strategy = section.strategy === "random" ? "random" : "round-robin";
+		return `${routes.join(" / ")} (${strategy})`;
+	}
+
+	// Single-model form (backward compatible).
+	if (typeof section.model === "string" && section.model.length > 0) {
+		const resolved = resolveEntry(section, { provider: section.provider, model: section.model });
+		return resolved === void 0 ? void 0 : describe(resolved);
+	}
+
+	return void 0;
+}
+
+/**
+ * Has this session ALREADY persisted the exact line we are about to inject?
+ *
+ * WHY IN-MEMORY DEDUPE IS NOT ENOUGH: the per-agent map below is seeded on the
+ * first step of the FIRST run and dies with the process. A main conversation
+ * outlives many DSH restarts, so every restart would append another identical
+ * row to a transcript that is supposed to describe one unchanging fact —
+ * `dsh-ldvh` shows exactly that failure in the wild (sessions carrying 3-4
+ * copies of the same notice).
+ *
+ * `deriveMessages()` is the session's own supported reader for derived history
+ * (the same fold the provider transcript is built from), so this asks the log
+ * rather than guessing. Two properties matter for cost and correctness:
+ *
+ *  - it is CACHED and monotonic — pure tail growth costs O(new nodes), so
+ *    calling it once per step is cheap;
+ *  - it returns SHARED, DEEP-FROZEN messages, so nothing here may mutate them.
+ *
+ * A session that does not expose the reader (an older host, or a fixture) is
+ * treated as "nothing known" and falls back to the in-memory map — the feature
+ * must never break the step waterfall over a missing optimisation.
+ *
+ * @param {object} agent - the agent whose session is inspected.
+ * @param {string} text - the exact model-visible text that would be injected.
+ * @returns {boolean} true when an identical line is already in the history.
+ */
+function historyAlreadyHas(agent, text) {
+	const derive = agent?.session?.deriveMessages;
+	if (typeof derive !== "function") return false;
+	let messages;
+	try {
+		messages = derive.call(agent.session);
+	} catch {
+		return false;
+	}
+	if (!Array.isArray(messages)) return false;
+	return messages.some((message) => {
+		if (message?.source?.kind !== ROUTE_CONTEXT_SOURCE) return false;
+		const content = Array.isArray(message.content) ? message.content : [];
+		const existing = content
+			.filter((block) => block?.type === "text")
+			.map((block) => block.text ?? "")
+			.join("");
+		return existing === text;
+	});
+}
+
+/**
+ * Install the context injector for BOTH sides of a delegation.
+ *
+ * ONE LISTENER, TWO ROLES — deliberately, not by accident:
+ *
+ *  - a SUBAGENT is told the route it is ACTUALLY running on, because the route
+ *    is chosen by the parent (this plugin's dispatch wrapper, an explicit
+ *    `agentOptions`, or plain inheritance) and by failover switches made
+ *    mid-run, none of which reaches the child's prompt. Without this a subagent
+ *    literally cannot answer "which model are you?" — it only sees the parent's
+ *    conversation.
+ *  - the MAIN agent is told the DELEGATION pool, because that pool lives in
+ *    settings the main agent cannot read; without it, "what model do your
+ *    subagents run on?" has no answer in its context.
+ *
+ * Both are real, persisted injections (`createUserMessage` placed into
+ * `decision.messages`, which `step()` appends to the session as a `user/message`
+ * with `surfaceOp: "append"`), so the Host records them and its own
+ * `ContextInjectionRow` draws the row — `上下文注入 · <producer> · <summary>`.
+ * The plugin draws NO row of its own for either side.
+ *
+ * Injected only when the text to report DIFFERS from the line already placed in
+ * this session, so a failover switch or a settings change is reflected
+ * immediately while an unchanged route re-injects nothing (a long run does not
+ * accumulate duplicates).
  */
 function installRouteContextInjector(ctx, state) {
 	/** Settled route per agent id, captured after `agent/request` resolves. */
@@ -801,23 +1370,50 @@ function installRouteContextInjector(ctx, state) {
 		const decision = await next();
 		if (decision === void 0 || decision === null || decision.kind === "reject") return decision;
 		if (state.getSection()?.injectRouteContext === false) return decision;
-		if (!isSubagentAgent(agent)) return decision;
 
 		if (!Array.isArray(decision.messages)) return decision;
 
-		// The live session route wins; see `routeForInjection` for why the
-		// dispatch-time `agent.options` must NOT be preferred.
-		const route = routeForInjection(agent, resolvedRoute);
-		if (route === void 0) return decision;
+		const subagent = isSubagentAgent(agent);
+		/** @type {string|undefined} the text this side must be told, if any. */
+		let wanted;
+		/** @type {string|undefined} the collapsed-row summary for that text. */
+		let summary;
+		if (subagent) {
+			// The live session route wins; see `routeForInjection` for why the
+			// dispatch-time `agent.options` must NOT be preferred.
+			const route = routeForInjection(agent, resolvedRoute);
+			if (route === void 0) return decision;
+			wanted = routeContextText(route.provider, route.model);
+			summary = routeSummary(route.provider, route.model);
+		} else {
+			// MAIN agent: report the DELEGATION pool, never its own route. Read on
+			// every step (not cached) so a settings change lands on the next step.
+			const description = delegationRouteDescription(state.getSection());
+			if (description === void 0) return decision;
+			wanted = mainContextText(description);
+			summary = description;
+		}
 
-		const wanted = routeContextText(route.provider, route.model);
-		// Same route as last time => the line already placed in this session is
-		// still accurate; inject nothing (no duplicate, no churn).
+		// Same text as last time => the line already placed in this session is
+		// still accurate; inject nothing (no duplicate, no churn). The in-memory
+		// map covers this run; `historyAlreadyHas` covers earlier runs, which
+		// matters for a main conversation that survives a restart.
 		if (injectedRoute.get(agent.id)?.text === wanted) return decision;
+		if (historyAlreadyHas(agent, wanted)) {
+			injectedRoute.set(agent.id, { text: wanted });
+			return decision;
+		}
 
 		const message = createUserMessage({
 			content: [{ type: "text", text: wanted }],
-			source: { kind: ROUTE_CONTEXT_SOURCE, form: ROUTE_CONTEXT_FORM }
+			// `summary` is what the Host's collapsed context row prints next to
+			// the producer label (`noticeSummary()`), so the reader sees the
+			// route without expanding a JSON body.
+			source: {
+				kind: ROUTE_CONTEXT_SOURCE,
+				form: ROUTE_CONTEXT_FORM,
+				summary
+			}
 		});
 		injectedRoute.set(agent.id, { text: wanted });
 		// A new array, not a push: the decision object belongs to the loop, and a
@@ -988,7 +1584,11 @@ export function apply(ctx, config) {
 				reasoningEffort: unwrap(raw.reasoningEffort),
 				// Fork/same-context policy. Absent resolves to the schema default
 				// (`false`), so an old config patch keeps the host's fork behaviour.
-				applyToForkChildren: unwrap(raw.applyToForkChildren)
+				applyToForkChildren: unwrap(raw.applyToForkChildren),
+				// Auto-continuation: a switch is only useful to a LATER turn, so a
+				// one-shot subagent must be woken for one to exist at all.
+				continueAfterFailover: unwrap(raw.continueAfterFailover),
+				maxAutoContinues: unwrap(raw.maxAutoContinues)
 			};
 			// Drop any field that resolved to undefined so downstream defaults apply.
 			for (const key of Object.keys(section)) {
@@ -1001,7 +1601,12 @@ export function apply(ctx, config) {
 	// Subagent-only failover hooks the agent loop, not the subagents service,
 	// so it is installed unconditionally: listeners no-op when the `failover`
 	// section is absent/disabled or when the failing agent is the main loop.
-	installFailover(ctx, state);
+	//
+	// The auto-continue engine is installed FIRST and handed in as the switch
+	// callback, so the failover path can wake the child the moment a selection
+	// lands — without a second listener racing the first on the same waterfall.
+	const onSwitched = installAutoContinue(ctx, state);
+	installFailover(ctx, state, onSwitched);
 
 	// Tell each subagent which route it is actually running on. Same gate as
 	// failover (origin === "subagent"), so the main agent's context is untouched.

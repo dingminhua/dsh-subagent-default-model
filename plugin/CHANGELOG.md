@@ -1,5 +1,142 @@
 # Changelog
 
+## 2.2.4 (2026-11-13)
+
+### Changed
+
+**上下文注入改成真正的「宿主看得见」的注入行；主代理也开始收到一条。**
+
+用户指出的问题很具体：注入行此前只是本插件**自绘的修饰**，宿主并不知道它的存在。
+
+- **`form` 从 `"route-context"` 改为 `"notice"`。** 这是根因。宿主 `dsh-client-ui-chat` 只认识
+  `instructions / catalog / snapshot / notice / relay / recall` 六个 form
+  （`KNOWN_FORMS`），别的值一律 `contextForm() === null` 并被丢给 `OpaqueBody`
+  ——于是那一行既没有摘要、展开也只有一坨原始 JSON。改用它认识的 `notice`
+  并补上 `source.summary`（`provider/model`），宿主自己的
+  `ContextInjectionRow` 才会画出「上下文注入 · dsh-subagent-default-model · minmax/MiniMax-M3.1-Flash」。
+- **删掉自绘的对话行。** `chat-subagent-model-notice` 节点 kind、`SubagentModelNoticeRow`
+  渲染器、`conversation.chat.node` 注册与整套样式全部移除。它存在的理由是
+  DSH 0.1.7 的 `isVisibleChatNode()` 会硬排除 `node.kind === "context"`；当前宿主
+  （0.2.2）只排除 `system-prompt`。而只要注入是真注入（落进 session 的
+  `user/message`），宿主**必然**自己画一行——再自绘一条就是两行「上下文注入」。
+- **主代理现在也收到一行。** 内容是设置里的默认派发模型（多模型时带策略），
+  因为这份设置在主代理的上下文里读不到，「你的子代理跑在哪个模型上」原本无从回答。
+  它报的是**派发目标**，不是主代理自己的 provider/model。这一行不推进轮换游标：
+  它只是报告，看一眼不该改变下一次派发拿到哪条路由。
+
+- **跨重启去重。** 内存里的「本行已注入」记录随进程消失，而主对话能活过很多次重启，
+  每次重启追加一行就会像 `dsh-ldvh` 那样在一个会话里堆出三四条相同通知
+  （实测该插件会话中 `ldvh=3` / `ldvh=4`）。现在除内存记录外，还会读
+  `session.deriveMessages()`——会话自己的派生历史折叠（即发给模型的那份）——判断同一行
+  是否已存在。读取器不存在时（旧宿主 / 精简 fixture）退回内存记录，不会让瀑布报错。
+
+### Removed
+
+- `chat-subagent-model` 会话视图定义、`SubagentModelNoticeRow` 渲染器、
+  `CHAT_MODEL_NODE_KIND` 常量、`row.chatModelInitial` / `row.chatModelChange` /
+  `row.chatModelResume` / `row.noticeLabel` 四条 locale 词条与 `.dsm-notice-*` 样式。
+  轨迹视图（`trajectory-subagent-model`）保留：它渲染的是 `request/context` 帧，
+  宿主不会自己呈现。
+
+## 2.2.3 (2026-11-13)
+
+### Added
+
+**切换后自动续跑：故障转移选中的健康路由，现在真的会被用上。**
+
+2.2.2 修好了「在 0.2.2 上不再抛错」，但只做到一半。`agent.model.select()` 的结果要到**下一步**的准备阶段才被读取，而一次性 `subagent` 没有下一步——于是选中的健康路由**从未被使用**，任务照样以 `error` 结束。
+
+实机复现（池里 `minmax` 已耗尽额度、`dsh-opencode-go` 健康）：子代理被派到 `minmax`，返回
+`429 … 已达到 Token Plan 用量上限`，失败转移把下一条路由选好了，会话却只有 **1 个 turn** 就结束；再手动发一条消息，同一个子代理立刻在 `dsh-opencode-go` 上跑完。**切换是自动的，续跑不是**——这就是缺口。
+
+现在失败转移在 `select()` 真正落地之后，通过 `agent.followup()` 唤醒子代理一轮，让新路由被用到：
+
+- **只在真的切换成功时唤醒**。唤醒由失败转移路径直接回调触发（不是在同一个瀑布上再加一个监听器），所以池耗尽、或宿主拒绝了 `select()` 时都不会唤醒——那种情况下下一轮只会撞同一个错误，白烧一次请求。`failoverView` 还会按 `provider+model+effort` 去重，因为重复路由会让 `model.select()` 静默变成空操作。
+- **唤醒消息的 `source.kind` 是 `plugin:dsh-subagent-default-model`，不是 `user`**。否则转录会把它渲染成人自己敲的消息：用户没说过这句话，也无从分辨。
+- **不唤醒 fork 子代理**。判据是 `header.isSeeded === true`——header 没有 `backend` 字段，这是「带 fork 继承前缀」唯一的持久证据。它那 14 万 token 的继承前缀换到新供应商要全额重算，正是本插件在 `applyToForkChildren` 上已经拒绝付的代价。
+- **不唤醒主代理**，同所有其他功能的 `origin === "subagent"` 门禁。
+- **排队时机是这套机制的关键**，同时受两条硬约束夹击：
+  - **不能太早**：`failureAt`（由紧随其后的 `agent/error` 置位）会让宿主的收敛判断短路成 `"ready"`，排进去的消息连同收件箱一起被清掉。
+  - **不能太晚**：宿主判定 `"ready"` 后立刻销毁 agent，任何定时器醒来时对象都已不在。
+  - **不能在 `turn/end` 里排**：`session/event` 监听器是在 `Session.append()` **内部**同步调用的，此时存储仍标记该条目为「发布中」，任何嵌套 append 都会被拒——实测报错 `session append cannot reenter while another append is being published`，于是唤醒抛异常、被日志吞掉、续跑全部消失。（这一版曾用 `setImmediate` 侥幸绕开，那依赖持久化刷盘时的 I/O 让出，不是排序保证。）
+  - **正确时机是 `agent/status` 变为 `idle`**：`setPhase()` 在 `kick()` 的 `finally` 里同步发出它，此时候选的 `turn/end` 已提交（`failureAt` 已清除）、且不在任何 append 期间、又早于管理器的收敛检查。在此时排入收件箱，既不会被清除，也不会被销毁。
+- **不重复唤醒**：判据是**收件箱**（`inbox.nextTurn` 是否已有排队），而不是 `agent.status`——后者在失败瞬间恒为 `running`，用它把关会拦掉每一次唤醒。
+- **有上限**：`maxAutoContinues`（默认 2，0 关闭）。真实边界仍是池子大小（N 条最多切 N-1 次）；这个上限只为「运行中改配置」这种极端情况兜底。
+
+### Configuration
+
+两个新键：
+
+| 键 | 默认 | 含义 |
+| --- | --- | --- |
+| `continueAfterFailover` | `true` | 切换后是否唤醒子代理再跑一轮。设 `false` 恢复 2.2.2 的行为（只切不续） |
+| `maxAutoContinues` | `2` | 单个子代理运行最多连续自动续跑几次；`0` 等于关闭 |
+
+### Fixed
+
+**`strategy: "random"` 会把刚失败的那条路由再抽一次，导致整条切换链静默失效。**
+
+随机分支原来是一句朴素的
+
+```js
+return Math.floor(Math.random() * entries.length);
+```
+
+它既不查 `tried`，也不排除**刚刚失败的那条**。抽中死路由时，`model.select()` 把「新选择」与当前选择一比，相等，于是直接返回、**不写 `model/selection`**——切换等于没发生：续跑的那一轮仍请求同一条死路由，子代理再次失败。
+
+实机诊断把两种结果并排拍了下来：
+
+```
+selecting minmax/MiniMax-M3.1-Flash        (before=minmax/MiniMax-M3.1-Flash)
+after select, current() 未变, seq 未变      ← 判等跳过，切换白做
+
+selecting dsh-opencode-go/deepseek-v4.1-flash  (before=minmax/MiniMax-M3.1-Flash)
+after select, current() 已变, seq 33→34        ← 真正写入，切换生效
+```
+
+修法：随机也只在**真正可用**的候选里抽——先剔除本次运行已试过的，再剔除当前正在服务（即刚失败）的那条；都剔完了才退回朴素随机，让调用方自己的池耗尽判断如实报错。
+
+同时补了 3 项回归测试：两条路线的池重复 200 次不得抽回死路由、三条路线的池重复 100 次同理，并把原有的随机用例从「不查重」改成「不得重选」。
+
+### Fixed（代码审查发现，均已补回归测试）
+
+1. **`random` 仍会抽回已经失败过的路由。** `tried` 只记录「切换到的」索引，最初失败的那条从未进入。于是从第二次切换起，它既不是 `served`、也不在 `tried`，又能被抽中——实测三条路线的池：**300 次第二次切换里有 136 次回到最初那条死路由**，而 `entries.length - 1` 的上限使第三条路线**从未被尝试**。修法：切换前把「刚失败的那条」也记入 `tried`（新旧宿主两条路径都修）。
+2. **`installAutoContinue` 被安装两次。** 重构（定时器改为回调）留下的旧调用还在 `installFailover` 末尾，导致两套引擎、两套监听器，且第一个引擎的返回值被丢弃。已删除。
+3. **唤醒时机改为订阅 `agent/status` 的 `idle` 转换。** 原先的 `setImmediate` 能成功，靠的是「管理器在 `flushFinalState()` 里 await 持久化刷盘、因此让出一次 I/O」——这是持久化层的副作用，不是排序保证。中途曾改成订阅 `turn/end`，但那**更糟**：`session/event` 监听器运行在 `Session.append()` 内部，`agent.followup()` 的嵌套 append 被存储的重入守卫直接拒绝（实测 `session append cannot reenter while another append is being published`），唤醒抛异常后被日志吞掉，续跑全部消失——而在测试夹具里这个错误完全看不见。`agent/status` 是唯一同时满足「`turn/end` 已提交」「不在 append 期间」「早于收敛检查」的时机。
+4. **`maxAutoContinues` 实际是每 turn 而非每 run。** 引擎原本在每个 `agent/pre-step` 删除计数器，而续跑的一轮必然从这个钩子开始，等于每轮重置预算：`maxAutoContinues: 1` 仍会排第二次续跑。已改为只在 `agent/disposed` 释放。
+5. **重复路由的池会让 `select()` 静默失效。** 池里两条解析出同一个 provider/model 时（如 `["a","a"]`），宿主比较相等后不写 `model/selection`，插件却仍记一次切换并唤醒。已在 `failoverView` 按 provider+model+effort 去重。
+10. **续跑轮无法再次切换（本轮引入又修复）。** 失败转移的分步守卫只比较 `step`、不比较 `turn`，而续跑的一轮从 `step 1` 重新开始——于是新一轮的首个失败被当成「这一 step 已经切过」而被拒，**一次性子代理因此最多只能切一次**，池里第三条路线永远用不到。实测三条路线只切到第二条；守卫改为同时比较 `turn` 与 `step` 后恢复正常（四条池可依次切到第三、第四条）。
+9. **仅 effort 不同的池会选中它当前所在的那一条。** `session.requestContext()` 不带 `reasoningEffort`，只按 provider+model 定位服务路由会指到错误的条目，于是选回子代理已经在用的 effort——宿主比较 effort，判等后静默跳过。改为用 `agent.model.current()`（含 effort）定位。
+6. **唤醒消息曾断言「你现在跑在不同且健康的供应商上」**——当选择是空操作、或目标立刻也失败时，这句话是假的。已改为不声称健康状况。
+7. **英文 README 未同步**：`continueAfterFailover` / `maxAutoContinues` 与续跑说明只写进了中文版。已补齐。
+8. **测试大面积空转**：多个「不会唤醒」的用例在延迟回调执行前就断言，把守卫删掉仍然全绿；池耗尽用例三次派发都在同一步，根本没走到耗尽分支。已全部修正，并对每个守卫做了变异验证（删掉即红）。
+
+### End-to-end verification (live, 2026-11-13)
+
+池中 `minmax/MiniMax-M3.1-Flash` 已耗尽额度、`dsh-opencode-go/deepseek-v4.1-flash` 健康。一次派发三个子代理（`strategy: random`），三者呈现完全相同的预期轨迹：
+
+```
+turn 1 -> error        （命中 minmax，429 用量上限）
+turn 2 -> completed    （自动切到 dsh-opencode-go 并跑完）
+```
+
+会话日志逐帧核对：
+
+| 帧 | 路由 |
+| --- | --- |
+| `request/header` seq 13 | `minmax/MiniMax-M3.1-Flash` |
+| `request/context` seq 14 | `minmax/MiniMax-M3.1-Flash` |
+| `model/selection` seq 33 | `dsh-opencode-go/deepseek-v4.1-flash` |
+| `request/header` seq 43 | `dsh-opencode-go/deepseek-v4.1-flash` |
+| `request/context` seq 44 | `dsh-opencode-go/deepseek-v4.1-flash` |
+| `assistant/message` seq 45 | 由 `dsh-opencode-go/deepseek-v4.1-flash` 生成 |
+
+**全程没有任何人工干预**：第 2 轮由插件自己唤醒，切换由插件自己完成。这就是「一个代理不能用时切到另一个并继续工作」的完整闭环。
+
+### Verified
+
+206 项测试全绿，其中约 15 项覆盖续跑：正常唤醒、池耗尽不唤醒、主代理不唤醒、fork 不唤醒、开关关闭、失败码不合格、已在排队的收件箱不重复排队、上限为 0。
+
 ## 2.2.2 (2026-11-13)
 
 ### Fixed

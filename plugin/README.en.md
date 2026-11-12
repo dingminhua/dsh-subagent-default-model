@@ -35,6 +35,13 @@ With `failoverEnabled` (on by default), when a subagent hits a **connection-clas
 - **Inherited reasoning strength is dropped** — after switching, the new provider/model is not sent the previous route's `reasoningEffort`; it resolves its own default. Otherwise a target that rejects that level can fail every request and burn through all remaining candidates.
 - **Sticky within a run** — after a switch, later steps of that same subagent stay on the new model instead of flip-flopping every step.
 - **Exhaustion passes the real error through** — once every candidate in the list has been tried, the real error surfaces; there is no infinite retry.
+- **Automatic continuation after a switch** — once the new route is chosen, the plugin **wakes the subagent for one more turn** so that route is actually used, instead of being selected and never read.
+  - **Why this step is needed**: DSH 0.2.2+ fixes the route during each step's preparation, so `agent.model.select()` only takes effect on the **next** step. A one-shot `subagent` never starts one, so the healthy route would be **selected and never used** and the task would still end in an error (measured: the switch had selected `dsh-opencode-go` while the subagent still ended after a single turn).
+  - **Only wakes after a switch really landed**: not when the pool is exhausted, and not when the host refused the selection — another turn would just hit the same error.
+  - **Never wakes `fork` children**: they carry the parent's inherited prefix, which a provider change would re-bill in full; the test is `header.isSeeded`.
+  - **Never wakes the main agent**, and **never stacks a duplicate wake** — the test is whether the inbox already holds a runnable next turn, not `agent.status`.
+  - **The timing matters**: the wake must be queued once the failed turn has fully retired and **outside any session write** — the moment `agent/status` becomes `idle`. Queuing synchronously lets the host's settlement check clear the inbox along with the message; a timer of any length is far too late, because the agent is already disposed; and queuing inside a `turn/end` listener is rejected by the store's reentrancy guard (a nested append throws).
+  - Controlled by `continueAfterFailover` (on by default) and `maxAutoContinues` (default 2).
 - **Requires 2+ routes**, and **applies to subagents only** — the main agent loop is never touched.
 
 ### Capability 3 — Route visibility: you can see it, and so can the subagent
@@ -221,6 +228,8 @@ To pin a **single** model, use `model` instead of `models` (never both in the sa
 | `models` | array | `[]` | List of model entries (string or `{provider, model, reasoningEffort?}` pair). Only meaningful for Capabilities 1 and 2 with 2+ entries. |
 | `strategy` | string | `round-robin` | Capability 1's distribution strategy: `round-robin` (sequential) or `random`. |
 | `failoverEnabled` | boolean | `true` | Capability 2: switch models **across providers** inside the `models` list when a subagent hits a connection failure (subagents only). |
+| `continueAfterFailover` | boolean | `true` | Capability 2: wake the subagent for one more turn after a switch, so the selected healthy route is actually used. |
+| `maxAutoContinues` | number | `2` | Capability 2: maximum consecutive automatic continuations per subagent run; `0` disables it. |
 | `injectRouteContext` | boolean | `true` | Capability 3 channel 2: inject a real one-line prompt stating the live provider/model into each subagent’s **own context** (subagents only). |
 | `reasoningEffort` | string | — | Optional reasoning strength for a model entry (e.g. `high`, `max`). |
 
@@ -259,12 +268,14 @@ Capability 3 has **two independent channels**. See [Capability 3](#capability-3-
 
 ### Channel 1: UI rows (for the user)
 
-| View | What it shows | Source frame |
+| View | What it shows | Source |
 | --- | --- | --- |
-| Trajectory | A row "Current provider/model: `provider/model`" | official `request/context` |
-| Conversation | One of "Current provider/model" / "Switched to" / "Currently using" | official `request/header` (by `reason`: `initial` / `change` / `resume`) |
+| Conversation | The Host's own "Context injection · dsh-subagent-default-model · `provider/model`" | the injected message's `source.summary`, rendered natively by `ContextInjectionRow` |
+| Trajectory | A row "Current provider/model: `provider/model`" | the plugin's own `trajectory-subagent-model` definition (over the official `request/context` frame) |
 
-Both registrations live inside `ctx.effect`, and the node `kind` values are plugin-owned (`trajectory-subagent-model` for the trajectory, `chat-subagent-model-notice` for the conversation) rather than reusing the Host's built-in `context` kind — the latter is filtered out by the Host's visibility rules.
+> **The conversation row is drawn by the Host, not by this plugin.**
+>
+> Older versions hand-drew it with a plugin-owned node kind (`chat-subagent-model-notice`) plus a `conversation.chat.node` renderer. That workaround existed because DSH 0.1.7's `isVisibleChatNode()` hard-excluded `node.kind === "context"`; the current Host (0.2.2) only excludes `system-prompt`, so `context` is visible. And once an injection is a **real** injection (a `user/message` persisted into the session), the Host draws its native row for it — hand-drawing a second one would show the user two identical "context injection" rows. That whole hand-drawn path has therefore been removed.
 
 ### Channel 2: Prompt injection (for the subagent)
 
@@ -275,9 +286,17 @@ See the full description and sample text above. Implementation:
 | Value source | the `{provider, model}` returned by the `agent/request` waterfall **after** it settles (including a failover swap) |
 | Injection point | the following `agent/pre-step`, where that step's message list is still mutable |
 | Dedupe | an unchanged route injects nothing; a changed route replaces the stale line |
-| Scope | `origin === "subagent"` only; the main agent is never touched |
+| Scope | a subagent reports **the route it is actually running on**; the main agent reports **the model its delegations will use** (see below) |
 | Setting | `injectRouteContext`, on by default |
-| Message source | `plugin:dsh-subagent-default-model` + `form: "route-context"` (the v4 session format requires a producer-owned `source.kind`) |
+| Message source | `plugin:dsh-subagent-default-model` + `form: "notice"` + `summary` (v4 requires a producer-owned `source.kind`; the `form` must be one the Host knows or the row renders as a raw JSON dump) |
+
+#### The main agent is told its DELEGATION target, not its own route
+
+The main agent cannot read this plugin's settings, so "which model do your subagents run on?" has no answer in its context. It therefore receives one line describing the configured pool (with the strategy when there are several, e.g. `a/x / b/y (round-robin)`). It deliberately does **not** report the main agent's own provider/model — the main agent is not the one being routed, and repeating it would be noise.
+
+That line is injected only when its content changes, and it **does not advance the round-robin cursor**: it is a report, and looking at it must not change which route the next delegation gets.
+
+Dedupe survives restarts: besides the in-run memory record, it reads `session.deriveMessages()` — the session's own derived-history fold, i.e. what the model is sent — to see whether the same line is already there. In-memory tracking alone is not enough: a main conversation outlives many restarts, and appending a row on each one would pile up three or four identical notices in a single session (the failure `dsh-ldvh` shows in the wild).
 
 > **The line only appears once the route is known.**
 >

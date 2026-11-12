@@ -35,6 +35,13 @@
 - **切换时丢弃继承的推理强度** —— 换到新 provider/model 后不沿用旧路由的 `reasoningEffort`，按目标自己的默认档位请求；否则目标模型可能因「不支持该强度」而直接拒绝请求，导致把剩余候选全部烧光。
 - **同一次运行内粘住** —— 切换后该子代理后续步骤继续跑在新模型上，不会每步来回跳。
 - **耗尽即放行** —— 列表内全部候选都试过仍失败，就抛出真实错误，不做无限重试。
+- **切换后自动续跑** —— 换好路由之后，插件会**唤醒子代理再跑一轮**，让新路由真正被用上，而不是「切好了却没人用」。
+  - **为什么需要这一步**：宿主 0.2.2+ 把路由锁死在每个 step 的准备阶段，`agent.model.select()` 的结果要到**下一步**才被读取；一次性 `subagent` 没有下一步，于是选中的健康路由会**从未被使用**、任务照样以错误结束（实测：切换已选中 `dsh-opencode-go`，子代理仍只有 1 个 turn 就失败）。
+  - **只在真的切换成功时唤醒**：池耗尽、或宿主拒绝选择时不唤醒——那种情况下一轮只会撞同一个错误。
+  - **不唤醒 `fork` 子代理**：它带着父会话的继承前缀，换供应商要全额重算；判据是 `header.isSeeded`。
+  - **不唤醒主代理**，也**不会重复排队**——判据是收件箱里是否已有待执行的下一轮，而不是 `agent.status`。
+  - **排队时机很讲究**：必须等失败的 turn 完全退役、且**不在任何 session 写入期间**——即 `agent/status` 变为 `idle` 的那一刻。同步排队会被宿主的收敛判断连同收件箱一起清掉；延迟若干毫秒则 agent 早已被销毁；而在 `turn/end` 监听器里排队会被存储的重入守卫拒绝（嵌套 append 会抛错）。
+  - 由 `continueAfterFailover`（默认开）与 `maxAutoContinues`（默认 2）控制。
 - **需要 ≥ 2 条路由**，且**仅对子代理生效** —— 主代理循环不受影响。
 
 ### 功能三：当前路由可见 —— 界面看得见，子代理也知道
@@ -235,6 +242,8 @@ CI 在 `ubuntu-latest`、`windows-latest`、`macos-latest` 三个平台上同时
 | `models` | array | `[]` | 模型条目列表（string 或 `{provider, model, reasoningEffort?}` 对）。≥2 项时功能一、二才有意义。 |
 | `strategy` | string | `round-robin` | 功能一的分配策略：`round-robin`（顺序轮换）或 `random`（随机）。 |
 | `failoverEnabled` | boolean | `true` | 功能二：子代理连接类失败时在 `models` 列表内**跨供应商**切换模型（仅 subagent）。 |
+| `continueAfterFailover` | boolean | `true` | 功能二：切换后唤醒子代理再跑一轮，让选中的健康路由真正被用上。 |
+| `maxAutoContinues` | number | `2` | 功能二：单个子代理运行最多连续自动续跑几次；`0` 等于关闭。 |
 | `injectRouteContext` | boolean | `true` | 功能三通路二：向子代理**自己的上下文**注入一行「当前 provider/model」的真实提示词（仅 subagent）。 |
 | `reasoningEffort` | string | — | 可选推理强度（如 `high`、`max`）。 |
 
@@ -259,12 +268,19 @@ CI 在 `ubuntu-latest`、`windows-latest`、`macos-latest` 三个平台上同时
 
 ### 通路一：界面行（给用户）
 
-| 视图 | 呈现内容 | 依据帧 |
+| 视图 | 呈现内容 | 依据 |
 | --- | --- | --- |
-| 轨迹视图 | 一行「当前供应商/模型：`provider/model`」 | 官方 `request/context` |
-| 对话视图 | 「当前供应商/模型」/「已切换到」/「当前使用」三类文案行 | 官方 `request/header`（按 `reason` 区分 `initial` / `change` / `resume`） |
+| 对话视图 | 宿主自己画的「上下文注入 · dsh-subagent-default-model · `provider/model`」 | 注入消息的 `source.summary`，由 `ContextInjectionRow` 原生渲染 |
+| 轨迹视图 | 一行「当前供应商/模型：`provider/model`」 | 插件自有定义 `trajectory-subagent-model`（依据官方 `request/context` 帧） |
 
-两个视图都在 `ctx.effect` 内注册，且节点 `kind` 使用插件自有值（轨迹侧 `trajectory-subagent-model`，对话侧 `chat-subagent-model-notice`），不占用宿主内置 `context` kind —— 后者会被宿主的可见性规则过滤掉。
+> **对话视图那一行是宿主画的，不是本插件画的。**
+>
+> 旧版本用一本自有节点 kind（`chat-subagent-model-notice`）+ 一个
+> `conversation.chat.node` 渲染器自绘对话行。这个绕过的前提是 DSH 0.1.7 的
+> `isVisibleChatNode()` 会硬排除 `node.kind === "context"`；当前宿主（0.2.2）
+> 只排除 `system-prompt`，`context` 本身可见。而只要注入是**真注入**（落进
+> session 的 `user/message`），宿主就会为它画原生行——再自绘一条，用户会看到
+> 两条一模一样的「上下文注入」。所以自绘那一套已整段删除。
 
 ### 通路二：提示词注入（给子代理）
 
@@ -275,9 +291,17 @@ CI 在 `ubuntu-latest`、`windows-latest`、`macos-latest` 三个平台上同时
 | 取值来源 | `agent/request` 瀑布**结算后**返回的 `{provider, model}`（含故障转移切换结果） |
 | 注入时机 | 下一步的 `agent/pre-step`，此时该步消息列表仍可修改 |
 | 去重 | 路由不变则不重复注入；路由变化则替换旧行 |
-| 作用域 | 仅 `origin === "subagent"`；主代理不碰 |
+| 作用域 | 子代理报**自己实际在跑的路由**；主代理报**子代理会被派发到的默认模型**（见下） |
 | 开关 | `injectRouteContext`，默认开启 |
-| 消息来源 | `plugin:dsh-subagent-default-model` + `form: "route-context"`（v4 会话格式要求生产者自有 `source.kind`） |
+| 消息来源 | `plugin:dsh-subagent-default-model` + `form: "notice"` + `summary`（v4 要求生产者自有 `source.kind`；`form` 必须是宿主认识的值，否则只渲染一坨原始 JSON） |
+
+#### 主代理收到的是「派发目标」，不是它自己的路由
+
+主代理读不到本插件的设置，所以「你的子代理跑在哪个模型上」这个问题在它的上下文里没有答案。为此主代理会收到一行说明，内容来自设置里的模型池（多模型时连策略一起列出，如 `a/x / b/y (round-robin)`）。它**不会**报主代理自己的 provider/model——主代理不是被路由的那一方，重复一遍只是噪音。
+
+这一行同样只在这行内容变化时注入，且**不推进轮换游标**：它是一份报告，读一眼不应该改变下一次派发拿到哪条路由。
+
+去重是**跨重启**的：除了本轮内存里的记录，还会读 `session.deriveMessages()`（会话自己的派生历史折叠，也就是发给模型的那份）判断同一行是否已经存在。只靠内存记录不够——主对话能活过很多次重启，每次重启都追加一行，就会像 `dsh-ldvh` 那样在一个会话里堆出三四条一模一样的通知。
 
 > **注入是有前提的：路由已知才会注入。**
 >

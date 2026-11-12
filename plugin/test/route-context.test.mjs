@@ -8,13 +8,15 @@
 //   2. it states the route the request ACTUALLY resolved to — including after
 //      this plugin's own failover swap, which is why the injector observes the
 //      settled `agent/request` seed rather than the plugin's intended target,
-//   3. the MAIN agent's context is never touched,
+//   3. the MAIN agent is told the DELEGATION pool instead (its own route is
+//      never reported — it is not the one being routed),
 //   4. a route change (failover) REPLACES the stale line instead of stacking a
 //      second one, so a long run does not accumulate duplicates,
 //   5. disabling the setting stops the injection entirely,
 //   6. the message source is producer-owned (`plugin:<name>`) with a `form`
-//      marker, because the v4 session format rejects a bare `{kind:"plugin"}`
-//      wrapper and would refuse to load the whole session.
+//      the HOST knows and a `summary`, because the v4 session format rejects a
+//      bare `{kind:"plugin"}` wrapper, and because an unknown/absent form makes
+//      the Host render a raw JSON dump instead of the summary line.
 //
 // The `agent/request` + `agent/pre-step` waterfalls and the `agent.inbox`
 // mutations are driven exactly as `dsh-agent-loop` does them:
@@ -195,7 +197,7 @@ async function dispatchPreStep(ctx, agent, messages = [stepMessage()], { turn = 
 /** True when a message is this plugin's injected route line. */
 function isRouteContext(message) {
 	return message?.source?.kind === "plugin:dsh-subagent-default-model"
-		&& message.source.form === "route-context";
+		&& message.source.form === "notice";
 }
 
 /**
@@ -273,48 +275,157 @@ test("reports the route after another waterfall rewrote it (failover-safe)", asy
 	await disposeHarness(harness);
 });
 
-// ── 3. the main agent's context is never touched ────────────────────────────
+// ── 3. the MAIN agent is told the delegation pool, not its own route ────────
 
-test("never injects into the MAIN agent's context", async () => {
-	const harness = await createHarness(ENABLED);
+/** Config with a single configured delegation route. */
+const POOL_ONE = { injectRouteContext: true, provider: "minmax", model: "MiniMax-M3.1-Flash" };
+
+function injectedTo(agent) {
+	return (agent.injectedRouteLog ?? []).filter((m) => m.source?.kind === "plugin:dsh-subagent-default-model");
+}
+
+function textOf(message) {
+	return (message?.content ?? []).map((block) => block?.text ?? "").join("\n");
+}
+
+test("the MAIN agent is told the configured delegation route", async () => {
+	const harness = await createHarness(POOL_ONE);
 	const main = makeAgent("main-1", { origin: "main" });
 
 	await dispatchRequest(harness.root, main, { provider: "workbuddy", model: "deepseek-v4.1-flash" });
 	await dispatchPreStep(harness.root, main);
 
-	assert.equal(injectedRouteMessages(main).length, 0, "the main agent must stay untouched");
+	const injected = injectedTo(main);
+	assert.equal(injected.length, 1, "the main agent gets exactly one line");
+	const [message] = injected;
+	// The DELEGATION route must be named...
+	assert.match(textOf(message), /minmax\/MiniMax-M3\.1-Flash/);
+	// ...and the main agent's OWN route must not be, because it is not the one
+	// being routed and repeating it here is pure noise.
+	assert.doesNotMatch(textOf(message), /deepseek-v4\.1-flash/);
+	assert.equal(message.source.form, "notice", "the Host only draws a summary row for a known form");
+	assert.equal(message.source.summary, "minmax/MiniMax-M3.1-Flash");
 	await disposeHarness(harness);
 });
 
-test("the MAIN agent stays untouched across several steps", async () => {
-	// The request-side gate keeps the main agent's route out of the cache in the
-	// first place; this asserts the observable contract on repeated steps.
-	const harness = await createHarness(ENABLED);
+test("a multi-route pool is described as a pool, not as one arbitrary pick", async () => {
+	const harness = await createHarness({
+		injectRouteContext: true,
+		strategy: "round-robin",
+		models: [
+			{ provider: "workbuddy", model: "deepseek-v4.1-flash" },
+			{ provider: "minmax", model: "MiniMax-M3.1-Flash" }
+		]
+	});
 	const main = makeAgent("main-2", { origin: "main" });
+	await dispatchPreStep(harness.root, main);
 
-	for (let step = 1; step <= 3; step += 1) {
-		await dispatchRequest(harness.root, main, { provider: "workbuddy", model: "deepseek-v4.1-flash" }, { step });
-		await dispatchPreStep(harness.root, main, [], { step });
-	}
-
-	assert.equal(injectedRouteMessages(main).length, 0, "no step may inject into the main agent");
+	const summary = injectedTo(main)[0].source.summary;
+	assert.match(summary, /workbuddy\/deepseek-v4\.1-flash/);
+	assert.match(summary, /minmax\/MiniMax-M3\.1-Flash/);
+	assert.match(summary, /round-robin/);
 	await disposeHarness(harness);
 });
 
-test("the origin gate is load-bearing on BOTH waterfalls", async () => {
-	// Static contract: the injector must gate the request side AND the pre-step
-	// side on `isSubagentAgent`. Mutation-verified — deleting only the pre-step
-	// gate silently stops injecting nothing, because the cache is never seeded
-	// for a non-subagent; deleting only the request gate leaks the main agent's
-	// route into the cache. Requiring both makes either regression fail loudly.
+test("reporting the pool does NOT consume a round-robin slot", async () => {
+	// `defaultModel()` advances `rrCursor`. The notice is a REPORT, so it must
+	// not: otherwise merely looking at the conversation would rotate which
+	// model the next delegation actually gets.
+	const harness = await createHarness({
+		injectRouteContext: true,
+		strategy: "round-robin",
+		models: [
+			{ provider: "workbuddy", model: "deepseek-v4.1-flash" },
+			{ provider: "minmax", model: "MiniMax-M3.1-Flash" }
+		]
+	});
+	const main = makeAgent("main-3", { origin: "main" });
+	await dispatchPreStep(harness.root, main);
+	await dispatchPreStep(harness.root, main, [stepMessage("again")], { step: 2 });
+
+	// Two identical reports, one line: the description is stable across steps.
+	assert.equal(injectedTo(main).length, 1, "an unchanged pool must not re-inject");
+	await disposeHarness(harness);
+});
+
+test("REGRESSION: a RESTARTED main conversation does not append a duplicate row", async () => {
+	// The in-memory dedupe dies with the process. A main conversation outlives
+	// many restarts, so without a history read every restart would append
+	// another identical row — `dsh-ldvh` shows that failure in the wild
+	// (sessions carrying 3-4 copies of one unchanging notice).
+	const harness = await createHarness(POOL_ONE);
+	const prior = injectedTo(await runOnceWithHistory(harness, []))[0];
+	assert.ok(prior, "the first run must inject");
+
+	// A SECOND run (fresh process, fresh in-memory maps) restores the session
+	// with that line already in its derived history.
+	const restored = await runOnceWithHistory(harness, [prior]);
+	assert.equal(injectedTo(restored).length, 0, "the line is already in history; nothing may be appended");
+	await disposeHarness(harness);
+});
+
+/**
+ * Run one main-agent step whose session already derives `history`.
+ * Uses a UNIQUE agent id per call, because the in-memory dedupe is keyed on it.
+ */
+let restoredSeq = 0;
+async function runOnceWithHistory(harness, history) {
+	const id = `main-restored-${++restoredSeq}`;
+	const agent = recordInjections({
+		id,
+		inbox: makeInbox(),
+		options: { provider: "deepseek-official", model: "deepseek-v4-pro" },
+		session: {
+			id,
+			header: { origin: "main" },
+			requestContext: () => void 0,
+			deriveMessages: () => history
+		}
+	});
+	await dispatchPreStep(harness.root, agent);
+	return agent;
+}
+
+test("history dedupe never suppresses the FIRST line of a fresh session", async () => {
+	// Guard against over-correction: an empty history must still inject.
+	const harness = await createHarness(POOL_ONE);
+	const agent = await runOnceWithHistory(harness, []);
+	assert.equal(injectedTo(agent).length, 1, "an empty history must not be read as 'already there'");
+	await disposeHarness(harness);
+});
+
+test("a session without the derived-history reader still injects", async () => {
+	// Older hosts / minimal fixtures expose no `deriveMessages`. The feature
+	// must fall back to the in-memory map rather than breaking the waterfall.
+	const harness = await createHarness(POOL_ONE);
+	const main = makeAgent("main-noDerive", { origin: "main" });
+	await dispatchPreStep(harness.root, main);
+	assert.equal(injectedTo(main).length, 1, "a missing reader must not block injection");
+	await disposeHarness(harness);
+});
+
+test("the main-conversation notice is gated by the same setting", async () => {
+	const harness = await createHarness({ ...POOL_ONE, injectRouteContext: false });
+	const main = makeAgent("main-4", { origin: "main" });
+	await dispatchPreStep(harness.root, main);
+	assert.equal(injectedTo(main).length, 0, "disabled means the main agent is left alone too");
+	await disposeHarness(harness);
+});
+
+test("the origin gate still keeps the subagent-only request cache clean", async () => {
+	// Static contract: the ACTUAL-route half must stay subagent-only on BOTH
+	// waterfalls. Mutation-verified — deleting only the pre-step gate silently
+	// stops injecting nothing (the cache is never seeded for a non-subagent);
+	// deleting only the request gate leaks the main agent's own route into the
+	// cache, which would then be reported as a subagent route.
 	const source = readFileSync(fileURLToPath(new URL("../lib/index.js", import.meta.url)), "utf8");
 	const region = source.slice(source.indexOf("function installRouteContextInjector"));
 	const body = region.slice(0, region.indexOf("\nfunction ", 10));
 	const gates = body.match(/if \(!isSubagentAgent\(agent\)\) return/g) ?? [];
 	assert.equal(
 		gates.length,
-		2,
-		`installRouteContextInjector must gate BOTH the request and pre-step waterfalls, found ${gates.length}`
+		1,
+		`only the request waterfall is subagent-gated; the pre-step one now serves both sides, found ${gates.length}`
 	);
 });
 
@@ -457,7 +568,11 @@ test("the injected source is producer-owned and carry a form marker", async () =
 	// plugin must use `plugin:<package-name>`.
 	assert.equal(source.kind, "plugin:dsh-subagent-default-model");
 	assert.notEqual(source.kind, "plugin", "a bare 'plugin' kind refuses to load in v4");
-	assert.equal(source.form, "route-context", "the form marker is what dedupe/replace keys on");
+	// `notice` is a form the HOST knows (`KNOWN_FORMS` in ui-chat). Any other
+	// value makes `contextForm()` return null and the Host renders the row
+	// through `OpaqueBody` — a raw JSON dump instead of the summary line.
+	assert.equal(source.form, "notice", "only a Host-known form renders a real context row");
+	assert.equal(source.summary, "workbuddy/deepseek-v4.1-flash", "the summary is what the Host prints on the collapsed row");
 	await disposeHarness(harness);
 });
 
