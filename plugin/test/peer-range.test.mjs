@@ -67,11 +67,23 @@ const EXPECTED_RANGE = /^>=\s*0\.1\.7-rc\.1\s*<\s*0\.3\.0-0$/;
  * either, so BOTH are listed: the running-host check only pins whichever
  * version is installed on the current machine, and a machine still on rc.4
  * must not fail a suite that was already reviewed for it.
+ *
+ * `0.2.5-rc.1` used to sit at the end of this list and NEVER EXISTED — no
+ * `@deepseek-ai/dsh*` package was ever published under it. It matched the peer
+ * range (so nothing failed) and inflated the list with a version the plugin was
+ * never reviewed against, which is the opposite of what the list is for. It was
+ * removed when `0.2.2-rc.2` was added below.
+ *
+ * `0.2.2-rc.2` is the host this plugin runs against now, and it is the release
+ * that FLATTENED `SubagentActivationSpec` (nested `request` → an interface that
+ * extends `SubagentStartRequest`). Listing the version is what makes the guard
+ * fail loudly on a fresh host upgrade; it does not by itself detect a contract
+ * change, which is why that one was found by diffing the packed packages.
  */
 const ADMITTED_HOST_VERSIONS = [
 	"0.2.0-rc.1", "0.2.0-rc.2", "0.2.0",
 	"0.2.1-rc.1", "0.2.1-rc.2", "0.2.1-rc.3", "0.2.1-rc.4", "0.2.1-rc.5", "0.2.1",
-	"0.2.2-rc.1", "0.2.5-rc.1"
+	"0.2.2-rc.1", "0.2.2-rc.2"
 ];
 
 /** The exact options `dsh-app-boot` passes to `semver.satisfies`. */

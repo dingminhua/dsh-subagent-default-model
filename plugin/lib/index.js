@@ -840,6 +840,65 @@ function installRouteContextInjector(ctx, state) {
 	}, "dsh-subagent-default-model: route context injector");
 }
 
+/**
+ * Read the delegation request out of one `startActivation` spec, in either
+ * shape the host has shipped.
+ *
+ * 0.2.2-rc.2 changed `SubagentActivationSpec` from a nested object to one that
+ * extends `SubagentStartRequest`:
+ *
+ *   <= 0.2.2-rc.1 : { provider, label, signal, delivery, request: { prompt, parent, agentOptions, … } }
+ *   >= 0.2.2-rc.2 : { provider, label, signal, delivery, prompt, parent, agentOptions, … }
+ *
+ * Both are still in the wild (the peer range spans the whole 0.2.x line), so
+ * the shape is DETECTED, never assumed. Reading `spec.request` alone on rc.2
+ * yields `undefined`, the wrapper then passes the spec through untouched, and
+ * every child silently inherits the parent route while the route-visibility
+ * line keeps rendering correctly — a failure with no error and no log line.
+ *
+ * The probe is `prompt`, not `request`: `prompt` is REQUIRED on
+ * `SubagentStartRequest` in every version, so its presence at the top level is
+ * what makes the spec flat. A nested spec could in principle carry an
+ * unrelated `request` key; a flat one cannot exist without `prompt`.
+ *
+ * @param spec - the activation spec handed to `startActivation`.
+ * @returns the request-shaped object carrying `agentOptions`, or undefined.
+ */
+function activationRequestOf(spec) {
+	if (spec === void 0 || spec === null) return void 0;
+	const nested = spec.request;
+	if (nested !== void 0 && nested !== null && typeof nested === "object") {
+		// Nested host. Prefer it even when `prompt` also sits at the top level
+		// (a spec built by copying fields around must not be re-shaped).
+		return nested;
+	}
+	if (spec.prompt !== void 0) return spec;
+	return void 0;
+}
+
+/**
+ * Rebuild one `startActivation` spec with an injected route, preserving the
+ * shape the host used.
+ *
+ * Identity is preserved whenever nothing is injected: host code compares spec
+ * and request identity, and a needless clone would be a silent behaviour
+ * change.
+ *
+ * @param spec - the original activation spec.
+ * @param injected - the possibly-updated request-shaped object.
+ * @param request - the original request-shaped object, for identity checks.
+ * @returns the spec to hand to the host.
+ */
+function withActivationRequest(spec, injected, request) {
+	if (injected === request) return spec;
+	if (request === spec) {
+		// Flat spec: the request IS the spec, so the injected copy already
+		// carries provider / label / signal / delivery.
+		return injected;
+	}
+	return { ...spec, request: injected };
+}
+
 function installSubagentWrapper(ctx, state) {
 	// `ctx.subagents` is a per-call Cordis traceable proxy, so reach the raw
 	// service object behind it for a stable handle and to install own methods.
@@ -871,13 +930,17 @@ function installSubagentWrapper(ctx, state) {
 			if (spec === void 0 || spec === null) return originalStartActivation.call(raw, spec);
 			// `spec.provider` names the delegation backend (`spawn` / `fork`), which
 			// is what decides whether this child inherits the parent conversation.
-			const request = applyDefaultModelFor(ctx, state, spec.request, spec.provider);
+			//
+			// The request is NOT always `spec.request`: 0.2.2-rc.2 flattened the
+			// spec, so on that host the fields live at the top level and
+			// `spec.request` is undefined. Reading the wrong one does not throw —
+			// it makes `applyDefaultModelFor` return early, so the child silently
+			// runs on the parent route. See `activationRequestOf`.
+			const request = activationRequestOf(spec);
+			const injected = applyDefaultModelFor(ctx, state, request, spec.provider);
 			// Keep the spec reference when nothing was injected: host code compares
 			// identity and a needless clone would be a silent behaviour change.
-			return originalStartActivation.call(raw, request === spec.request ? spec : {
-				...spec,
-				request
-			});
+			return originalStartActivation.call(raw, withActivationRequest(spec, injected, request));
 		}
 		: void 0;
 

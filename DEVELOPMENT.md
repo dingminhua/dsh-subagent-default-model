@@ -172,19 +172,49 @@ grep -n 'preStep\|buildRequest\|inbox.claim\|request/context' app.asar 内 dsh-a
 npm --prefix plugin test
 ```
 
-第 3 步要核对的清单（0.2.1-rc.5 实测行号）：
+第 3 步要核对的清单（0.2.2-rc.2 实测行号）：
 
-| 契约 | rc.2 | rc.3 | rc.5 | 0.2.2-rc.1 |
+| 契约 | rc.3 | rc.5 | 0.2.2-rc.1 | 0.2.2-rc.2 |
 | --- | --- | --- | --- | --- |
-| `preStep()` 定义 / `inbox.claim()` | `:902` / `:906` | `:902` / `:906` | `:902` / `:906`（未变） | `:666` / `:670`（**整体上移，且语义变了**） |
-| `agent/pre-step` 瀑布 / 默认决策 | `:909` / `:917` | `:909` / `:917` | `:909` / `:917`（未变） | `:685` / `:690` |
-| `buildRequest()` 定义 | `:1214` | `:1214` | `:1214`（未变） | `:1018` |
-| `request/context` append | `:1271` | `:1271` | `:1271`（未变） | `:1075` |
-| `session.requestContext()` | — | `:1627` | `dsh-session` `:1627`（未变） | `dsh-session` `:1636` |
-| `subagents.startActivation()` | — | `:3036` | `dsh-subagent` `:3036`（未变） | `dsh-subagent` `:3051` |
-| `agent/request-error` / `agent/request` 瀑布 | — | `:1136` / `:1191` | `:1136` / `:1191`（未变） | `:929` / `:994`（`agent/request` **已废弃**） |
+| `preStep()` / `inbox.claim()` | `:902` / `:906` | `:902` / `:906`（未变） | `:666` / `:670`（**整体上移，且语义变了**） | `:679` / `:683` |
+| `agent/pre-step` 瀑布 | `:909` | `:909`（未变） | `:685` | `:698` |
+| `buildRequest()` 定义 | `:1214` | `:1214`（未变） | `:1018` | `:1031` |
+| `request/context` append | `:1271` | `:1271`（未变） | `:1075` | `:1088` |
+| `session.requestContext()` | `:1627` | `dsh-session` `:1627`（未变） | `dsh-session` `:1636` | `dsh-session` `:1708` |
+| `subagents.startActivation()` | `:3036` | `dsh-subagent` `:3036`（未变） | `dsh-subagent` `:3051` | `dsh-subagent` `:3018`（**且 spec 被扁平化**） |
+| `agent/request-error` / `agent/request` | `:1136` / `:1191` | `:1136` / `:1191`（未变） | `:929` / `:994`（`agent/request` **已废弃**） | `:942` / `:1007`（仍未移除，仍派发） |
 
-> 行号是**核对时的快照**，不是契约：它在 0.2.1-rc.1 → rc.2 之间整体下移过，rc.2 → rc.3 → rc.5 之间**没有再动**。每次升级都重新 `grep` 一遍，别照抄上一版。
+> 行号是**核对时的快照**，不是契约：它在 0.2.1-rc.1 → rc.2 之间整体下移过，rc.2 → rc.3 → rc.5 之间没有再动，0.2.2-rc.1 → rc.2 之间又整体上移了十几行。每次升级都重新 `grep` 一遍，别照抄上一版。
+
+### `startActivation(spec)` 的形状是契约的一部分（0.2.2-rc.2 的教训）
+
+**升级时只 `grep` 行号是不够的**：这次 `startActivation` 还在，行号也找到了，但**传进去的对象换了形状**。
+
+```ts
+// <= 0.2.2-rc.1 —— 嵌套
+interface SubagentActivationSpec {
+  provider: string; label: string; childId?: SessionId;
+  request: Omit<SubagentStartRequest, 'label' | 'signal'>;  // prompt / parent / agentOptions 在这里
+  signal: AbortSignal; delivery: 'parent' | 'caller';
+}
+
+// >= 0.2.2-rc.2 —— 扁平（直接 extends SubagentStartRequest）
+interface SubagentActivationSpec extends Omit<SubagentStartRequest, 'label' | 'signal'> {
+  provider: string; label: string; name?: string; childId?: SessionId;
+  signal: AbortSignal; delivery: 'parent' | 'caller';
+  // prompt / parent / agentOptions / outputSchema / maxDepth 都在顶层
+}
+```
+
+**失败模式尤其阴险**：插件读 `spec.request` 拿到 `undefined`，`applyDefaultModelFor` 首行就 `return request` 原样放行——**不抛错、不打日志、测试全绿**，子代理安静地退回继承父路由。而路由可见性那一行仍然正确渲染（它读的是会话自己的 `request/context`），于是界面上「当前供应商/模型」照常显示，只是显示的永远是父路由。
+
+实机判据：派发描述符里 `agentProvider` 等于**父会话**的 provider，而配置池里根本没有这一条。
+
+**修法**：能力探测式读形状（`activationRequestOf`），探测键是 `prompt` 而不是 `request`——`prompt` 在 `SubagentStartRequest` 里必填，顶层有它就是扁平；回写时按原形状还原（扁平则注入后的对象本身就是 spec）。
+
+**这条变更没有升级指南**：`docs/upgrade-guide/` 里没有 `v0.2.2-rc.2` 目录。只能靠逐包 `npm pack` + `diff` 发布物发现，因此**发布物比对是必做项，不是可选优化**。
+
+**夹具必须造真实形状**：旧夹具只造嵌套 spec（`{ request: {...} }`），所以它在 rc.2 上全绿却毫无覆盖。现在 `createHarness(..., { flatSpec: true })` 造扁平形状，5 条用例钉住注入 / 显式优先 / 空配置 / fork 两侧门禁。变异验证：把读法改回 `spec.request`，或回写时不还原扁平形状，都会让其中 2 条失败。
 
 ### 跨多个 rc 升级：把跳过的版本也补进清单
 

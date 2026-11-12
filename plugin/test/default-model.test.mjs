@@ -18,8 +18,13 @@ import * as defaultModelPlugin from "../lib/index.js";
  * @param options.activation - keep the 0.2.x `startActivation` entry point.
  * @param options.legacy - keep `start` / `startContinuable`; set false to model
  *   a 0.2.x host where `startActivation` is the ONLY delegation entry point.
+ * @param options.flatSpec - model DSH >= 0.2.2-rc.2, where `SubagentActivationSpec`
+ *   extends `SubagentStartRequest` and therefore carries `prompt` / `parent` /
+ *   `agentOptions` at the TOP level instead of under `request`. See the
+ *   "flattened spec" tests below; a fixture that only ever builds the nested
+ *   shape kept the whole suite green while real delegations lost their route.
  */
-async function createHarness(config = undefined, { continuable = true, activation = true, legacy = true } = {}) {
+async function createHarness(config = undefined, { continuable = true, activation = true, legacy = true, flatSpec = false } = {}) {
 	const root = new Context();
 	const calls = [];
 	const subagents = {
@@ -57,7 +62,7 @@ async function createHarness(config = undefined, { continuable = true, activatio
 	const fiber = root.registry.plugin(defaultModelPlugin, config);
 	await fiber;
 
-	return { root, config, subagents, originalStart, originalStartContinuable, originalStartActivation, calls, fiber };
+	return { root, config, subagents, originalStart, originalStartContinuable, originalStartActivation, calls, fiber, flatSpec };
 }
 
 async function disposeHarness(harness) {
@@ -248,6 +253,107 @@ test("startActivation inherits the parent route when nothing is configured", asy
 		await harness.subagents.startActivation(spec);
 		assert.strictEqual(harness.calls[0].spec, spec);
 		assert.equal(harness.calls[0].spec.request.agentOptions, undefined);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+// ── the flattened activation spec (DSH >= 0.2.2-rc.2) ────────────────────────
+//
+// 0.2.2-rc.2 changed `SubagentActivationSpec` from a nested shape to one that
+// extends `SubagentStartRequest`:
+//
+//   // <= 0.2.2-rc.1
+//   { provider, label, signal, delivery, request: { prompt, parent, agentOptions, … } }
+//   // >= 0.2.2-rc.2
+//   { provider, label, signal, delivery, prompt, parent, agentOptions, … }
+//
+// The plugin wrapped this method reading `spec.request` only, so on rc.2 the
+// nested lookup returned `undefined`, the wrapper passed the spec through
+// unchanged, and every delegation silently fell back to the parent route. The
+// route-visibility line still rendered (it reads the session's own
+// `request/context`), which is exactly what made the regression invisible
+// until a subagent ran on the PARENT provider while the pool named two others.
+//
+// These tests build the real rc.2 shape. Before the fix they fail; the fixture
+// alone could never have caught it because it only ever built the nested one.
+
+test("injects defaults into a flattened (0.2.2-rc.2) activation spec", async () => {
+	const harness = await createHarness(defaultSection, { legacy: false, flatSpec: true });
+	try {
+		const prompt = [{ type: "text", text: "hello" }];
+		const parent = { id: "session-parent" };
+		await harness.subagents.startActivation({ provider: "spawn", label: "task", prompt, parent });
+		assert.deepEqual(harness.calls[0].spec.agentOptions, {
+			provider: "deepseek-official",
+			model: "deepseek-v4-pro"
+		});
+		assert.equal(harness.calls[0].spec.request, undefined, "a flat host must not receive a nested request");
+		// Everything the host handed in must survive unchanged.
+		assert.strictEqual(harness.calls[0].spec.prompt, prompt);
+		assert.strictEqual(harness.calls[0].spec.parent, parent);
+		assert.equal(harness.calls[0].spec.provider, "spawn");
+		assert.equal(harness.calls[0].spec.label, "task");
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("a flattened spec keeps an explicit child route", async () => {
+	const harness = await createHarness(defaultSection, { legacy: false, flatSpec: true });
+	try {
+		const explicit = { provider: "kimi", model: "kimi-k3" };
+		const spec = { provider: "spawn", label: "task", prompt: [], parent: { id: "p" }, agentOptions: explicit };
+		await harness.subagents.startActivation(spec);
+		assert.deepEqual(harness.calls[0].spec.agentOptions, explicit);
+		// Identity: nothing to inject, so the host must get the very same object.
+		assert.strictEqual(harness.calls[0].spec, spec);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("a flattened spec keeps the parent route when nothing is configured", async () => {
+	const harness = await createHarness(undefined, { legacy: false, flatSpec: true });
+	try {
+		const spec = { provider: "spawn", label: "task", prompt: [], parent: { id: "p" } };
+		await harness.subagents.startActivation(spec);
+		assert.strictEqual(harness.calls[0].spec, spec);
+		assert.equal(harness.calls[0].spec.agentOptions, undefined);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("a flattened fork spec still keeps the parent route by default", async () => {
+	// The fork gate must work in BOTH spec shapes; it is decided from
+	// `provider`, but the injection it suppresses lives on the flat object here.
+	const harness = await createHarness(defaultSection, { legacy: false, flatSpec: true });
+	try {
+		const spec = { provider: "fork", label: "task", prompt: [], parent: { id: "p" } };
+		await harness.subagents.startActivation(spec);
+		assert.equal(
+			harness.calls[0].spec.agentOptions,
+			undefined,
+			"a fork child must inherit the parent route so its KV cache survives"
+		);
+		assert.strictEqual(harness.calls[0].spec, spec);
+	} finally {
+		await disposeHarness(harness);
+	}
+});
+
+test("a flattened fork spec follows the pool once applyToForkChildren is on", async () => {
+	const harness = await createHarness(
+		{ ...defaultSection, applyToForkChildren: true },
+		{ legacy: false, flatSpec: true }
+	);
+	try {
+		await harness.subagents.startActivation({ provider: "fork", label: "task", prompt: [], parent: { id: "p" } });
+		assert.deepEqual(harness.calls[0].spec.agentOptions, {
+			provider: "deepseek-official",
+			model: "deepseek-v4-pro"
+		});
 	} finally {
 		await disposeHarness(harness);
 	}

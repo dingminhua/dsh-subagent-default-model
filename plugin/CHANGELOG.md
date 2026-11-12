@@ -1,5 +1,48 @@
 # Changelog
 
+## 2.2.2 (2026-11-13)
+
+### Fixed
+
+**宿主 0.2.2-rc.2 把 `startActivation(spec)` 的 spec 扁平化了，默认模型注入因此静默失效。**
+
+rc.2 起 `SubagentActivationSpec` 不再嵌套 `request`，而是直接继承 `SubagentStartRequest`：
+
+```ts
+// <= 0.2.2-rc.1
+{ provider, label, signal, delivery, request: { prompt, parent, agentOptions, … } }
+// >= 0.2.2-rc.2
+{ provider, label, signal, delivery, prompt, parent, agentOptions, … }
+```
+
+插件包装的正是这个方法，而它只读 `spec.request`。在 rc.2 上拿到 `undefined` 后，`applyDefaultModelFor` 首行原样返回，**spec 原封不动透传给宿主**——子代理退回继承父路由，两处池配置一条都没生效。
+
+**为什么没被测试拦住**：夹具只造嵌套形状，`183/183` 全绿；这个缺陷也没有升级指南（`docs/upgrade-guide/` 里没有 `v0.2.2-rc.2` 目录），只能靠逐包 `npm pack` + `diff` 发布物发现。
+
+**为什么在界面上看不出来**：`injectRouteContext` 仍然工作，它读的是会话自己的 `request/context`，所以「当前供应商/模型」照常渲染——只是显示的永远是父路由。两个功能一个坏一个正常，反而更像「配置没写对」。
+
+实机证据（升级后立即复现）：子代理会话的派发描述符为
+`{"provider":"spawn","agentProvider":"workbuddy","agentModel":"deepseek-v4.1-flash"}`，
+而 `workbuddy` 是父会话路由，配置池里只有 `minmax/MiniMax-M3.1-Flash` 与 `dsh-opencode-go/deepseek-v4.1-flash`。升级前的同类描述符是正确的 `minmax/MiniMax-M3.1-Flash`。
+
+### Changed
+
+注入改为**形状自适应**，一个构建同时服务新旧宿主：
+
+- 读：`activationRequestOf(spec)` 探测键用 `prompt`（`SubagentStartRequest` 里的必填字段），顶层有它就是扁平；有嵌套 `request` 则优先用它。
+- 写：`withActivationRequest()` 按原形状还原——扁平宿主拿到的是注入后的对象本身，嵌套宿主拿到 `{ ...spec, request }`。
+- 不注入时仍返回**原 spec 引用**：宿主会比较 spec/request 的身份，无谓的拷贝是静默的行为变更。
+
+### Tests
+
+`188/188`（183 → 188），`skip 0`。新增 5 条扁平 spec 用例：注入 / 显式路由优先 / 空配置继承 / fork 默认不注入 / fork 打开 `applyToForkChildren` 后跟随池。
+
+变异验证 2/2 命中：把读法改回 `spec.request`、或回写时不还原扁平形状，都会让其中 2 条失败。
+
+`ADMITTED_HOST_VERSIONS` 补入 `0.2.2-rc.2`，并**删除从未存在过的 `0.2.5-rc.1`**（npm 上没有任何 `@deepseek-ai/dsh*` 发布过该版本；它一直匹配 peer 区间，所以从未报错，只是虚增了「已评审版本」集合）。
+
+`peer-range` 的「running host must be admitted」用例在修复前按预期失败：`the running host 0.2.2-rc.2 must be listed in ADMITTED_HOST_VERSIONS`——这条护栏第五次发挥作用的记录在 `DEVELOPMENT.md`。
+
 ## 2.2.1 (2026-11-10)
 
 ### Fixed
