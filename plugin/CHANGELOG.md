@@ -1,5 +1,124 @@
 # Changelog
 
+## 2.2.5 (2026-11-19)
+
+### 兼容性核查：DSH Desktop 0.2.2-rc.3 → rc.4 → rc.5
+
+宿主由 `0.2.2-rc.2` 一路升到 **`0.2.2-rc.5`**（2026-11-18 安装）。**插件运行逻辑零改动**（`plugin/lib/index.js` / `plugin/lib/client.js` 未动一行）——本版只做核查与清单维护。
+
+两个区间分开记：rc.2 → rc.3 见下节（2.2.5 起草时核查过），rc.3 → rc.5 见本节。
+
+#### rc.3 → rc.5：只有 10 个包有真实代码改动，全部在插件未触碰的面
+
+| 包 | 改动 | 与本插件的关系 |
+| --- | --- | --- |
+| `dsh-web` / `dsh-tool-web` | 搜索提供方改为**按模型路由自动选择**：DeepSeek 模型走旧版 Messages 搜索（不按次收费），其余路由走 DeepSeek Search API；`WebSearchRequest` 新增 `llmProvider` | 与本插件无关（不碰 `ctx.web`） |
+| `dsh-web-search-deepseek` / `dsh-web-deepseek-api` | 跟随上述改造 | 与本插件无关 |
+| `dsh-client-ui-settings-web-search` | 「网页搜索提供方」菜单新增**自动选择** | 与本插件无关 |
+| `dsh-bundle-base` | 组合不再固定 `web.searchProvider` | 与本插件无关 |
+| `dsh-llm` | **新增失败码 `CONTENT_REFUSED`**（内容安全拒答，取代原来的 `MALFORMED_RESPONSE`） | 见下方「需要决定的一项」 |
+| `dsh-llm-deepseek` | 拒答时先 `yield usage` 再抛错（已消耗的 token 照常计费）；`stop_reason: "refusal"` 映射到 `CONTENT_REFUSED` | 同上 |
+| `dsh-experimental-liveshare` | 隧道 worker 的 owner 凭据时限 | 与本插件无关 |
+| `dsh-tool-cordis` | 内嵌的 `SERVICE_API` 目录：`ctx.web` 的搜索选择规则补上按路由分支，`WebSearchRequest` 增加 `llmProvider` | 纯文档字符串 |
+
+**插件依赖的 8 个包在 rc.3 → rc.5 全程零改动**：`dsh-agent-loop`、`dsh-agent`、`dsh-session`、`dsh-subagent`、`dsh-tool-subagent`、`dsh-settings`、`dsh-app-boot`、`cordis`（逐文件比对，只有 `package.json` 版本号）。
+
+#### 契约复核（`0.2.2-rc.5` 实测，与 rc.3 逐位相同）
+
+| 检查项 | 结论 |
+| --- | --- |
+| 插件加载与注入 | ✅ 已挂载（`include:dsh-subagent-default-model`），`Config` 投影出全部 10 个 volatile 字段（`provider` / `model` / `models` / `strategy` / `failoverEnabled` / `injectRouteContext` / `reasoningEffort` / `applyToForkChildren` / `continueAfterFailover` / `maxAutoContinues`） |
+| `preStep()` → `buildRequest()` 时序 | ✅ `:679` / `:1031`；`request/context` 仍在 `:1088` append |
+| `inbox.claim()` 先抽干 | ✅ `:683`，仍在 `:698` 的 `agent/pre-step` 之前 |
+| `agent/pre-step` / `agent/request-error` / `agent/request` | ✅ `:698` / `:942` / `:1007`，`agent/request` 仍未移除、仍派发 |
+| `agent/request` 的硬校验 | ✅ 仍在 `:1013`——改了 `provider` / `model` / `reasoningEffort` 就抛错 |
+| `agent/disposed` | ✅ `:1448` |
+| `session.requestContext()` / `deriveMessages()` | ✅ `dsh-session` `:1708` / `:1753` |
+| `agent.model.select()` | ✅ `dsh-agent` `model-selection.js:88`（2.2.3 的故障转移落点） |
+| `agent.followup()` | ✅ `dsh-agent-loop` `:579`（2.2.3 的自动续跑） |
+| 派发入口 | ✅ `startActivation(spec)`（`dsh-subagent` `:3018`），**spec 仍是扁平形状**，2.2.2 的形状自适应（探测键 `prompt`）继续正确 |
+| `provider.capabilities.agentOptions` | ✅ spawn / fork 两个 in-process provider 都仍声明 `agentOptions: true` |
+| `request/header` 的 `reason` | ✅ `initial` / `resume` / `change` / `series` 四种未变（`:1045` / `:1051` / `:1056`） |
+| `Symbol.for("cordis.original")` | ✅ `cordis` `:39` |
+| 客户端槽位 | ✅ `settings.section` 与 `settings.section.icon` 都有本插件 occupant 且 `active: true` |
+| peer 区间覆盖 | ✅ `>=0.1.7-rc.1 <0.3.0-0` 放行 rc.3 / rc.4 / rc.5（`semver.satisfies` 实测 true），仍挡住 `0.3.0-rc.1` |
+
+#### 升级指南这次终于跟上了
+
+`docs/upgrade-guide/` 新增两个目录（此前最新是 `v0.2.2-rc.1`）：
+
+- `v0.2.2-rc.3/deepseek-refusal-code` —— 拒答错误码从 `MALFORMED_RESPONSE` 改为 `CONTENT_REFUSED`；
+- `v0.2.2-rc.4/web-search-deepseek-model-default` —— DeepSeek 模型上的搜索默认改用旧版 Messages 搜索。
+
+两条**都落在插件未触碰的面上**，无需迁移。`0.2.2-rc.2`（扁平化 `SubagentActivationSpec`）依旧没有指南，那条只能靠逐包比对发现。
+
+#### rc.2 → rc.3：11 个包有真实代码改动
+
+| 包 | 改动 | 与本插件的关系 |
+| --- | --- | --- |
+| `dsh-client-ui-sidebar` | 新增 `sidebar.session.action` HOC 槽 | 插件只注册 `settings.section` / `settings.section.icon`，不碰侧栏会话行 |
+| `dsh-client-ui-workspace` | Workspace picker 重整为 `WorkspacePickerFactory` | 与本插件无关 |
+| `dsh-client-ui-directory-picker-browse` / `-native` | 跟随上述 picker 改造 | 与本插件无关 |
+| `dsh-client-ui-primitives` | 新增 `IconUploadOutline{Regular,Medium}` | 纯新增；插件只用到 `Toast` 与 `IconChevronDown*`，全部仍在 |
+| `dsh-deepseek-chat-import` | **新包**：DeepSeek 聊天记录导入为 Session | 与本插件无关；rc.3 唯一新增的 bundle |
+| `dsh-session-log-export` | 归档导出容错：单个附件读不出来时记入 `missing` 继续导出 | 与本插件无关 |
+| `dsh-cordis-client-runner` | 内嵌 `CLIENT_SLOT_API` 行号引用 | 纯文档字符串 |
+| `dsh-tool-cordis` | 内嵌 `SERVICE_API` 新增 `deepseekChatImport.limits` | 纯文档字符串 |
+| `dsh-agent-preset` | `dsh-doc` skill 的 `references/packages.md` 增一行 | 纯文档 |
+| `dsh-official-bundles` | 把 `@deepseek-ai/dsh-deepseek-chat-import` 列入三个 bundle 清单 | 与本插件无关 |
+
+#### rc.2 → rc.3 的契约复核（行号与 rc.2 逐位相同）
+
+`core` / `subagent` / `llm` / `settings` / `session` / `boot` 六组共 57 个文件**全部只是 `package.json` 版本号**。当时逐项复核的结论与上面的 rc.5 表一致，唯一的差别是失败码词表当时还只有 `RATE_LIMIT` / `QUOTA` / `EMPTY_RESPONSE` / `CONTEXT_WINDOW_EXCEEDED` 等；`CONTENT_REFUSED` 是 rc.4 才加进来的。
+
+### Fixed
+
+- **「应当通过」的宿主版本清单第六次滞后**：清单停在 `0.2.2-rc.3`。2.1.8 加的自检用例照例直接失败：
+
+  ```text
+  ✖ the running host 0.2.2-rc.5 must be listed in ADMITTED_HOST_VERSIONS
+  ```
+
+  补 `0.2.2-rc.4` **与** `0.2.2-rc.5`：跨版本升级必须把跳过的版本一并列上，否则一台仍停在 rc.4 的机器上跑同一份已评审清单会失败。
+
+  变异验证（**注意只有一半测得出来**）：删掉 `0.2.2-rc.5` → `fail 1`；删掉 `0.2.2-rc.4` → **仍然 `fail 0`**，因为这台机器装的是 rc.5，而该用例只断言本机那一个版本。这是「清单记录的是已评审集合，不是本机版本」那条判据的实证——**rc.4 那一行没有任何测试替你守着**，只能靠人记得补。
+
+  > 这道自检只覆盖**版本号漏列**，不覆盖**契约变化**。rc.2 那次扁平化 spec 的破坏性变更正是它看不见的——那次是靠逐包 diff 发布物找到的。
+
+### Docs
+
+`DEVELOPMENT.md`：
+
+1. 「宿主升级流程」第 1 步换成可直接粘贴的一行命令（asar 内不能 `ls`/`cat`，但能 `node` 读），新增第 4 步「逐包比对发布物」，并把 `skipped` 必须为 0 写进判据。
+2. 契约行号表：表头 `rc.3` / `rc.5` 改为全称 `0.2.1-rc.3` / `0.2.1-rc.5`（与 `0.2.2-rc.3` 撞名，核对时极易看错列），新增 `0.2.2-rc.3` 与 `0.2.2-rc.5` 两列（两者行号完全相同）。
+3. 新增一张「2.2.3 / 2.2.4 之后额外依赖的契约」表：`agent.model.select()`、`agent.followup()`、`session.deriveMessages()`、`agent.disposed`、失败码词表、`cordis.original`。
+4. 「逐包比对」一节补 rc.2 → rc.3 与 rc.3 → rc.5 的实操结论，并新增判据：**关键词零命中不等于契约没了**（失败码在 `dsh-llm`、`cordis.original` 定义在 `cordis`，搜错包会得出反结论）。
+
+> 升级指南从 rc.3 起补上了（见上），但 `0.2.2-rc.2` 仍然缺席。发布物比对依旧是发现契约变化的唯一可靠手段。
+
+### Tests
+
+全量：`tests 198 / pass 198 / fail 0 / skipped 0`（用例数与 2.2.4 相同，本版未新增用例）。
+
+### 需要决定的一项（尚未改动，等你定）
+
+核对失败码时发现插件**当前切换的码集与实际会发生的失败对不上**。这不是本次升级引入的，是 8 月底 failover v1.0.0 写定码集后、宿主陆续加码造成的。下表是**实测**——用插件真实的 `agent/request-error` 监听器跑出来的，不是读常量：
+
+| 失败码 | 宿主会不会抛 | 插件是否切换 |
+| --- | --- | --- |
+| `RATE_LIMIT` / `QUOTA` / `SERVER` / `TIMEOUT` / `TRANSPORT` / `EMPTY_RESPONSE` | 会 | ✅ 切换 |
+| `AUTH` / `INVALID_CREDENTIAL` | 会 | ✅ 切换 |
+| `STREAM_CLOSED` | **会**（`dsh-llm-deepseek:2096`、`dsh-llm-pi-ai:1688`：流在 `message_stop` 前断掉） | ❌ **不切换** |
+| `ACCOUNT_QUOTA` | **会**（`dsh-llm-deepseek-account:87`，账号额度耗尽时把 `QUOTA` 改写成它） | ❌ **不切换** |
+| `MALFORMED_RESPONSE` | 会（SSE 坏帧） | ❌ 不切换（宿主自己标了 `retryChoice`，但换一家未必还会坏） |
+| `CONTENT_REFUSED` | 会（内容拒答） | ❌ 不切换（**正确**：换一家也会被拒） |
+
+前两条是实质缺口：**流被中断**和**账号额度耗尽**恰好都是换一家供应商很可能成功的场景，却直接放行错误、结束子代理。`docs/per-model-retry-design.md` 的原始需求是「连接类失败就换」，`STREAM_CLOSED` 正属于连接类。
+
+另有一处文档不一致：2.1.10 的核查表把 `ACCOUNT_QUOTA` 列为「已核对」的失败码，但插件源码里从来没有它。
+
+**没有动它**，因为这是行为变更（会让上面两种失败从此触发切换），不属于「升级跟进」的范围。要修的话单独起一版。
+
 ## 2.2.4 (2026-11-13)
 
 ### Changed

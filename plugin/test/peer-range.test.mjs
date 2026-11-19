@@ -74,16 +74,34 @@ const EXPECTED_RANGE = /^>=\s*0\.1\.7-rc\.1\s*<\s*0\.3\.0-0$/;
  * never reviewed against, which is the opposite of what the list is for. It was
  * removed when `0.2.2-rc.2` was added below.
  *
- * `0.2.2-rc.2` is the host this plugin runs against now, and it is the release
- * that FLATTENED `SubagentActivationSpec` (nested `request` → an interface that
- * extends `SubagentStartRequest`). Listing the version is what makes the guard
- * fail loudly on a fresh host upgrade; it does not by itself detect a contract
- * change, which is why that one was found by diffing the packed packages.
+ * `0.2.2-rc.2` is the release that FLATTENED `SubagentActivationSpec` (nested
+ * `request` → an interface that extends `SubagentStartRequest`). Listing the
+ * version is what makes the guard fail loudly on a fresh host upgrade; it does
+ * not by itself detect a contract change, which is why that one was found by
+ * diffing the packed packages.
+ *
+ * `0.2.2-rc.3` was reviewed package by package: nothing under the
+ * plugin-facing surface (`core`, `subagent`, `llm`, `settings`, `session`,
+ * `boot`) changed except `package.json` versions, and every contract landmark
+ * the plugin depends on sits at the SAME line as in rc.2. Adding the version
+ * is still required — the guard asserts the list, not the peer range.
+ *
+ * `0.2.2-rc.4` is listed even though this machine never installed it: the list
+ * records every host the plugin has been REVIEWED against, and a machine still
+ * on rc.4 must not fail a suite that was already reviewed for it. Nothing
+ * guards that for you — the running-host assertion below pins only the version
+ * actually installed, so a skipped rc has no automatic check.
+ *
+ * rc.3 → rc.5 changed only web search plus one new failure code
+ * (`CONTENT_REFUSED`); no agent, session, or subagent package changed across
+ * the two releases, and every landmark below still sits at the rc.3 line.
+ *
+ * `0.2.2-rc.5` is what runs here now (installed 2026-11-18).
  */
 const ADMITTED_HOST_VERSIONS = [
 	"0.2.0-rc.1", "0.2.0-rc.2", "0.2.0",
 	"0.2.1-rc.1", "0.2.1-rc.2", "0.2.1-rc.3", "0.2.1-rc.4", "0.2.1-rc.5", "0.2.1",
-	"0.2.2-rc.1", "0.2.2-rc.2"
+	"0.2.2-rc.1", "0.2.2-rc.2", "0.2.2-rc.3", "0.2.2-rc.4", "0.2.2-rc.5"
 ];
 
 /** The exact options `dsh-app-boot` passes to `semver.satisfies`. */

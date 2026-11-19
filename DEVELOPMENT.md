@@ -155,36 +155,69 @@ Unexpected token 'e', "e": "@deepseek-ai/dsh", … is not valid JSON
 
 ## 宿主升级流程（每次换宿主版本都走一遍）
 
-「应当通过」的宿主版本清单**已经滞后过四次**（2.1.5、2.1.6、2.1.8、2.1.10 各一次），每次都是「宿主先升级、清单靠人记得补」。所以现在清单**由宿主自己核对**：
+「应当通过」的宿主版本清单**已经滞后过六次**（2.1.5、2.1.6、2.1.8、2.1.10、rc.3、rc.5 各一次），每次都是「宿主先升级、清单靠人记得补」。所以现在清单**由宿主自己核对**：
+
+第六次（0.2.2-rc.5）与前几次的不同之处：**连续两次（rc.3、rc.5）都不是靠人发现的**。护栏按设计直接失败（`the running host 0.2.2-rc.5 must be listed in ADMITTED_HOST_VERSIONS`），`node --test` 当场给出红字。这正是加那道自检的目的——但它只覆盖「清单漏了版本号」，**不覆盖契约变化**，所以下面第 2、3 步一步都不能省。
 
 ```bash
 # 1. 看宿主当前版本（安装包内 @deepseek-ai/dsh 的 package.json）
-node -e '…手写 asar 读取…'   # 或直接看 app.asar 内该文件的 version
+#    最省事的一条（asar 内不能 ls/cat，但能 node 读）：
+ELECTRON_RUN_AS_NODE=1 "$DSH_NODE_EXECUTABLE" -e \
+  'console.log(require(process.env.DSH_INSTALL_DIR + "/package.json").version)'
+# 或直接看 app.asar 内该文件的 version / Info.plist 的 CFBundleShortVersionString
 
 # 2. 补进 ADMITTED_HOST_VERSIONS（plugin/test/peer-range.test.mjs）
 #    —— 漏了的话，「the RUNNING host version must be admitted」用例会直接失败
 #    —— 跨多个 rc 升级时把跳过的版本也补上（见下）
+#    —— 顺手把该文件里「当前运行的宿主是哪个」的注释一并更正
 
 # 3. 逐项核对插件依赖的宿主契约（行号要重新 grep，别抄上一版）
 grep -n 'preStep\|buildRequest\|inbox.claim\|request/context' app.asar 内 dsh-agent-loop/lib/index.js
 
-# 4. 跑全套测试，确认 skip 0
+# 4. 逐包比对发布物，把「契约变了」与「只是版本号变了」分开（见后面的专节）
+#    —— 升级指南 docs/upgrade-guide/ 先读一遍，但它不全：0.2.2-rc.2 至今无目录，
+#       rc.3 起才补上（只覆盖拒答码与搜索默认值，都不影响本插件）
+
+# 5. 顺手比一遍码集：宿主会抛的失败码 vs 插件 FAILOVER_TRIGGER_CODES
+#    —— 还没有自动护栏，靠人比对（码集与宿主词表目前没有任何测试看守）
+
+# 6. 跑全套测试，确认 fail 0 且 skipped 0
 npm --prefix plugin test
 ```
 
-第 3 步要核对的清单（0.2.2-rc.2 实测行号）：
+> 第 6 步看 **`skipped` 也要是 0**。「运行中的宿主」那条用例在找不到安装包时会 `t.skip` 并注册成 skip——skip 不是 pass，它意味着宿主契约当前无人在看。
 
-| 契约 | rc.3 | rc.5 | 0.2.2-rc.1 | 0.2.2-rc.2 |
-| --- | --- | --- | --- | --- |
-| `preStep()` / `inbox.claim()` | `:902` / `:906` | `:902` / `:906`（未变） | `:666` / `:670`（**整体上移，且语义变了**） | `:679` / `:683` |
-| `agent/pre-step` 瀑布 | `:909` | `:909`（未变） | `:685` | `:698` |
-| `buildRequest()` 定义 | `:1214` | `:1214`（未变） | `:1018` | `:1031` |
-| `request/context` append | `:1271` | `:1271`（未变） | `:1075` | `:1088` |
-| `session.requestContext()` | `:1627` | `dsh-session` `:1627`（未变） | `dsh-session` `:1636` | `dsh-session` `:1708` |
-| `subagents.startActivation()` | `:3036` | `dsh-subagent` `:3036`（未变） | `dsh-subagent` `:3051` | `dsh-subagent` `:3018`（**且 spec 被扁平化**） |
-| `agent/request-error` / `agent/request` | `:1136` / `:1191` | `:1136` / `:1191`（未变） | `:929` / `:994`（`agent/request` **已废弃**） | `:942` / `:1007`（仍未移除，仍派发） |
+第 3 步要核对的清单（`0.2.2-rc.5` 实测行号）：
 
-> 行号是**核对时的快照**，不是契约：它在 0.2.1-rc.1 → rc.2 之间整体下移过，rc.2 → rc.3 → rc.5 之间没有再动，0.2.2-rc.1 → rc.2 之间又整体上移了十几行。每次升级都重新 `grep` 一遍，别照抄上一版。
+> 表头的 `0.2.1-rc.N` 一律写全称。早先只写 `rc.3` / `rc.5`，与 `0.2.2-rc.3` 撞名，核对时极易看错列。
+
+| 契约 | 0.2.1-rc.3 | 0.2.1-rc.5 | 0.2.2-rc.1 | 0.2.2-rc.2 | 0.2.2-rc.3 | 0.2.2-rc.5 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `preStep()` / `inbox.claim()` | `:902` / `:906` | `:902` / `:906`（未变） | `:666` / `:670`（**整体上移，且语义变了**） | `:679` / `:683` | `:679` / `:683`（未变） | `:679` / `:683`（未变） |
+| `agent/pre-step` 瀑布 | `:909` | `:909`（未变） | `:685` | `:698` | `:698`（未变） | `:698`（未变） |
+| `buildRequest()` 定义 | `:1214` | `:1214`（未变） | `:1018` | `:1031` | `:1031`（未变） | `:1031`（未变） |
+| `request/context` append | `:1271` | `:1271`（未变） | `:1075` | `:1088` | `:1088`（未变） | `:1088`（未变） |
+| `session.requestContext()` | `:1627` | `dsh-session` `:1627`（未变） | `dsh-session` `:1636` | `dsh-session` `:1708` | `dsh-session` `:1708`（未变） | `dsh-session` `:1708`（未变） |
+| `subagents.startActivation()` | `:3036` | `dsh-subagent` `:3036`（未变） | `dsh-subagent` `:3051` | `dsh-subagent` `:3018`（**且 spec 被扁平化**） | `dsh-subagent` `:3018`（未变，仍扁平） | `dsh-subagent` `:3018`（未变，仍扁平） |
+| `agent/request-error` / `agent/request` | `:1136` / `:1191` | `:1136` / `:1191`（未变） | `:929` / `:994`（`agent/request` **已废弃**） | `:942` / `:1007`（仍未移除，仍派发） | `:942` / `:1007`（未变） | `:942` / `:1007`（未变） |
+
+> 行号是**核对时的快照**，不是契约：它在 0.2.1-rc.1 → rc.2 之间整体下移过，rc.2 → rc.3 → rc.5 之间没有再动，0.2.2-rc.1 → rc.2 之间又整体上移了十几行，**`0.2.2-rc.2` → `rc.3` → `rc.5` 两整列都没动**。每次升级都重新 `grep` 一遍，别照抄上一版。
+
+2.2.3 / 2.2.4 之后插件还额外依赖下面这些，同样要一起核对（`0.2.2-rc.5` 实测；rc.3 与 rc.5 位置相同）：
+
+| 契约 | 位置 |
+| --- | --- |
+| `agent.model.select()`（故障转移落点） | `dsh-agent/lib/types/model-selection.js:88` |
+| `agent.followup()`（切换后自动续跑） | `dsh-agent-loop/lib/index.js:579` |
+| `session.deriveMessages()`（注入行跨重启去重） | `dsh-session/lib/index.js:1753` |
+| `agent/disposed`（每个子代理的状态清理） | `dsh-agent-loop/lib/index.js:1448` |
+| `request/header` 的 `reason`（`initial` / `resume` / `change` / `series`） | `dsh-agent-loop/lib/index.js:1045` / `:1051` / `:1056` |
+| 失败码词表（`QUOTA` / `CONTENT_REFUSED` / `CONTEXT_WINDOW_EXCEEDED` / `EMPTY_RESPONSE` / `RATE_LIMIT` / `INVALID_CREDENTIAL` / `STREAM_CLOSED` / `MALFORMED_RESPONSE`） | `dsh-llm/lib/index.js:129` / `:134` / `:135` / `:141` / `:167` / `:147` / `:172` / `:158` |
+| `Symbol.for("cordis.original")`（拿到未代理的服务本体） | `cordis/lib/index.js:39`（定义处，非消费点） |
+
+> 失败码与 `cordis.original` 一行 `grep` 找不到不代表契约没了：它们的定义与消费分居两个包。按位置查，别按「关键词零命中」下结论。
+
+> **核对词表时要顺手比一遍「宿主标了 `retryChoice` 的码」与「插件 `FAILOVER_TRIGGER_CODES` 的码」。** 两者不是同一件事，但差距就是缺口：`0.2.2-rc.5` 上宿主标了 `retryChoice` 的 8 个码里，`STREAM_CLOSED` 与 `MALFORMED_RESPONSE` 不在插件的切换集里，而两个适配器**确实会抛** `STREAM_CLOSED`（流在 `message_stop` 前断掉：`dsh-llm-deepseek:2096`、`dsh-llm-pi-ai:1688`）。`ACCOUNT_QUOTA` 更隐蔽：它连 `retryChoice` 都没有，但 `dsh-llm-deepseek-account:87` 会把账号额度耗尽的 `QUOTA` 改写成它。**判据：码集要对「宿主真的会抛什么」负责，不是对「常量表里写了什么」负责。**
 
 ### `startActivation(spec)` 的形状是契约的一部分（0.2.2-rc.2 的教训）
 
@@ -222,7 +255,7 @@ interface SubagentActivationSpec extends Omit<SubagentStartRequest, 'label' | 's
 
 判据：**清单描述的是「本插件已评审过的宿主版本集合」，不是「我这台机器上的那一个」。** 升级路径上跨过的每个版本都要显式列出。
 
-### 逐包比对的正确姿势（rc.3 → rc.5 实操）
+### 逐包比对的正确姿势（0.2.1-rc.3 → rc.5、0.2.2-rc.2 → rc.3 实操）
 
 宿主的 `desktop-runtime.json` 列出了本次发布包含的**全部 305 个包**及其精确版本。把 rc.N 与 rc.N+1 的同名包都 `npm pack` 下来做 `diff -rq`，就能把「哪些包真有改动」和「哪些只是版本号变了」分开：
 
@@ -231,9 +264,17 @@ interface SubagentActivationSpec extends Omit<SubagentStartRequest, 'label' | 's
 diff -rq rc-old/pkg rc-new/pkg | grep -v -E 'package\.json differ|README'
 ```
 
-rc.3 → rc.5 的结果：**305 个包里只有 10 个有真实代码改动**，且全部落在插件未触碰的面上（见 `plugin/CHANGELOG.md` 2.1.10 节）。插件依赖的 `dsh-agent-loop`、`dsh-subagent`、`dsh-tool-subagent`、`dsh-llm`、`dsh-settings`、`dsh-app-boot` 等**逐个文件比对为零改动**。
+0.2.1-rc.3 → rc.5 的结果：**305 个包里只有 10 个有真实代码改动**，且全部落在插件未触碰的面上（见 `plugin/CHANGELOG.md` 2.1.10 节）。插件依赖的 `dsh-agent-loop`、`dsh-subagent`、`dsh-tool-subagent`、`dsh-llm`、`dsh-settings`、`dsh-app-boot` 等**逐个文件比对为零改动**。
+
+0.2.2-rc.2 → rc.3 的结果：**只有 11 个包有真实代码改动**，插件依赖面（`core` / `subagent` / `llm` / `settings` / `session` / `boot` 共 57 个文件）**全部只是 `package.json` 版本号**。改动的 11 个包里最贴边的是 `dsh-client-ui-sidebar`（新增 `sidebar.session.action` HOC 槽）与 `dsh-client-ui-workspace`（picker 改 Factory）——本插件都不碰，它只用 `settings.section` / `settings.section.icon` 与 `trajectory` 视图定义。
+
+0.2.2-rc.3 → rc.5 的结果：**10 个包有真实代码改动**（`dsh-web` / `dsh-tool-web` / `dsh-web-search-deepseek` / `dsh-web-deepseek-api` / `dsh-client-ui-settings-web-search` / `dsh-bundle-base` / `dsh-llm` / `dsh-llm-deepseek` / `dsh-experimental-liveshare` / `dsh-tool-cordis`），仍然是网页搜索 + 一个新失败码。`dsh-agent-loop`、`dsh-agent`、`dsh-session`、`dsh-subagent`、`dsh-tool-subagent`、`dsh-settings`、`dsh-app-boot`、`cordis` **八个包全程零改动**。
 
 > 判据：**「版本号变了」不等于「契约变了」，但只有逐文件比对才能把这句话变成结论。** 别用「应该只是版本号」代替比对。
+>
+> 另一条同源判据（0.2.2-rc.3 核查时踩到）：**关键词零命中不等于契约没了**。`RATE_LIMIT` 这类失败码在 `dsh-agent-loop` 里一行都搜不到，因为它们定义在 `dsh-llm`；`cordis.original` 定义在 `cordis` 包，消费方才在插件里。搜之前先想清楚这个符号**属于哪个包**。
+>
+> 第三条（0.2.2-rc.5 核查时踩到）：**「包零改动」不等于「行为零变化」**。rc.3 → rc.5 里 `dsh-llm-deepseek-account` 一个字节没动，但它抛的 `ACCOUNT_QUOTA` 从来不在插件的切换集里——这个缺口不是本轮升级造成的，是它一直都在，靠逐包 diff 永远看不出来。**逐包比对找的是「变了什么」，插件自己的码集要对「宿主会抛什么」负责，两件事分开查。**
 
 ### 路由在 step 内是固定的：`agent/request` 不能再改 provider/model（0.2.2 的教训）
 
