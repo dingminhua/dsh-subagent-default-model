@@ -36,11 +36,13 @@
 // options, and prefers the real `semver` package when it resolves.
 
 import assert from "node:assert/strict";
-import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, sep } from "node:path";
 import test from "node:test";
 import vm from "node:vm";
+
+import { HOST_HOMES, findRunningHostVersion, readFileFromAsar } from "../test-helpers/host-asar.mjs";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const PEERS = Object.keys(pkg.peerDependencies ?? {});
@@ -377,12 +379,7 @@ test("the HOST's own evaluator accepts this manifest, when its source is readabl
 	// `semver.satisfies(v, range)` WITHOUT `{ includePrerelease: true }` says
 	// `0.2.1-rc.1` is unsatisfied, which reads as a broken peer range. The host
 	// passes that option, so the range was fine.
-	const homes = [
-		process.env.DSH_APP_BOOT,
-		"/Applications/DeepSeek Harness.app/Contents/Resources/app.asar",
-		"/Applications/DSH Desktop.app/Contents/Resources/app.asar",
-		"/Applications/DSH NEXT.app/Contents/Resources/app.asar"
-	].filter((value) => typeof value === "string" && value !== "");
+	const homes = HOST_HOMES;
 
 	const evaluator = findHostEvaluator(homes);
 	if (evaluator === void 0) {
@@ -439,12 +436,7 @@ test("the RUNNING host version must be admitted by the peer range", async (t) =>
 	// Without a host on this machine the check SKIPS LOUDLY. A silent skip
 	// would be the same "passes while asserting nothing" failure this file has
 	// already fixed twice.
-	const homes = [
-		process.env.DSH_APP_BOOT,
-		"/Applications/DeepSeek Harness.app/Contents/Resources/app.asar",
-		"/Applications/DSH Desktop.app/Contents/Resources/app.asar",
-		"/Applications/DSH NEXT.app/Contents/Resources/app.asar"
-	].filter((value) => typeof value === "string" && value !== "");
+	const homes = HOST_HOMES;
 
 	const running = findRunningHostVersion(homes);
 	if (running === undefined) {
@@ -464,40 +456,6 @@ test("the RUNNING host version must be admitted by the peer range", async (t) =>
 		`the running host ${running} must be listed in ADMITTED_HOST_VERSIONS (the explicit prerelease list)`
 	);
 });
-
-/**
- * Read the version of the DSH Desktop installation on this machine.
- *
- * The host's own version lives in `dsh/node_modules/@deepseek-ai/dsh/package.json`
- * inside the app bundle. An already-extracted tree (the review workflow's
- * layout) is read directly; an `app.asar` is read with the hand-written
- * reader below.
- *
- * @param {readonly string[]} homes - candidate app.asar paths, or a plugin dir.
- * @returns {string|undefined} the host version, or `undefined` when not found.
- */
-function findRunningHostVersion(homes) {
-	const relative = join("dsh", "node_modules", "@deepseek-ai", "dsh", "package.json");
-	for (const home of homes) {
-		try {
-			if (existsSync(home) && statSync(home).isDirectory()) {
-				const direct = join(home, relative);
-				if (!existsSync(direct)) continue;
-				const version = JSON.parse(readFileSync(direct, "utf8")).version;
-				if (typeof version === "string") return version;
-				continue;
-			}
-			if (!home.endsWith(".asar")) continue;
-			const source = readFileFromAsar(home, relative.split(sep).join("/"));
-			if (source === undefined) continue;
-			const version = JSON.parse(source).version;
-			if (typeof version === "string") return version;
-		} catch {
-			// Different layout, corrupt archive, or unreadable file; keep looking.
-		}
-	}
-	return undefined;
-}
 
 /**
  * Locate and extract the host's `unmetRequirements` implementation.
@@ -542,60 +500,6 @@ function findHostEvaluator(homes) {
 	return undefined;
 }
 
-/**
- * Read one file's bytes out of an `app.asar` archive, without any dependency.
- *
- * Layout: four little-endian uint32s — `4` (pickle header) | payload size |
- * padded JSON string size | UNPADDED JSON length — then the JSON directory
- * tree, then a payload whose file offsets are relative to the end of the
- * preamble + header. The third and fourth words look interchangeable and are
- * The third and fourth words look interchangeable and are not: the third is
- * padded to 4 bytes and includes the trailing padding, so parsing it yields
- * `Unexpected non-whitespace character after JSON`.
- *
- * THE PAYLOAD BASE IS `8 + headerSize`, NOT `16 + headerSize`. The header is
- * itself a pickle: the four words ARE that pickle's framing, the JSON
- * directory tree starts at byte 16, and the payload starts at byte
- * `8 + headerSize`. Reading with `16 + headerSize` lands 8 bytes too far in:
- * every file comes back with its first 8 bytes REPLACED by the tail of the
- * previous file and its last 8 bytes cut off.
- *
- * That mistake stayed invisible here for years, because the only reader of
- * this helper searched the text for a substring (`function unmetRequirements(`)
- * and a shifted copy still contains it. Reading a file AS JSON — which the
- * running-host-version check does — turns the same shift into a hard parse
- * error: the text starts mid-token (`e": "@deepseek-ai/dsh", …`).
- *
- * @param {string} archive - path to the `.asar` file.
- * @param {string} archivePath - POSIX-style path inside the archive.
- * @returns {string|undefined} UTF-8 contents, or `undefined` when absent/unpacked.
- */
-function readFileFromAsar(archive, archivePath) {
-	const fd = openSync(archive, "r");
-	try {
-		const preamble = Buffer.alloc(16);
-		if (readSync(fd, preamble, 0, 16, 0) !== 16) return undefined;
-		if (preamble.readUInt32LE(0) !== 4) return undefined;
-		const headerSize = preamble.readUInt32LE(4);
-		const jsonSize = preamble.readUInt32LE(12);
-		if (jsonSize === 0 || jsonSize > headerSize) return undefined;
-		const header = Buffer.alloc(headerSize);
-		if (readSync(fd, header, 0, headerSize, 16) !== headerSize) return undefined;
-		let node = JSON.parse(header.subarray(0, jsonSize).toString("utf8"));
-		for (const segment of archivePath.split("/")) {
-			node = node?.files?.[segment];
-			if (node === void 0) return undefined;
-		}
-		// An unpacked entry lives in `app.asar.unpacked/`, not in the archive.
-		if (node.files !== void 0 || node.unpacked === true) return undefined;
-		const bytes = Buffer.alloc(Number(node.size));
-		const at = 8 + headerSize + Number(node.offset);
-		if (readSync(fd, bytes, 0, bytes.length, at) !== bytes.length) return undefined;
-		return bytes.toString("utf8");
-	} finally {
-		closeSync(fd);
-	}
-}
 
 /**
  * Pull `unmetRequirements` out of the host bundle and wire it to the real semver.

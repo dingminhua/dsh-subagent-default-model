@@ -177,7 +177,7 @@ While you pick a provider / model / reasoning effort, the panel validates the co
 When a subagent loop hits a connection-class failure, the plugin automatically switches to another model in the `models` list and retries by `strategy` — **subagents only; the main agent loop is never affected**.
 
 - **Trigger codes**: two families, either one switches.
-  - **Connection**: `RATE_LIMIT`, `QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`.
+  - **Connection**: `RATE_LIMIT`, `QUOTA`, `ACCOUNT_QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`, `STREAM_CLOSED`.
   - **Authentication**: `AUTH`, `INVALID_CREDENTIAL`. API keys are independent per provider, so one bad key must not kill the whole task — these **do** switch. Every authentication switch logs a **warn**, flagging that the provider's key may be invalid rather than silently hiding a misconfiguration.
 - **Queue**: with `round-robin`, switch to the next model in list order.
 - **Random**: with `random`, pick any model (without checking whether it was used before).

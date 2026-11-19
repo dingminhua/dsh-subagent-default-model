@@ -1,5 +1,55 @@
 # Changelog
 
+## 2.2.6 (2026-11-19)
+
+### Fixed
+
+**故障转移的触发码集补上两个真实会发生的失败：`STREAM_CLOSED` 与 `ACCOUNT_QUOTA`。**
+
+这张清单是 2026-08 写 failover v1.0.0 时照着**当时**宿主会抛的码定的，之后宿主陆续加码，而**没有任何测试比对过两张表**。到 0.2.2-rc.5 为止，缺的两个恰好都是本功能存在的理由：
+
+| 码 | 宿主在哪里抛 | 为什么该切换 |
+| --- | --- | --- |
+| `STREAM_CLOSED` | `dsh-llm-deepseek:2096`「stream ended before message_stop」、`dsh-llm-pi-ai:1688`「event stream ended without done/error」 | 流在响应中途断掉，是「这家坏了、换一家就好」的典型场景。此前插件把它原样放行，子代理直接以错误结束 |
+| `ACCOUNT_QUOTA` | `dsh-llm-deepseek-account:87` —— 把账号余额耗尽的 `QUOTA` **改写**成这个码 | 与 `QUOTA`（清单里一直有）是同一件事，只是把「账号额度」与「单 key 额度」分开表达。结果唯一一个明说「这个账号没钱了」的码，恰恰是唯一不触发切换的码 |
+
+判据：**码集要对「宿主真的会抛什么」负责，不是对「当年常量表里写了什么」负责。**
+
+仍然**故意不切换**的码（理由已逐条写进测试文件）：`CONTENT_REFUSED`（内容被拒，换一家也一样被拒）、`CONTEXT_WINDOW_EXCEEDED` / `IMAGE_OFFLOAD_REQUIRED` / `INVALID_REQUEST`（请求本身有问题）、`UNKNOWN_MODEL` / `MODEL_UNSUPPORTED`（切换会掩盖配置里的笔误）、`MALFORMED_RESPONSE`（可能是供应商坏了，也可能是适配器的恒定 bug，插件分不出来，赌错会烧光整池）。
+
+### Added
+
+**护栏：码集与宿主词表的自动对齐（此前完全裸奔）。**
+
+新增 `plugin/test/failover-codes.test.mjs`，两层：
+
+1. **词表层（静态）** —— 从运行中的 `app.asar` 里解析宿主自己的 `LLM_FAILURE_CODES` 表，要求每个码要么在切换集里、要么在 `DELIBERATELY_ABSENT` 里写明理由。宿主下次加码时，**这条用例会红**，而不是等到几个月后有人手工发现。
+2. **行为层（动态）** —— 对每个码真实驱动插件自己的 `agent/request-error` 监听器，断言到底切不切。观察点是 `agent.model.select()` 是否被调用：在 0.2.2 上切换走这条路，瀑布的返回值**两种情况都是 `undefined`**，只看返回值等于什么都没断言。
+
+另有两条针对性回归：`STREAM_CLOSED` / `ACCOUNT_QUOTA` 必须切换；且必须走**连接类**路径而不是认证类（否则每次都要打一条误导性的「凭据被拒」warn）。
+
+`FAILOVER_ELIGIBLE_CODES` 与 `FAILOVER_TRIGGER_CODE_SET` 改为导出常量（与 `volatileField` / `Config` 同类的测试接缝）：测试直接读模块，**不再手抄一份清单**——抄一份的话，清单改了它照样绿，护栏就成了装饰。
+
+### Tests
+
+`198 → 206`，`skip 0`。新增 8 条：
+
+- 宿主词表可读（并校验解析结果的规模，防止解析退化成两三条让后续断言全部空转）；
+- 每个宿主码要么切换、要么有文档；
+- 「故意不切」与「切换集」互斥；
+- 「故意不切」里的码必须仍存在于宿主词表（防止过期决策变成噪音）;
+- 行为：切换集里的每个码真的会切；
+- 行为：文档记为不切的每个码真的不切；
+- 回归：`STREAM_CLOSED` / `ACCOUNT_QUOTA` 会切；
+- 回归：两者走连接类路径，不打凭据 warn。
+
+**变异验证 3/3 命中**：删 `STREAM_CLOSED` → 2 条红；删 `ACCOUNT_QUOTA` → 2 条红；把 `CONTENT_REFUSED` 误加进切换集 → 2 条红（互斥检查 + 行为检查）。
+
+### Changed
+
+- 双语文档（根 `README` 与 `plugin/README` 各两份）的连接类触发码清单同步补上这两个码。
+
+
 ## 2.2.5 (2026-11-19)
 
 ### 兼容性核查：DSH Desktop 0.2.2-rc.3 → rc.4 → rc.5

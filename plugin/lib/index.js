@@ -195,8 +195,50 @@ const WRAPPED = Symbol.for("dsh-subagent-default-model.wrapped");
  * Failure codes that count as "connection failed" (rate limit, quota, server /
  * transport errors, empty responses). Switching on these is safe because a
  * different model/provider may well succeed where the primary just failed.
+ *
+ * The list was written in 2026-08 against the failure codes the host raised
+ * THEN, and the host has added codes since. Two of them were missing until
+ * 2.2.6, and both are exactly the kind this feature exists for:
+ *
+ * - `STREAM_CLOSED` — the provider's stream ended before its terminal event
+ *   (`dsh-llm-deepseek`: "DeepSeek Messages stream ended before message_stop";
+ *   `dsh-llm-pi-ai`: "pi-ai event stream ended without done/error"). A dropped
+ *   connection mid-stream is the textbook case for trying another provider,
+ *   yet the plugin used to pass the error straight through and end the
+ *   subagent.
+ * - `ACCOUNT_QUOTA` — `dsh-llm-deepseek-account` REWRITES a plain `QUOTA` into
+ *   this code when the *account's* balance is exhausted. It is the same
+ *   situation as `QUOTA` (which this list always had), just told apart from a
+ *   per-key quota; skipping it meant the one code that says "this account is
+ *   out of credit" was the one code that never triggered a switch.
+ *
+ * Deliberately still absent:
+ *
+ * - `CONTENT_REFUSED` — the provider's safety review rejected the content.
+ *   Another provider would refuse the same request, so switching only burns
+ *   the pool.
+ * - `CONTEXT_WINDOW_EXCEEDED`, `IMAGE_OFFLOAD_REQUIRED`, `INVALID_REQUEST` —
+ *   the request itself is wrong; retrying it elsewhere fails identically.
+ * - `MALFORMED_RESPONSE` — kept out on purpose even though the host marks it
+ *   `retryChoice`. A malformed stream is a real candidate for "this provider is
+ *   broken", but it is also what a permanent adapter bug looks like, and the
+ *   plugin has no way to tell them apart. Adding a code here is cheap; adding
+ *   one that turns a deterministic parse failure into a pool-wide burn is not.
+ *
+ * `test/failover-codes.test.mjs` pins this list against the host's own failure
+ * code vocabulary, so a future host release that adds a code fails a test
+ * instead of silently going unswitched.
  */
-const FAILOVER_TRIGGER_CODES = ["RATE_LIMIT", "QUOTA", "SERVER", "TIMEOUT", "TRANSPORT", "EMPTY_RESPONSE"];
+const FAILOVER_TRIGGER_CODES = [
+	"RATE_LIMIT",
+	"QUOTA",
+	"ACCOUNT_QUOTA",
+	"SERVER",
+	"TIMEOUT",
+	"TRANSPORT",
+	"EMPTY_RESPONSE",
+	"STREAM_CLOSED"
+];
 
 /**
  * Auth failures, handled SEPARATELY from the connection codes above.
@@ -219,8 +261,19 @@ const FAILOVER_TRIGGER_CODES = ["RATE_LIMIT", "QUOTA", "SERVER", "TIMEOUT", "TRA
  */
 const AUTH_FAILURE_CODES = ["AUTH", "INVALID_CREDENTIAL"];
 
-/** Every failure code that may trigger a switch. */
-const FAILOVER_ELIGIBLE_CODES = [...FAILOVER_TRIGGER_CODES, ...AUTH_FAILURE_CODES];
+/**
+ * Every failure code that may trigger a switch.
+ *
+ * Exported as a read-only test seam, the same convention `volatileField` and
+ * `Config` follow: `test/failover-codes.test.mjs` compares it against the
+ * host's own failure-code vocabulary, and a hand-copied duplicate inside the
+ * test would defeat the point (it would keep passing after this list changed).
+ * The module loader only reads `apply` / `inject`.
+ */
+export const FAILOVER_ELIGIBLE_CODES = Object.freeze([...FAILOVER_TRIGGER_CODES, ...AUTH_FAILURE_CODES]);
+
+/** The connection-class subset, exported alongside for the same reason. */
+export const FAILOVER_TRIGGER_CODE_SET = Object.freeze([...FAILOVER_TRIGGER_CODES]);
 
 /**
  * Whether this host fixes the step's route and only sanctions changing it

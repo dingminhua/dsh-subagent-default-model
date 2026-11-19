@@ -27,7 +27,7 @@ With `failoverEnabled` (on by default), when a subagent hits a **connection-clas
 
 - **Provider-agnostic** — candidates come from the whole `models` list, so failover works **across providers**. If `deepseek-official/deepseek-v4-pro` dies, the subagent can fail over to a *different vendor's* model in the list — not merely another model ID from the same vendor.
 - **Two classes of trigger code** —
-  - **Connection-class**: `RATE_LIMIT`, `QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`.
+  - **Connection-class**: `RATE_LIMIT`, `QUOTA`, `ACCOUNT_QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`, `STREAM_CLOSED`.
   - **Auth-class**: `AUTH`, `INVALID_CREDENTIAL` (HTTP 401/403 — an invalid, expired, or unauthorised key).
   - Auth-class failures **do** switch: when each provider holds its own credentials, one bad key must not kill the whole delegation while healthy providers sit unused.
   - **But an auth switch always emits a warning** naming the provider whose key was refused. That is deliberate: switching buys resilience, and the **log line** is what keeps the misconfiguration from being silently hidden.
@@ -252,7 +252,7 @@ CI runs the same suite on `ubuntu-latest`, `windows-latest`, and `macos-latest`,
 With `failoverEnabled` on (the default), when a subagent's own loop hits a connection-class failure, the plugin automatically switches models inside the `models` list and retries, following `strategy`. See [Capability 2](#capability-2--cross-provider-failover-if-one-provider-is-down-run-on-another-providers-model) above for the full account; the key points:
 
 - **Cross-provider** — candidates are the whole `models` list, so it can fail over to a model from another provider, not just another model ID from the same vendor.
-- **Trigger codes** — connection-class: `RATE_LIMIT`, `QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`; auth-class: `AUTH`, `INVALID_CREDENTIAL` (invalid/expired key — switches, with a warning). Other codes do not switch.
+- **Trigger codes** — connection-class: `RATE_LIMIT`, `QUOTA`, `ACCOUNT_QUOTA`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE`, `STREAM_CLOSED`; auth-class: `AUTH`, `INVALID_CREDENTIAL` (invalid/expired key — switches, with a warning). Other codes do not switch.
 - `round-robin`: advance to the next model in the list (the queue).
 - `random`: pick any model (without checking whether it was used before).
 - **Needs ≥ 2 models** — with fewer than 2 entries in `models`, the feature is inactive.

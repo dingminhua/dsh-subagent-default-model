@@ -178,8 +178,11 @@ grep -n 'preStep\|buildRequest\|inbox.claim\|request/context' app.asar 内 dsh-a
 #    —— 升级指南 docs/upgrade-guide/ 先读一遍，但它不全：0.2.2-rc.2 至今无目录，
 #       rc.3 起才补上（只覆盖拒答码与搜索默认值，都不影响本插件）
 
-# 5. 顺手比一遍码集：宿主会抛的失败码 vs 插件 FAILOVER_TRIGGER_CODES
-#    —— 还没有自动护栏，靠人比对（码集与宿主词表目前没有任何测试看守）
+# 5. 码集对齐 —— 从 2.2.6 起这一步自动跑，不再靠人记得比
+npm --prefix plugin test 2>&1 | grep "failover-codes"
+#    —— test/failover-codes.test.mjs 解析宿主自己的 LLM_FAILURE_CODES 词表，
+#       要求每个码要么在切换集里、要么写进 DELIBERATELY_ABSENT（带理由）
+#    —— 宿主加了新码而这边没跟上时，这条用例直接红
 
 # 6. 跑全套测试，确认 fail 0 且 skipped 0
 npm --prefix plugin test
@@ -217,7 +220,11 @@ npm --prefix plugin test
 
 > 失败码与 `cordis.original` 一行 `grep` 找不到不代表契约没了：它们的定义与消费分居两个包。按位置查，别按「关键词零命中」下结论。
 
-> **核对词表时要顺手比一遍「宿主标了 `retryChoice` 的码」与「插件 `FAILOVER_TRIGGER_CODES` 的码」。** 两者不是同一件事，但差距就是缺口：`0.2.2-rc.5` 上宿主标了 `retryChoice` 的 8 个码里，`STREAM_CLOSED` 与 `MALFORMED_RESPONSE` 不在插件的切换集里，而两个适配器**确实会抛** `STREAM_CLOSED`（流在 `message_stop` 前断掉：`dsh-llm-deepseek:2096`、`dsh-llm-pi-ai:1688`）。`ACCOUNT_QUOTA` 更隐蔽：它连 `retryChoice` 都没有，但 `dsh-llm-deepseek-account:87` 会把账号额度耗尽的 `QUOTA` 改写成它。**判据：码集要对「宿主真的会抛什么」负责，不是对「常量表里写了什么」负责。**
+> **码集对齐从 2.2.6 起由 `test/failover-codes.test.mjs` 自动看守**，上面第 5 步就是它。这里记录它守的是什么、以及当初是怎么发现的。
+>
+> `retryChoice` 标记与本插件的切换集**不是同一件事**，但两者的差距就是缺口：`0.2.2-rc.5` 上宿主标了 `retryChoice` 的 8 个码里，`STREAM_CLOSED` 与 `MALFORMED_RESPONSE` 不在插件的切换集里，而两个适配器**确实会抛** `STREAM_CLOSED`（流在 `message_stop` 前断掉：`dsh-llm-deepseek:2096`、`dsh-llm-pi-ai:1688`）。`ACCOUNT_QUOTA` 更隐蔽：它连 `retryChoice` 都没有，但 `dsh-llm-deepseek-account:87` 会把账号额度耗尽的 `QUOTA` 改写成它。
+>
+> **判据：码集要对「宿主真的会抛什么」负责，不是对「常量表里写了什么」负责。** 也不能只 grep `new LlmError("…", "CODE")` —— 接近一半的码是**动态赋值**的（`HTTP_${status}`、账号适配器的 `QUOTA` 改写），静态 grep 会给出一个干净但错误的答案。护栏因此读的是宿主的 `LLM_FAILURE_CODES` **词表**（完整、含未使用的码），再逐码跑一遍真实监听器确认行为。
 
 ### `startActivation(spec)` 的形状是契约的一部分（0.2.2-rc.2 的教训）
 

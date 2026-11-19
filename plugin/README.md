@@ -27,7 +27,7 @@
 
 - **不区分供应商** —— 候选来自整个 `models` 列表，**跨 provider 生效**。主选 `deepseek-official/deepseek-v4-pro` 挂了，可以切到列表里另一个供应商的模型，而不只是在同一家换个型号。
 - **触发码分两类** ——
-  - **连接类**：`RATE_LIMIT`、`QUOTA`、`SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE`。
+  - **连接类**：`RATE_LIMIT`、`QUOTA`、`ACCOUNT_QUOTA`、`SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE`、`STREAM_CLOSED`。
   - **认证类**：`AUTH`、`INVALID_CREDENTIAL`（HTTP 401/403，密钥无效/过期/无权限）。
   - 认证类**也会切换**：当各家供应商密钥各自独立时，其中一家密钥失效不应该让整个任务死掉、而健康的供应商却在闲置。
   - **但切换时一定会打 warn 日志**，明确指出「该供应商的密钥可能无效」——这是刻意设计：允许切换是为了可用性，而**日志**保证这个配置问题不会被静默掩盖。
@@ -252,7 +252,7 @@ CI 在 `ubuntu-latest`、`windows-latest`、`macos-latest` 三个平台上同时
 开启 `failoverEnabled`（默认开启）后，子代理自身的循环遇到连接类失败时，插件会在 `models` 列表内按 `strategy` 自动切换模型并重试。完整说明见上文「[功能二：跨供应商故障转移](#功能二跨供应商故障转移--这条通了那条不通就换另一个供应商的模型)」，要点复述：
 
 - **跨供应商** —— 候选是整个 `models` 列表，可以切到另一个 provider 的模型，不限于同一家换型号。
-- **触发码** —— 连接类：`RATE_LIMIT`、`QUOTA`、`SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE`；认证类：`AUTH`、`INVALID_CREDENTIAL`（密钥无效/过期，会切换并打 warn 日志）。其余码不切换。
+- **触发码** —— 连接类：`RATE_LIMIT`、`QUOTA`、`ACCOUNT_QUOTA`、`SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE`、`STREAM_CLOSED`；认证类：`AUTH`、`INVALID_CREDENTIAL`（密钥无效/过期，会切换并打 warn 日志）。其余码不切换。
 - `round-robin`：按列表顺序切到下一个模型（队列）。
 - `random`：随机挑一个模型（不判断之前是否用过）。
 - **需要 ≥ 2 个模型** —— 当 `models` 少于 2 项时本功能不生效。

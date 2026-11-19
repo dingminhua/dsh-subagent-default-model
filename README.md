@@ -177,7 +177,7 @@ CI 在 `ubuntu-latest` / `windows-latest` / `macos-latest` 三个平台同时跑
 当子代理（subagent）自身的循环遇到连接类失败时，插件会自动在 `models` 列表内切换模型并按 `strategy` 规则重试——**仅对 subagent 生效，主代理循环不受影响**。
 
 - **触发码**：分两类，命中任一即切换。
-  - **连接类**：`RATE_LIMIT`、`QUOTA`、`SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE`。
+  - **连接类**：`RATE_LIMIT`、`QUOTA`、`ACCOUNT_QUOTA`、`SERVER`、`TIMEOUT`、`TRANSPORT`、`EMPTY_RESPONSE`、`STREAM_CLOSED`。
   - **认证类**：`AUTH`、`INVALID_CREDENTIAL`。各家密钥独立，一家密钥坏不该让整个任务死掉，因此**也会切换**；但每次认证类切换都会打一条 **warn** 日志，说明该供应商的密钥可能无效，避免静默掩盖配置问题。
 - **队列**：`round-robin` 策略下按列表顺序切到下一个模型。
 - **随机**：`random` 策略下随机挑一个模型（不判断之前是否用过）。
