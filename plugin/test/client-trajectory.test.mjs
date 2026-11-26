@@ -2061,9 +2061,9 @@ test("the nav glyph is registered under the SAME id as the page", async () => {
 
 test("the nav glyph renders the plugin's own mark at the requested size", async () => {
 	// The shell wraps this cell in a <span> (`inline: true`) and passes
-	// `{ size, active }`. Rendering the mark means an <img> carrying the brand
-	// data URI at exactly the requested edge — not a generic gear, and not a
-	// block element that would break the nav row's baseline.
+	// `{ size, active }`. With no stored preference the mark is an <img> carrying
+	// the brand data URI at exactly the requested edge — not a generic gear, and
+	// not a block element that would break the nav row's baseline.
 	const { ctx, slotRegistrations } = makeCtx();
 	const react = makeReactDouble();
 	capturedModule.factory((id) => {
@@ -2076,16 +2076,20 @@ test("the nav glyph renders the plugin's own mark at the requested size", async 
 	const icon = slotRegistrations.find((entry) => entry.name === "settings.section.icon");
 	assert.ok(icon, "the glyph entry must exist");
 	const component = icon.value.component;
+	// The glyph follows the saved skin, so the component subscribes to the
+	// preference through hooks; expand it the way React would.
 	react.beginPass();
-	const node = component({ size: 16, active: true });
-	assert.equal(node.type, "img", "the nav glyph must be an image");
+	const node = expand(component({ size: 16, active: true }))[0];
+	assert.equal(node.type, "img", "the default skin is the brand image");
 	assert.match(String(node.props.src), /^data:image\/png;base64,/, "and must carry the brand mark, not a re-drawn glyph");
 	assert.equal(node.props.width, 16);
 	assert.equal(node.props.height, 16);
 	// A larger request must be honoured rather than hard-coding 16.
 	react.beginPass();
-	const bigger = component({ size: 24, active: false });
+	const bigger = expand(component({ size: 24, active: false }))[0];
 	assert.equal(bigger.props.width, 24, "the requested edge must be respected");
+	// `active: false` dims the mark instead of hiding it.
+	assert.equal(bigger.props.style.opacity, 0.75, "an inactive section must dim its glyph");
 });
 
 test("the Settings page states the plugin's three values, one sentence each", async () => {
@@ -2217,4 +2221,325 @@ test("the diagnostics sit LAST on the page, below the save controls", async () =
 		`the diagnostics must come AFTER the save footer (got diag=${diagAt}, footer=${footerAt}): ${JSON.stringify(classes)}`
 	);
 	assert.equal(diagAt, classes.length - 1, "the diagnostics must be the last block in the form");
+});
+
+// ── 图标样式（issue #3：可选 Claude 风格）─────────────────────────────────
+// 参考同族插件 dsh-connect-workbuddy / dsh-connect-trae 的做法：外观是**本地**
+// 偏好（localStorage），不写进 profile 配置；默认是本插件自己的图标。
+//
+// 这里驱动的是真实注册的组件，而不是把实现抄一份到测试里——抄一份的话，
+// 实现改坏了测试照样绿。
+
+/** 给沙箱 window 装一个内存版 localStorage + 事件总线。 */
+function installIconEnvironment(initial) {
+	const store = new Map(Object.entries(initial ?? {}));
+	const listeners = new Map();
+	const localStorage = {
+		getItem(key) { return store.has(key) ? store.get(key) : null; },
+		setItem(key, value) { store.set(key, String(value)); },
+		removeItem(key) { store.delete(key); }
+	};
+	sandbox.window.localStorage = localStorage;
+	sandbox.window.addEventListener = (type, listener) => {
+		if (!listeners.has(type)) listeners.set(type, []);
+		listeners.get(type).push(listener);
+	};
+	sandbox.window.removeEventListener = (type, listener) => {
+		const list = listeners.get(type);
+		if (!list) return;
+		const at = list.indexOf(listener);
+		if (at >= 0) list.splice(at, 1);
+	};
+	return {
+		store,
+		localStorage,
+		/** 模拟另一个标签页写入：storage 事件只带 key。 */
+		dispatchStorage(key) {
+			for (const listener of (listeners.get("storage") ?? []).slice()) listener({ key });
+		}
+	};
+}
+
+function clearIconEnvironment() {
+	delete sandbox.window.localStorage;
+	delete sandbox.window.addEventListener;
+	delete sandbox.window.removeEventListener;
+}
+
+/** 启动一次真实 client apply，返回 slot 注册表与 React 替身。 */
+function applyClient() {
+	const react = makeReactDouble();
+	const { ctx, slotRegistrations, dictionaries } = makeCtx();
+	capturedModule.factory((id) => {
+		if (id === "react") return react;
+		if (id === "@deepseek-ai/dsh-client-ui-primitives") {
+			return { Toast: function Toast() {}, IconChevronDownOutlineRegular: function Icon() {} };
+		}
+		throw new Error(`unexpected require: ${id}`);
+	}).apply(ctx);
+	const t = (key, params) => {
+		const template = dictionaries.zh?.[key] ?? key;
+		return params === undefined ? template : template.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
+	};
+	return { react, slotRegistrations, dictionaries, t };
+}
+
+/** 渲染设置页（真实组件），返回可重新渲染的钩子。 */
+function renderSettingsPage(react, slotRegistrations, t) {
+	const section = slotRegistrations.find((entry) => entry.name === "settings.section").value;
+	const render = () => {
+		react.beginPass();
+		return expand(section.component({ ...section.options.inject(), t, close: () => {} }));
+	};
+	return { render, section };
+}
+
+/** 页面上皮肤选择器的两个选项按钮。 */
+function iconChoiceButtons(tree) {
+	return collect(tree, (node) => node.type === "button" && node.props && node.props["data-icon-style-option"] !== undefined);
+}
+
+test("icon style: the plugin's own mark is the DEFAULT, not the Claude skin", () => {
+	// 一个从未选过的用户不该被换成另一种身份标识：皮肤是「选择」，必须由人选。
+	// 同时这也是读不到 localStorage 时的兜底，所以首帧不会闪一下再换。
+	const env = installIconEnvironment();
+	try {
+		const { react, slotRegistrations, t } = applyClient();
+		const { render } = renderSettingsPage(react, slotRegistrations, t);
+		const tree = render();
+		const buttons = iconChoiceButtons(tree);
+		assert.equal(buttons.length, 2, "both skins must be offered");
+		assert.equal(buttons[0].props["data-icon-style-option"], "original", "original comes first");
+		assert.equal(buttons[0].props["aria-checked"], true, "and is the checked one when nothing is stored");
+		assert.equal(buttons[1].props["aria-checked"], false);
+		assert.equal(env.store.has("dsh-subagent-default-model.icon-style"), false, "rendering must not write a preference");
+	} finally {
+		clearIconEnvironment();
+	}
+});
+
+test("icon style: each choice PREVIEWS the real icon it selects", () => {
+	// 选项里画的必须是真正会应用的那个字形，而不是文字标签——否则用户在点之前
+	// 根本不知道另一个皮肤长什么样。
+	const env = installIconEnvironment();
+	try {
+		const { react, slotRegistrations, t } = applyClient();
+		const { render } = renderSettingsPage(react, slotRegistrations, t);
+		const buttons = iconChoiceButtons(render());
+		const originalPreview = expand(buttons[0].children[0])[0];
+		const claudePreview = expand(buttons[1].children[0])[0];
+		assert.equal(originalPreview.type, "img", "the default preview is the brand image");
+		assert.match(String(originalPreview.props.src), /^data:image\/png;base64,/);
+		assert.equal(claudePreview.type, "svg", "the Claude preview is drawn, not an image");
+		assert.equal(claudePreview.props.fill, "currentColor", "and follows the theme's text colour");
+		assert.equal(claudePreview.props["data-icon-style"], "claude");
+	} finally {
+		clearIconEnvironment();
+	}
+});
+
+test("icon style: clicking a choice persists it and repaints every surface at once", () => {
+	// 三处必须一起变：选择器本身、导航栏字形、插件卡。只变一处就是「改了一半」。
+	const env = installIconEnvironment();
+	try {
+		const { react, slotRegistrations, t } = applyClient();
+		const { render } = renderSettingsPage(react, slotRegistrations, t);
+		render();
+		const claude = iconChoiceButtons(render())[1];
+		claude.props.onClick();
+		assert.equal(env.store.get("dsh-subagent-default-model.icon-style"), "claude", "the choice is persisted");
+
+		// Re-render the way React would after the state update.
+		const after = iconChoiceButtons(render());
+		assert.equal(after[1].props["aria-checked"], true, "the chosen option is checked");
+		assert.equal(after[0].props["aria-checked"], false);
+
+		// The nav-rail glyph follows the saved skin instead of staying a bitmap.
+		//
+		// A SECOND client apply (fresh hook cells, same localStorage) is what the
+		// assertion needs: the test double keeps ONE cells array for every
+		// component, so a glyph rendered in the same double would read the cell
+		// the page already filled. Real React keeps cells per component instance,
+		// and the glyph mounting later reads storage fresh — which is exactly
+		// what a fresh apply models.
+		const second = applyClient();
+		const glyph = second.slotRegistrations.find((entry) => entry.name === "settings.section.icon").value.component;
+		second.react.beginPass();
+		const drawn = expand(glyph({ size: 16, active: true }))[0];
+		assert.equal(drawn.type, "svg", "the nav glyph must follow the chosen skin");
+		assert.equal(drawn.props["data-icon-style"], "claude");
+		assert.equal(drawn.props.width, 16, "and still honour the requested edge");
+	} finally {
+		clearIconEnvironment();
+	}
+});
+
+test("icon style: a stored choice is what the first paint uses (no flash of the other skin)", () => {
+	const env = installIconEnvironment({ "dsh-subagent-default-model.icon-style": "claude" });
+	try {
+		const { react, slotRegistrations } = applyClient();
+		const glyph = slotRegistrations.find((entry) => entry.name === "settings.section.icon").value.component;
+		react.beginPass();
+		assert.equal(expand(glyph({ size: 20, active: true }))[0].type, "svg");
+	} finally {
+		clearIconEnvironment();
+	}
+});
+
+test("icon style: an unknown stored value falls back to the default", () => {
+	// 存储里可能有旧版本写下的值（或人手改坏的值）。它必须退化成默认皮肤，
+	// 而不是渲染一个两边都不匹配的空图标。
+	const env = installIconEnvironment({ "dsh-subagent-default-model.icon-style": "neon" });
+	try {
+		const { react, slotRegistrations } = applyClient();
+		const glyph = slotRegistrations.find((entry) => entry.name === "settings.section.icon").value.component;
+		react.beginPass();
+		assert.equal(expand(glyph({ size: 16, active: true }))[0].type, "img");
+	} finally {
+		clearIconEnvironment();
+	}
+});
+
+test("icon style: a blocked localStorage degrades to the default instead of throwing", () => {
+	// 存储被策略禁用的浏览器里，读取会抛错。渲染路径上抛错等于整页白屏，
+	// 所以读取必须自己吞掉异常。
+	sandbox.window.localStorage = {
+		getItem() { throw new Error("SecurityError"); },
+		setItem() { throw new Error("SecurityError"); }
+	};
+	try {
+		const { react, slotRegistrations } = applyClient();
+		const glyph = slotRegistrations.find((entry) => entry.name === "settings.section.icon").value.component;
+		react.beginPass();
+		assert.equal(expand(glyph({ size: 16, active: true }))[0].type, "img", "the default skin must still render");
+	} finally {
+		clearIconEnvironment();
+	}
+});
+
+test("icon style: a failed save is REPORTED, not swallowed", () => {
+	// 点击后什么都没发生是最难排查的失败：必须有一条可见的错误提示。
+	sandbox.window.localStorage = {
+		getItem() { return null; },
+		setItem() { throw new Error("QuotaExceededError"); }
+	};
+	try {
+		const { react, slotRegistrations, t } = applyClient();
+		const { render } = renderSettingsPage(react, slotRegistrations, t);
+		render();
+		iconChoiceButtons(render())[1].props.onClick();
+		const alerts = collect(render(), (node) => node.props && node.props.role === "alert");
+		assert.equal(alerts.length, 1, "the failure must surface as an alert");
+		assert.match(alerts[0].text, /保存失败/);
+	} finally {
+		clearIconEnvironment();
+	}
+});
+
+test("icon style: another tab's change is picked up through the storage event", () => {
+	// 同一份 localStorage 在两个标签页之间共享，但内存里的订阅不会自动知道
+	// ——`storage` 事件是它唯一的通知渠道。
+	const env = installIconEnvironment();
+	try {
+		const { react, slotRegistrations } = applyClient();
+		const glyph = slotRegistrations.find((entry) => entry.name === "settings.section.icon").value.component;
+		react.beginPass();
+		assert.equal(expand(glyph({ size: 16, active: true }))[0].type, "img");
+		env.store.set("dsh-subagent-default-model.icon-style", "claude");
+		env.dispatchStorage("dsh-subagent-default-model.icon-style");
+		react.beginPass();
+		assert.equal(expand(glyph({ size: 16, active: true }))[0].type, "svg", "the other tab's choice must apply");
+	} finally {
+		clearIconEnvironment();
+	}
+});
+
+test("icon style: the radio group is keyboard operable, not click-only", () => {
+	// 两个互斥选项是单选语义；方向键切换、Home/End 跳首尾，是 role=radio 的
+	// 约定。只支持鼠标等于把键盘用户挡在门外。
+	const env = installIconEnvironment();
+	try {
+		const { react, slotRegistrations, t } = applyClient();
+		const { render } = renderSettingsPage(react, slotRegistrations, t);
+		render();
+		const buttons = iconChoiceButtons(render());
+		let prevented = 0;
+		const original = buttons[0];
+		original.props.onKeyDown({
+			key: "ArrowRight",
+			preventDefault() { prevented += 1; },
+			currentTarget: { parentElement: { querySelectorAll: () => [] } }
+		});
+		assert.equal(prevented, 1, "the arrow key must be claimed by the group, not scroll the page");
+		assert.equal(env.store.get("dsh-subagent-default-model.icon-style"), "claude", "ArrowRight moves to the next option");
+
+		// End jumps to the LAST option (claude), Home back to the first.
+		iconChoiceButtons(render())[1].props.onKeyDown({
+			key: "Home",
+			preventDefault() {},
+			currentTarget: { parentElement: { querySelectorAll: () => [] } }
+		});
+		assert.equal(env.store.get("dsh-subagent-default-model.icon-style"), "original");
+
+		// A key the group does not own must pass through untouched.
+		let unclaimedPrevented = 0;
+		iconChoiceButtons(render())[0].props.onKeyDown({
+			key: "Tab",
+			preventDefault() { unclaimedPrevented += 1; },
+			currentTarget: { parentElement: { querySelectorAll: () => [] } }
+		});
+		assert.equal(unclaimedPrevented, 0, "Tab must not be swallowed");
+	} finally {
+		clearIconEnvironment();
+	}
+});
+
+test("icon style: the appearance block sits on the settings page with both locales", () => {
+	const env = installIconEnvironment();
+	try {
+		const { react, slotRegistrations, t, dictionaries } = applyClient();
+		const { render } = renderSettingsPage(react, slotRegistrations, t);
+		const tree = render();
+		assert.ok(
+			collect(tree, (node) => node.props && node.props.className === "dsm-icon-preference").length === 1,
+			"the appearance block must render on the Settings page"
+		);
+		assert.match(treeText(tree), /图标样式/, "the label must come from the dictionary");
+		for (const key of ["row.iconStyleLabel", "row.iconStyleHint", "row.iconStyleClaude", "row.iconStyleOriginal", "row.iconStyleSaveFailed"]) {
+			assert.ok(dictionaries.zh[key], `zh missing ${key}`);
+			assert.ok(dictionaries.en[key], `en missing ${key}`);
+		}
+	} finally {
+		clearIconEnvironment();
+	}
+});
+
+test("icon style: the nav glyph follows the STORED preference, and stray props cannot override it", () => {
+	// 皮肤的唯一来源是 localStorage。这条用例把这一点钉住，因为「谁来定皮肤」
+	// 一旦有第二个入口（比如某个调用方顺手传个 variant），两条通路就会打架。
+	//
+	// 注：这里**不能**用"传 variant 看它是否生效"来验证——注册进 slot 的组件
+	// 根本不转发未知 props 给 PluginIcon，所以那种断言无论实现怎么写都会绿，
+	// 是一条假的护栏。草案里 `props.variant || useIconStyle()` 那个分支正是
+	// 这种"没有调用方、也测不到"的死代码，已整个删掉（见 lib/client.js 注释）。
+	const env = installIconEnvironment();
+	try {
+		const { react, slotRegistrations } = applyClient();
+		const glyph = slotRegistrations.find((entry) => entry.name === "settings.section.icon").value.component;
+
+		// 存储为空 → 默认皮肤（位图）。
+		react.beginPass();
+		assert.equal(expand(glyph({ size: 16 }))[0].type, "img", "no stored choice means the plugin's own icon");
+
+		// 存储里是 claude → 自绘。这才是皮肤真正生效的路径。
+		env.store.set("dsh-subagent-default-model.icon-style", "claude");
+		const second = applyClient();
+		const glyph2 = second.slotRegistrations.find((entry) => entry.name === "settings.section.icon").value.component;
+		second.react.beginPass();
+		const drawn = expand(glyph2({ size: 16 }))[0];
+		assert.equal(drawn.type, "svg", "the stored preference is what the glyph follows");
+		assert.equal(drawn.props["data-icon-style"], "claude");
+	} finally {
+		clearIconEnvironment();
+	}
 });

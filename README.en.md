@@ -47,6 +47,7 @@ A standalone [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-ha
 - **`subagent_fork` stands aside by default**: a `fork` child inherits the parent's whole conversation, so the host deliberately keeps it on the parent's route to preserve KV-cache reuse of that prefix. This plugin does **not** reroute it unless you opt in (`applyToForkChildren: true` in the settings card); turning it on re-runs the inherited context once on the new model.
 - **Hot settings reload**: the next delegation picks up edited settings immediately.
 - **Clean teardown**: Cordis disposal restores the original service methods.
+- **Optional icon style**: at the bottom of the Settings page, switch between the default icon and the Claude style; the choice applies at the click to the nav-rail glyph, the plugin card and the picker previews. It lives in this browser (`localStorage`) and changes no routing behaviour; the default remains this plugin's own icon.
 - **Native settings card**: configure it under `Settings → Plugins → Subagent default model`.
 
 ## How it works

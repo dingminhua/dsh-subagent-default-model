@@ -26,11 +26,11 @@ window.__ModuleLoader__.load({
     // 跑的是哪一个 client bundle」——宿主在启动时快照 bundle，页面可能仍
     // 持有旧版本；一眼对出构建号即可排除/坐实这一点。每次改 client.js
     // 排查时必须递增它。
-    var DSM_CLIENT_BUILD = "2026-11-06.1";
+    var DSM_CLIENT_BUILD = "2026-11-26.1";
 
     // ── plugin icon (LD brand logo, 64px) ────────────────────────────────
     var DSM_ICON = "data:image/png;base64,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";
-    var SETTINGS_CSS = ".dsm-model-settings{display:flex;flex-direction:column;gap:14px;margin:0;padding:0}.dsm-model-settings-list{display:flex;flex-direction:column;gap:10px}.dsm-model-settings-route{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;padding:10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:10px;background:var(--dsw-alias-bg-layer-3,#202126)}.dsm-model-settings-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-select{width:100%;max-width:220px;height:32px;padding:0 28px 0 10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font:inherit;font-size:13px;line-height:1.5}.dsm-model-settings-select:focus{outline:2px solid var(--dsw-alias-state-business-primary,#5686fe);outline-offset:1px}.dsm-model-settings-select:disabled{color:var(--dsw-alias-label-tertiary,#999);cursor:default}.dsm-model-settings-remove{height:32px;min-width:32px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer;font-size:16px;line-height:1}.dsm-model-settings-remove:hover{color:var(--dsw-alias-state-error-primary,#ef4444);background:var(--dsw-alias-interactive-bg-hover-danger,rgba(242,90,90,.15))}.dsm-model-settings-options{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.dsm-model-settings-strategy{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-strategy .dsm-model-settings-select{max-width:150px}.dsm-model-settings-failover{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-failover input[type=checkbox]{cursor:pointer}.dsm-failover-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999);white-space:nowrap}.dsm-model-settings-inject-route{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-inject-route input[type=checkbox]{cursor:pointer}.dsm-inject-route-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999)}.dsm-model-settings-apply-fork{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-apply-fork input[type=checkbox]{cursor:pointer}.dsm-apply-fork-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999)}.dsm-model-settings-footer{border-top:1px solid var(--dsw-alias-border-l2,#36373b);display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 0 4px}.dsm-model-settings-footer-left{display:flex;align-items:center;gap:10px;flex:1;min-width:0}.dsm-model-settings-footer-status{flex:1;min-width:0;color:var(--dsw-alias-label-secondary,#b8b8b8);font-size:12px;line-height:1.5}.dsm-model-settings-footer-error{flex:1;min-width:0;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:1.5}.dsm-btn{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dsm-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px}.dsm-btn:disabled{opacity:.4;cursor:default}.dsm-btn-outline{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent;font-weight:500}.dsm-btn-outline:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:rgba(255,255,255,.04)}.dsm-btn-primary{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dsm-btn-primary:hover:not(:disabled){opacity:.9}.dsm-model-settings-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-plugin-card{border:1px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-3,#202126);border-radius:12px;list-style:none;transition:border-color .16s,background .16s}.dsm-plugin-card:hover{border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-open{background:var(--dsw-alias-bg-layer-2,#25262b);border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.dsm-plugin-card-header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:-2px}.dsm-plugin-card-head{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.dsm-plugin-card-title{color:var(--dsw-alias-label-primary,#e6e6e6);font-size:15px;font-weight:600;line-height:1.4}.dsm-plugin-card-description{color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5}.dsm-plugin-card-chevron{color:var(--dsw-alias-label-tertiary,#999);flex:none;display:inline-flex;transition:transform .16s}.dsm-plugin-card-chevron-open{transform:rotate(180deg)}.dsm-plugin-card-caret{color:inherit;font-size:12px;line-height:1;display:inline-flex}.dsm-plugin-card-body{border-top:1px solid var(--dsw-alias-border-l2,#36373b);margin:0 16px;padding:0 0 8px}.dsm-plugin-card-body .dsm-model-settings{margin:0;padding:12px 0 0;background:transparent;border:0;border-radius:0}.dsm-plugin-card-body .dsm-model-settings-head{display:none}.dsm-plugin-card-icon{width:32px;height:32px;flex:none;border-radius:7px}.dsm-model-settings-cheer{display:inline-flex;align-items:center;gap:4px;flex:none;text-decoration:underline;text-underline-offset:2px;color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5;transition:color .16s}.dsm-model-settings-cheer-star{font-size:12px;line-height:1;display:inline-flex}.dsm-model-settings-cheer:hover{color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-model-settings-cheer:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:2px}.dsm-model-settings-warn{grid-column:1/-1;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-model-settings-warn-list{display:flex;flex-direction:column;gap:4px;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-model-settings-section{display:flex;flex-direction:column;gap:14px}.dsm-settings-heading{margin:0;font-size:16px;font-weight:600;line-height:24px;color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-settings-intro{margin:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-section .dsm-model-settings{margin:0;padding:0;background:transparent;border:0;border-radius:0}.dsm-settings-values{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-settings-values li::marker{color:var(--dsw-alias-label-tertiary,#999)}.dsm-model-settings-diag{display:flex;flex-direction:column;gap:4px}.dsm-model-settings-diag-toggle{appearance:none;font:inherit;cursor:pointer;background:transparent;border:0;padding:2px 0;display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-tertiary,#999);font-size:12px;line-height:18px;text-align:left;min-width:0}.dsm-model-settings-diag-toggle:hover{color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-diag-toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px;border-radius:3px}.dsm-model-settings-diag-caret{flex:none;font-size:10px;line-height:1;display:inline-flex}.dsm-model-settings-diag-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-caption,#777)}";
+    var SETTINGS_CSS = ".dsm-model-settings{display:flex;flex-direction:column;gap:14px;margin:0;padding:0}.dsm-model-settings-list{display:flex;flex-direction:column;gap:10px}.dsm-model-settings-route{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;padding:10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:10px;background:var(--dsw-alias-bg-layer-3,#202126)}.dsm-model-settings-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-select{width:100%;max-width:220px;height:32px;padding:0 28px 0 10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:var(--dsw-alias-bg-layer-2,#232529);color:var(--dsw-alias-label-primary,#e6e6e6);font:inherit;font-size:13px;line-height:1.5}.dsm-model-settings-select:focus{outline:2px solid var(--dsw-alias-state-business-primary,#5686fe);outline-offset:1px}.dsm-model-settings-select:disabled{color:var(--dsw-alias-label-tertiary,#999);cursor:default}.dsm-model-settings-remove{height:32px;min-width:32px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer;font-size:16px;line-height:1}.dsm-model-settings-remove:hover{color:var(--dsw-alias-state-error-primary,#ef4444);background:var(--dsw-alias-interactive-bg-hover-danger,rgba(242,90,90,.15))}.dsm-model-settings-options{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.dsm-model-settings-strategy{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-strategy .dsm-model-settings-select{max-width:150px}.dsm-model-settings-failover{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-failover input[type=checkbox]{cursor:pointer}.dsm-failover-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999);white-space:nowrap}.dsm-model-settings-inject-route{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-inject-route input[type=checkbox]{cursor:pointer}.dsm-inject-route-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999)}.dsm-model-settings-apply-fork{display:flex;align-items:center;gap:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8);cursor:pointer}.dsm-model-settings-apply-fork input[type=checkbox]{cursor:pointer}.dsm-apply-fork-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999)}.dsm-model-settings-footer{border-top:1px solid var(--dsw-alias-border-l2,#36373b);display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 0 4px}.dsm-model-settings-footer-left{display:flex;align-items:center;gap:10px;flex:1;min-width:0}.dsm-model-settings-footer-status{flex:1;min-width:0;color:var(--dsw-alias-label-secondary,#b8b8b8);font-size:12px;line-height:1.5}.dsm-model-settings-footer-error{flex:1;min-width:0;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:1.5}.dsm-btn{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dsm-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px}.dsm-btn:disabled{opacity:.4;cursor:default}.dsm-btn-outline{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent;font-weight:500}.dsm-btn-outline:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:rgba(255,255,255,.04)}.dsm-btn-primary{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dsm-btn-primary:hover:not(:disabled){opacity:.9}.dsm-model-settings-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-plugin-card{border:1px solid var(--dsw-alias-border-l2,#36373b);background:var(--dsw-alias-bg-layer-3,#202126);border-radius:12px;list-style:none;transition:border-color .16s,background .16s}.dsm-plugin-card:hover{border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-open{background:var(--dsw-alias-bg-layer-2,#25262b);border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-plugin-card-header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}.dsm-plugin-card-header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:-2px}.dsm-plugin-card-head{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}.dsm-plugin-card-title{color:var(--dsw-alias-label-primary,#e6e6e6);font-size:15px;font-weight:600;line-height:1.4}.dsm-plugin-card-description{color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5}.dsm-plugin-card-chevron{color:var(--dsw-alias-label-tertiary,#999);flex:none;display:inline-flex;transition:transform .16s}.dsm-plugin-card-chevron-open{transform:rotate(180deg)}.dsm-plugin-card-caret{color:inherit;font-size:12px;line-height:1;display:inline-flex}.dsm-plugin-card-body{border-top:1px solid var(--dsw-alias-border-l2,#36373b);margin:0 16px;padding:0 0 8px}.dsm-plugin-card-body .dsm-model-settings{margin:0;padding:12px 0 0;background:transparent;border:0;border-radius:0}.dsm-plugin-card-body .dsm-model-settings-head{display:none}.dsm-plugin-card-icon{width:32px;height:32px;flex:none;border-radius:7px}.dsm-model-settings-cheer{display:inline-flex;align-items:center;gap:4px;flex:none;text-decoration:underline;text-underline-offset:2px;color:var(--dsw-alias-label-tertiary,#999);font-size:13px;line-height:1.5;transition:color .16s}.dsm-model-settings-cheer-star{font-size:12px;line-height:1;display:inline-flex}.dsm-model-settings-cheer:hover{color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-model-settings-cheer:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:2px}.dsm-model-settings-warn{grid-column:1/-1;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-model-settings-warn-list{display:flex;flex-direction:column;gap:4px;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}.dsm-model-settings-section{display:flex;flex-direction:column;gap:14px}.dsm-settings-heading{margin:0;font-size:16px;font-weight:600;line-height:24px;color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-settings-intro{margin:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-section .dsm-model-settings{margin:0;padding:0;background:transparent;border:0;border-radius:0}.dsm-settings-values{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-settings-values li::marker{color:var(--dsw-alias-label-tertiary,#999)}.dsm-model-settings-diag{display:flex;flex-direction:column;gap:4px}.dsm-model-settings-diag-toggle{appearance:none;font:inherit;cursor:pointer;background:transparent;border:0;padding:2px 0;display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-tertiary,#999);font-size:12px;line-height:18px;text-align:left;min-width:0}.dsm-model-settings-diag-toggle:hover{color:var(--dsw-alias-label-secondary,#b8b8b8)}.dsm-model-settings-diag-toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px;border-radius:3px}.dsm-model-settings-diag-caret{flex:none;font-size:10px;line-height:1;display:inline-flex}.dsm-model-settings-diag-hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-caption,#777)}.dsm-icon-preference{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--dsw-alias-border-l2,#36373b);color:var(--dsw-alias-label-primary,#e6e6e6)}.dsm-icon-preference-copy{display:flex;flex-direction:column;gap:4px;flex:1;min-width:180px;font-size:13px;line-height:20px}.dsm-icon-preference-copy>span{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#999)}.dsm-icon-choices{display:flex;flex-wrap:wrap;gap:6px}.dsm-icon-choices>button{appearance:none;display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:12px;line-height:20px;color:inherit;background:transparent;border:1px solid var(--dsw-alias-border-l2,#777);border-radius:8px;padding:7px 10px;cursor:pointer}.dsm-icon-choices>button[aria-checked=true]{border-color:var(--dsw-alias-brand-primary,#5686fe);background:var(--dsw-alias-bg-layer-2,#25262b)}.dsm-icon-choices>button:hover{border-color:var(--dsw-alias-label-dimmed,#777)}.dsm-icon-choices>button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:2px}.dsm-icon-save-error{margin:0;color:var(--dsw-alias-label-error,#ef4444);font-size:12px;line-height:18px}";
 
     if (typeof document !== "undefined") {
       var cssId = "dsh-subagent-default-model/client.css";
@@ -41,6 +41,229 @@ window.__ModuleLoader__.load({
         styleTag.textContent = SETTINGS_CSS;
         document.head.appendChild(styleTag);
       }
+    }
+
+    // ── 图标样式（可选皮肤）──────────────────────────────────────────────
+    //
+    // 与同族插件（dsh-connect-workbuddy / dsh-connect-trae）保持一致的实现：
+    // 图标外观是**本地偏好**，存在浏览器 localStorage 里，不写进 profile 配置
+    // ——它不影响任何行为，也不该被当成"设置"在多台机器之间同步。
+    //
+    // 默认值是本插件自己的图标（original），不是 Claude 皮肤。这一点是刻意的：
+    // 一个从未选过的用户不该在打开页面时就被换成另一种身份标识；皮肤是"选择"，
+    // 所以必须由人选。同时 original 也是读不到 localStorage（存储被禁）时的
+    // 兜底值，于是首帧与服务端快照一致，不会出现闪一下再换。
+    var ICON_STYLE_STORAGE_KEY = "dsh-subagent-default-model.icon-style";
+    var DEFAULT_ICON_STYLE = "original";
+    var ALTERNATE_ICON_STYLE = "claude";
+    var ICON_STYLE_VARIANTS = [DEFAULT_ICON_STYLE, ALTERNATE_ICON_STYLE];
+
+    /** localStorage，或 undefined（被策略禁用 / 非浏览器环境）。 */
+    function iconStorage() {
+      try {
+        return typeof window !== "undefined" && window.localStorage ? window.localStorage : undefined;
+      } catch (_storageError) {
+        return undefined;
+      }
+    }
+
+    /**
+     * 当前皮肤。比较的是 ALTERNATE_ICON_STYLE 而不是写死的 "claude"：
+     * 默认值只声明一次，改默认值时两条分支才会一起动——早期版本把默认值
+     * 写成常量、比较却写死另一个字面量，结果"改默认值"根本不生效。
+     */
+    function iconStyleSnapshot() {
+      try {
+        var store = iconStorage();
+        return store && store.getItem(ICON_STYLE_STORAGE_KEY) === ALTERNATE_ICON_STYLE
+          ? ALTERNATE_ICON_STYLE
+          : DEFAULT_ICON_STYLE;
+      } catch (_readError) {
+        return DEFAULT_ICON_STYLE;
+      }
+    }
+
+    /**
+     * 本标签页内的订阅者。
+     *
+     * 为什么不是自定义 DOM 事件：同标签页的联动是**功能本身**（点一下就要
+     * 立刻换），不能挂在 `Event` 构造器的可用性上——vm/旧环境里没有它就
+     * 会静默失效。跨标签页的同步仍然走 `storage` 事件，那才是它的语义。
+     */
+    var iconStyleListeners = [];
+
+    function subscribeIconStyle(listener) {
+      iconStyleListeners.push(listener);
+      var onStorage = function (event) {
+        if (!event || event.key === ICON_STYLE_STORAGE_KEY || event.key === null) listener();
+      };
+      var removable = typeof window !== "undefined" && typeof window.addEventListener === "function";
+      if (removable) window.addEventListener("storage", onStorage);
+      return function () {
+        var at = iconStyleListeners.indexOf(listener);
+        if (at >= 0) iconStyleListeners.splice(at, 1);
+        if (removable) window.removeEventListener("storage", onStorage);
+      };
+    }
+
+    function notifyIconStyle() {
+      var listeners = iconStyleListeners.slice();
+      for (var index = 0; index < listeners.length; index += 1) listeners[index]();
+    }
+
+    /** 写入并广播。写入失败（存储被禁）抛错，由调用方渲染错误提示。 */
+    function setIconStyle(value) {
+      var store = iconStorage();
+      if (!store) throw new Error("localStorage is unavailable");
+      store.setItem(ICON_STYLE_STORAGE_KEY, value);
+      notifyIconStyle();
+    }
+
+    /**
+     * 读取当前皮肤的 hook。
+     *
+     * 这里没有直接用 React.useSyncExternalStore：它要求 React 18+，而测试里
+     * 的 React 替身只实现 useState/useEffect。useState + useEffect(subscribe)
+     * 的语义与之一致（订阅外部可变源），且两个版本都能跑。
+     */
+    function useIconStyle() {
+      var state = React.useState(iconStyleSnapshot);
+      var variant = state[0];
+      var setVariant = state[1];
+      React.useEffect(function () {
+        return subscribeIconStyle(function () {
+          setVariant(iconStyleSnapshot());
+        });
+      }, []);
+      return variant;
+    }
+
+    /**
+     * 画一个插件图标。**不是**组件（不调用 hook），因此可以在 hook 持有者里
+     * 直接调用，也可以在预览里按指定 variant 调用。
+     *
+     * original：本插件的品牌位图（与 dsh-ldvh / workbuddy / trae 同族的 LD 标记）。
+     * claude：保留同一 LD 轮廓，用 currentColor 跟随主题文字色——这样深浅主题下
+     * 都不会出现一块突兀的白色方块，也不会与宿主自绘图标风格打架。
+     */
+    function renderPluginIcon(options) {
+      var size = typeof options.size === "number" ? options.size : 16;
+      var variant = options.variant === ALTERNATE_ICON_STYLE ? ALTERNATE_ICON_STYLE : DEFAULT_ICON_STYLE;
+      var shared = {
+        className: options.className,
+        width: size,
+        height: size,
+        style: Object.assign({ flexShrink: 0 }, options.style || {}),
+        "aria-hidden": "true"
+      };
+      if (variant === DEFAULT_ICON_STYLE) {
+        return React.createElement("img", Object.assign({}, shared, {
+          src: DSM_ICON,
+          alt: "",
+          style: Object.assign({}, shared.style, {
+            borderRadius: Math.max(2, Math.round(size / 8)) + "px",
+            display: "block",
+            objectFit: "contain",
+            opacity: options.dimmed === true ? 0.75 : 1
+          })
+        }));
+      }
+      return React.createElement("svg", Object.assign({}, shared, {
+        viewBox: "0 0 24 24",
+        fill: "currentColor",
+        "data-icon-style": ALTERNATE_ICON_STYLE,
+        "data-plugin-icon": "dsh-subagent-default-model",
+        style: Object.assign({}, shared.style, { display: "block", opacity: options.dimmed === true ? 0.75 : 1 })
+      }),
+        React.createElement("path", { d: "M4.5 5.5h3v11h3l3-3v4l-2 2h-7z" }),
+        React.createElement("path", { d: "M10.5 5.5H15a7 7 0 0 1 0 14h-2v-3h2a4 4 0 0 0 0-8h-1.5v2l-3 3z" })
+      );
+    }
+
+    /**
+     * 跟随当前皮肤的画法（组件，持有订阅）。
+     *
+     * **没有 `variant` 入参，这是刻意的。** 草案里有过 `variant: props.variant ||
+     * useIconStyle()`，好让调用方按需覆盖皮肤——那是死代码（没有任何调用方传
+     * variant），而且它把 hook 放在了 `||` 右边：传了 variant 的那次渲染会少调
+     * 一个 hook，同一个实例下次换 props 重渲染时 React 抛
+     * "Rendered fewer hooks than expected"。
+     *
+     * 需要按指定皮肤画（选择器的预览）时，直接调**非组件**的
+     * `renderPluginIcon({ variant })`——它不持有 hook，天然没有这个问题。
+     */
+    function PluginIcon(props) {
+      return renderPluginIcon({
+        variant: useIconStyle(),
+        size: props.size,
+        className: props.className,
+        style: props.style,
+        dimmed: props.dimmed
+      });
+    }
+
+    /**
+     * 皮肤选择器：每个选项预览真实图标，点一下立即生效并持久化。
+     *
+     * role=radio + 方向键导航，与同族插件一致：两个互斥选项用单选语义，
+     * 键盘用户不需要 Tab 两次才能切换。
+     */
+    function IconStylePreference(props) {
+      var t = props.t;
+      var selected = useIconStyle();
+      var errorState = React.useState(false);
+      var error = errorState[0];
+      var setError = errorState[1];
+      var choose = function (variant) {
+        try {
+          setIconStyle(variant);
+          setError(false);
+        } catch (_writeError) {
+          setError(true);
+        }
+      };
+      return React.createElement("div", { className: "dsm-icon-preference" },
+        React.createElement("div", { className: "dsm-icon-preference-copy" },
+          React.createElement("b", null, t("row.iconStyleLabel")),
+          React.createElement("span", null, t("row.iconStyleLead")),
+          React.createElement("span", null, t("row.iconStyleHint"))
+        ),
+        React.createElement("div", {
+          className: "dsm-icon-choices",
+          role: "radiogroup",
+          "aria-label": t("row.iconStyleLabel")
+        }, ICON_STYLE_VARIANTS.map(function (variant) {
+          return React.createElement("button", {
+            key: variant,
+            type: "button",
+            role: "radio",
+            "aria-checked": selected === variant,
+            tabIndex: selected === variant ? 0 : -1,
+            "data-icon-style-option": variant,
+            onKeyDown: function (event) {
+              var keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
+              if (keys.indexOf(event.key) < 0) return;
+              event.preventDefault();
+              var next = event.key === "Home"
+                ? ICON_STYLE_VARIANTS[0]
+                : event.key === "End"
+                  ? ICON_STYLE_VARIANTS[ICON_STYLE_VARIANTS.length - 1]
+                  : (variant === ICON_STYLE_VARIANTS[0] ? ICON_STYLE_VARIANTS[1] : ICON_STYLE_VARIANTS[0]);
+              choose(next);
+              var buttons = event.currentTarget && event.currentTarget.parentElement
+                ? event.currentTarget.parentElement.querySelectorAll("[role=radio]")
+                : null;
+              var index = ICON_STYLE_VARIANTS.indexOf(next);
+              if (buttons && buttons[index] && typeof buttons[index].focus === "function") buttons[index].focus();
+            },
+            onClick: function () { choose(variant); }
+          },
+            renderPluginIcon({ variant: variant, size: 20 }),
+            t(variant === ALTERNATE_ICON_STYLE ? "row.iconStyleClaude" : "row.iconStyleOriginal")
+          );
+        })),
+        error ? React.createElement("p", { role: "alert", className: "dsm-icon-save-error" }, t("row.iconStyleSaveFailed")) : null
+      );
     }
 
     // ── locale ───────────────────────────────────────────────────────────
@@ -106,7 +329,13 @@ window.__ModuleLoader__.load({
       "row.injectRouteContextHint": "（子代理从第 2 步起能回答自己跑在哪个模型上；这是一行真实提示词，不是界面显示）。",
       "row.applyToForkChildren": "让 subagent_fork 子代理也使用这里设定的模型",
       "row.applyToForkChildrenHint": "（默认关闭。fork 子代理会继承父会话的完整对话，宿主因此让它留在父路由上，好让这段前缀能复用缓存；开启后它会改用这里的模型，代价是那段继承的上下文要在新模型上重新算一次）。",
-      "row.trajectoryModel": "当前供应商/模型"
+      "row.trajectoryModel": "当前供应商/模型",
+      "row.iconStyleLead": "外观 —— 插件长什么样，不是它能做什么。",
+      "row.iconStyleLabel": "图标样式",
+      "row.iconStyleHint": "点一下立即应用到设置页、导航栏与插件卡。默认是本插件自己的图标；另一个皮肤跟随主题的文字颜色。选择只存在当前浏览器里。",
+      "row.iconStyleClaude": "Claude 风格",
+      "row.iconStyleOriginal": "默认图标",
+      "row.iconStyleSaveFailed": "图标选择保存失败，请检查浏览器存储权限。"
     };
     var SUBAGENT_ROW_EN = {
       "row.title": "Subagent default model (dsh-subagent-default-model)",
@@ -149,7 +378,13 @@ window.__ModuleLoader__.load({
       "row.injectRouteContextHint": "(from step 2 a subagent can answer which model it is; a real prompt line, not a display row).",
       "row.applyToForkChildren": "Also apply these models to subagent_fork children",
       "row.applyToForkChildrenHint": "(off by default. A fork child inherits the parent's full conversation, so the host keeps it on the parent's route to preserve cache reuse of that prefix; turning this on moves it to the configured model and re-runs the inherited context once on the new model).",
-      "row.trajectoryModel": "Current provider/model"
+      "row.trajectoryModel": "Current provider/model",
+      "row.iconStyleLead": "Appearance — what the plugin looks like, not what it may do.",
+      "row.iconStyleLabel": "Icon style",
+      "row.iconStyleHint": "Takes effect on the click in the settings page, the nav rail and the plugin card. The default is this plugin's own icon; the alternative skin follows the theme's text colour. The choice is stored in this browser only.",
+      "row.iconStyleClaude": "Claude style",
+      "row.iconStyleOriginal": "Default icon",
+      "row.iconStyleSaveFailed": "The icon choice could not be saved. Check browser storage permissions."
     };
 
     // ── helpers ──────────────────────────────────────────────────────────
@@ -1019,7 +1254,7 @@ window.__ModuleLoader__.load({
           "aria-label": t(open ? "row.collapse" : "row.expand") + ": " + title,
           onClick: function () { setOpen(!open); }
         },
-          React.createElement("img", { className: "dsm-plugin-card-icon", src: DSM_ICON, alt: "" }),
+          React.createElement(PluginIcon, { className: "dsm-plugin-card-icon", size: 32 }),
           React.createElement("span", { className: "dsm-plugin-card-head" },
             React.createElement("span", { className: "dsm-plugin-card-title" }, title),
             React.createElement("span", { className: "dsm-plugin-card-description" }, description)
@@ -1063,7 +1298,15 @@ window.__ModuleLoader__.load({
           React.createElement("li", null, t("section.value2")),
           React.createElement("li", null, t("section.value3"))
         ),
-        React.createElement(SubagentModelRow, props)
+        React.createElement(SubagentModelRow, props),
+        // Appearance sits BELOW the form and outside it: it is not a setting of
+        // the routing behaviour, it is how the plugin draws itself. Putting it
+        // inside the form would make it look like part of the same document —
+        // with the same Save button, which it does not use (it applies on click
+        // and is stored in the browser, not in the profile). The block carries
+        // its own lead line, so no extra wrapper (and no extra CSS class) is
+        // needed here.
+        React.createElement(IconStylePreference, { t: t })
       );
     }
 
@@ -1562,19 +1805,12 @@ window.__ModuleLoader__.load({
                       locale: SUBAGENT_ROW_LOCALE
                     }, function (iconProps) {
                       var edge = iconProps && typeof iconProps.size === "number" ? iconProps.size : 16;
-                      return React.createElement("img", {
-                        src: DSM_ICON,
-                        alt: "",
-                        width: edge,
-                        height: edge,
-                        style: {
-                          width: edge + "px",
-                          height: edge + "px",
-                          borderRadius: "3px",
-                          display: "block",
-                          objectFit: "contain",
-                          opacity: iconProps && iconProps.active === false ? 0.75 : 1
-                        }
+                      // Follows the saved icon skin, so switching to the Claude
+                      // style repaints the rail glyph too — otherwise the choice
+                      // would only reach the plugin card and look half-applied.
+                      return React.createElement(PluginIcon, {
+                        size: edge,
+                        dimmed: iconProps && iconProps.active === false
                       });
                     });
                     disposers.push(iconDisposer);

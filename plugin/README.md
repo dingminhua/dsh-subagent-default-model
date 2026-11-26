@@ -83,6 +83,7 @@ answer with this route. This line is system-provided context about the runtime, 
 - **单模型** —— 只用 `provider` + `model` 配置一条路由，所有子代理跑在同一个模型上（功能一、二的退化形态）。
 - **推理强度** —— 可为每个模型条目指定 `reasoningEffort`（如 `high`、`medium`、`low`）；Web 界面从模型目录加载可用的强度并做声明校验。
 - **热重载** —— 设置变更立即作用于下一次派发。
+- **图标样式** —— 设置页底部可在「默认图标」与「Claude 风格」之间切换，点一下立即应用到导航栏、插件卡与选择器预览；选择只存在当前浏览器里，不影响任何路由行为。
 - **干净卸载** —— Cordis 销毁时还原原始服务方法。
 
 ## 截图

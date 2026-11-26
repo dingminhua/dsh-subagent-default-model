@@ -83,6 +83,7 @@ Key points:
 - **Single model** — configure just `provider` + `model`; every subagent runs on that one model (the degenerate form of Capabilities 1 and 2).
 - **Reasoning strength** — optionally set `reasoningEffort` per model entry (e.g. `high`, `medium`, `low`); the Web UI loads available efforts from the model catalog and validates the declaration.
 - **Hot-reload** — settings changes apply to the very next delegation.
+- **Icon style** — at the bottom of the Settings page, switch between the default icon and the Claude style; the choice applies at the click to the nav rail, the plugin card and the picker previews, and lives in this browser only (it changes no routing behaviour).
 - **Clean teardown** — Cordis disposal restores the original service methods.
 
 ## Screenshots
